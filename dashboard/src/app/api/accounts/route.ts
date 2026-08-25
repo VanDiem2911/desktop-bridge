@@ -47,7 +47,7 @@ function getFanpageConfig(): { accounts: FanpageAccount[] } {
       {
         id: 1,
         name: 'Facebook Fanpage Chính',
-        pageUrl: 'https://www.facebook.com/profile.php?id=100087184532124',
+        pageUrl: 'https://www.facebook.com/',
         profileDir: 'n8n-chatgpt-profile',
         port: 9222,
         enabled: true,

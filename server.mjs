@@ -144,7 +144,7 @@ function loadFanpageConfig() {
   }
   return {
     name: 'Facebook Fanpage Chính',
-    pageUrl: 'https://www.facebook.com/profile.php?id=100087184532124',
+    pageUrl: 'https://www.facebook.com/',
     profileDir: 'n8n-chatgpt-profile',
     port: 9222,
     enabled: true,
@@ -264,12 +264,10 @@ async function openFacebookPage(pageUrl) {
     page = await context.newPage();
   }
 
-  // Luôn điều hướng đến đúng URL Fanpage đã lưu từ giao diện Dashboard
-  if (!page.url().startsWith(targetUrl)) {
-    console.log(`[Fanpage Bridge] Đang điều hướng Chrome đến đúng Fanpage trên Dashboard: ${targetUrl}`);
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await delay(3000);
-  }
+  // Luôn điều hướng trực tiếp đến đúng URL Fanpage cấu hình từ Dashboard
+  console.log(`[Fanpage Bridge] Đang truy cập thẳng vào link Fanpage Dashboard: ${targetUrl}`);
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await delay(3000);
 
   await page.bringToFront();
   if (page.url().includes('/login')) {

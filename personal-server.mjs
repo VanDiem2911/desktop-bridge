@@ -310,10 +310,9 @@ async function openFacebookPersonalPage(account, targetUrl = 'https://www.facebo
   let page = context.pages().find((candidate) => candidate.url().includes('facebook.com'));
   if (!page) {
     page = await context.newPage();
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  } else if (targetUrl && targetUrl !== 'https://www.facebook.com/' && !page.url().startsWith(targetUrl)) {
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   }
+  console.log(`[Personal Bridge] Đang truy cập thẳng vào link Trang Cá Nhân Dashboard: ${targetUrl}`);
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.bringToFront();
   await delay(3000);
 
