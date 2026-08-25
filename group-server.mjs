@@ -228,8 +228,39 @@ async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType 
   }
 
   // 2. Tìm ô soạn thảo trong dialog
-  const composer = dialog.locator('[contenteditable="true"]').first();
-  await composer.waitFor({ state: 'visible', timeout: 15000 });
+  const composerSelectors = [
+    '[role="dialog"] div[role="textbox"]',
+    '[role="dialog"] div[contenteditable="true"]',
+    '[role="dialog"] [data-lexical-editor="true"]',
+    '[role="dialog"] [aria-label*="viết" i]',
+    '[role="dialog"] [aria-label*="write" i]',
+    '[role="dialog"] [aria-label*="nghĩ gì" i]',
+    '[role="dialog"] [aria-label*="tạo bài viết" i]',
+    '[role="dialog"] [contenteditable="true"]',
+  ];
+
+  let composer = null;
+  const composerDeadline = Date.now() + 15000;
+  while (Date.now() < composerDeadline) {
+    for (const sel of composerSelectors) {
+      const loc = dialog.locator(sel).last();
+      if (await loc.count()) {
+        try {
+          if (await loc.isVisible()) {
+            composer = loc;
+            break;
+          }
+        } catch {}
+      }
+    }
+    if (composer) break;
+    await delay(500);
+  }
+
+  if (!composer) {
+    composer = dialog.locator('[contenteditable="true"]').first();
+  }
+
   await composer.click({ force: true });
   await delay(500);
 
@@ -316,12 +347,19 @@ async function executeGroupPosting(body) {
   const config = loadConfig();
   let accountsToRun = (config.accounts || []).filter(acc => acc.enabled !== false);
 
-  if (Array.isArray(targetAccounts) && targetAccounts.length > 0) {
-    accountsToRun = accountsToRun.filter(acc => targetAccounts.includes(acc.id) || targetAccounts.includes(acc.name));
+  if (targetAccounts) {
+    const targets = Array.isArray(targetAccounts) ? targetAccounts.map(String) : [String(targetAccounts)];
+    if (targets.length > 0) {
+      accountsToRun = accountsToRun.filter(acc => {
+        const idStr = String(acc.id);
+        const rawId = idStr.replace(/^acc_/, '');
+        return targets.includes(idStr) || targets.includes(rawId) || targets.includes(acc.name);
+      });
+    }
   }
 
   if (accountsToRun.length === 0) {
-    throw new Error('Không có tài khoản nào được bật (enabled: true) trong groups-config.json');
+    throw new Error('Không có tài khoản nào được bật (enabled: true) trong groups-config.json. Hãy bật tài khoản trên Dashboard!');
   }
 
   const results = [];
@@ -329,12 +367,15 @@ async function executeGroupPosting(body) {
 
   for (let i = 0; i < accountsToRun.length; i++) {
     const account = accountsToRun[i];
-    const accPort = BASE_CHROME_PORT + i; // Acc 1 dùng port 9223, Acc 2 dùng port 9224...
+    const accNum = parseInt(String(account.id).replace(/\D/g, ''), 10) || (i + 1);
+    const accPort = account.port ? Number(account.port) : (9222 + accNum);
+    const profileDir = account.profileDir || `n8n-fb-group-profile-${accNum}`;
 
     const accResult = {
       accountId: account.id,
       accountName: account.name,
       port: accPort,
+      profileDir: profileDir,
       groups: [],
     };
 
