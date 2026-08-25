@@ -1,0 +1,11 @@
+{
+  "accounts": [
+    {
+      "id": 1,
+      "name": "ChatGPT Tài khoản 1",
+      "profileDir": "n8n-chatgpt-profile",
+      "port": 9222,
+      "enabled": true
+    }
+  ]
+}

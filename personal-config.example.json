@@ -1,0 +1,14 @@
+{
+  "activeAccount": 1,
+  "accounts": [
+    {
+      "id": 1,
+      "name": "Facebook Cá nhân 1",
+      "profileDir": "n8n-personal-profile-1",
+      "port": 9230,
+      "profileUrl": "https://www.facebook.com/",
+      "enabled": true,
+      "description": "Mở Dashboard để cấu hình link Trang Cá Nhân"
+    }
+  ]
+}

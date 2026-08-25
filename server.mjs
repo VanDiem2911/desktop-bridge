@@ -127,6 +127,18 @@ function getChromeExecutable() {
 const CONFIG_CHATGPT_PATH = path.join(__dirname, 'chatgpt-config.json');
 const CONFIG_FANPAGE_PATH = path.join(__dirname, 'fanpage-config.json');
 
+// Tự tạo file config từ file mẫu .example nếu chưa tồn tại (máy mới clone về)
+function ensureConfigExists(configPath, examplePath) {
+  if (!fs.existsSync(configPath)) {
+    if (fs.existsSync(examplePath)) {
+      fs.copyFileSync(examplePath, configPath);
+      console.log(`[Config] Đã tạo ${path.basename(configPath)} từ file mẫu. Mở Dashboard để cấu hình.`);
+    }
+  }
+}
+ensureConfigExists(CONFIG_FANPAGE_PATH, path.join(__dirname, 'fanpage-config.example.json'));
+ensureConfigExists(CONFIG_CHATGPT_PATH, path.join(__dirname, 'chatgpt-config.example.json'));
+
 function loadFanpageConfig() {
   try {
     if (fs.existsSync(CONFIG_FANPAGE_PATH)) {

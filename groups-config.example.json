@@ -1,0 +1,11 @@
+{
+  "accounts": [
+    {
+      "id": "acc_1",
+      "name": "Tài khoản 1",
+      "enabled": true,
+      "profileDir": "n8n-fb-group-profile-1",
+      "groupUrls": []
+    }
+  ]
+}

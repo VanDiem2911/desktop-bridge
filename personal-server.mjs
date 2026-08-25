@@ -17,11 +17,23 @@ app.use(express.json({ limit: '25mb' }));
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(__dirname, 'personal-config.json');
 
+// Tự tạo file config từ file mẫu .example nếu chưa tồn tại (máy mới clone về)
+function ensureConfigExists(configPath, examplePath) {
+  if (!fs.existsSync(configPath)) {
+    if (fs.existsSync(examplePath)) {
+      fs.copyFileSync(examplePath, configPath);
+      console.log(`[Config] Đã tạo ${path.basename(configPath)} từ file mẫu. Mở Dashboard để cấu hình.`);
+    }
+  }
+}
+ensureConfigExists(CONFIG_PATH, path.join(__dirname, 'personal-config.example.json'));
+
 let activeJob = false;
 let activeJobAt = 0;
 const JOB_TIMEOUT_MS = 15 * 60 * 1000; // 15 phút auto-reset nếu job bị treo
 
 const CONFIG_CHATGPT_PATH = path.join(__dirname, 'chatgpt-config.json');
+ensureConfigExists(CONFIG_CHATGPT_PATH, path.join(__dirname, 'chatgpt-config.example.json'));
 
 function loadChatGptAccounts() {
   try {

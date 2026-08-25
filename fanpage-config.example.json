@@ -1,0 +1,13 @@
+{
+  "accounts": [
+    {
+      "id": 1,
+      "name": "Facebook Fanpage Chính",
+      "pageUrl": "https://www.facebook.com/",
+      "profileDir": "n8n-chatgpt-profile",
+      "port": 9222,
+      "enabled": true,
+      "desc": "Mở Dashboard để cấu hình link Fanpage"
+    }
+  ]
+}
