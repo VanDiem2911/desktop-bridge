@@ -1,3 +1,2 @@
 @echo off
-title DUDI Control Center
-powershell -ExecutionPolicy Bypass -File "%~dp0open-dashboard.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\open-dashboard.ps1"

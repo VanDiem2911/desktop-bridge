@@ -124,20 +124,33 @@ function getChromeExecutable() {
   return candidates[0];
 }
 
-const CONFIG_CHATGPT_PATH = path.join(__dirname, 'chatgpt-config.json');
-const CONFIG_FANPAGE_PATH = path.join(__dirname, 'fanpage-config.json');
+function resolveConfigFile(filename, exampleFilename) {
+  const configsDir = path.join(__dirname, 'configs');
+  const targetInConfigs = path.join(configsDir, filename);
+  const targetInRoot = path.join(__dirname, filename);
 
-// Tự tạo file config từ file mẫu .example nếu chưa tồn tại (máy mới clone về)
-function ensureConfigExists(configPath, examplePath) {
-  if (!fs.existsSync(configPath)) {
-    if (fs.existsSync(examplePath)) {
-      fs.copyFileSync(examplePath, configPath);
-      console.log(`[Config] Đã tạo ${path.basename(configPath)} từ file mẫu. Mở Dashboard để cấu hình.`);
-    }
+  if (fs.existsSync(targetInConfigs)) return targetInConfigs;
+  if (fs.existsSync(targetInRoot)) return targetInRoot;
+
+  // Tự tạo file config từ file mẫu .example nếu chưa tồn tại
+  if (!fs.existsSync(configsDir)) {
+    try { fs.mkdirSync(configsDir, { recursive: true }); } catch {}
   }
+  const exampleInConfigs = path.join(configsDir, exampleFilename);
+  const exampleInRoot = path.join(__dirname, exampleFilename);
+  const examplePath = fs.existsSync(exampleInConfigs) ? exampleInConfigs : exampleInRoot;
+
+  if (fs.existsSync(examplePath)) {
+    try {
+      fs.copyFileSync(examplePath, targetInConfigs);
+      console.log(`[Config] Đã tạo ${filename} từ file mẫu trong thư mục configs/. Mở Dashboard để cấu hình.`);
+    } catch {}
+  }
+  return targetInConfigs;
 }
-ensureConfigExists(CONFIG_FANPAGE_PATH, path.join(__dirname, 'fanpage-config.example.json'));
-ensureConfigExists(CONFIG_CHATGPT_PATH, path.join(__dirname, 'chatgpt-config.example.json'));
+
+const CONFIG_CHATGPT_PATH = resolveConfigFile('chatgpt-config.json', 'chatgpt-config.example.json');
+const CONFIG_FANPAGE_PATH = resolveConfigFile('fanpage-config.json', 'fanpage-config.example.json');
 
 function loadFanpageConfig() {
   try {

@@ -14,7 +14,31 @@ const app = express();
 app.use(express.json({ limit: '25mb' }));
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_PATH = path.join(__dirname, 'groups-config.json');
+function resolveConfigFile(filename, exampleFilename) {
+  const configsDir = path.join(__dirname, 'configs');
+  const targetInConfigs = path.join(configsDir, filename);
+  const targetInRoot = path.join(__dirname, filename);
+
+  if (fs.existsSync(targetInConfigs)) return targetInConfigs;
+  if (fs.existsSync(targetInRoot)) return targetInRoot;
+
+  if (!fs.existsSync(configsDir)) {
+    try { fs.mkdirSync(configsDir, { recursive: true }); } catch {}
+  }
+  const exampleInConfigs = path.join(configsDir, exampleFilename);
+  const exampleInRoot = path.join(__dirname, exampleFilename);
+  const examplePath = fs.existsSync(exampleInConfigs) ? exampleInConfigs : exampleInRoot;
+
+  if (fs.existsSync(examplePath)) {
+    try {
+      fs.copyFileSync(examplePath, targetInConfigs);
+      console.log(`[Config] Đã tạo ${filename} từ file mẫu trong thư mục configs/. Mở Dashboard để cấu hình.`);
+    } catch {}
+  }
+  return targetInConfigs;
+}
+
+const CONFIG_PATH = resolveConfigFile('groups-config.json', 'groups-config.example.json');
 
 let activeGroupJob = false;
 

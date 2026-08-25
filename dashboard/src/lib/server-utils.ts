@@ -20,10 +20,33 @@ function resolveBridgeDir(): string {
 
 // Đường dẫn thư mục gốc desktop-bridge (Tự động thích ứng trên mọi máy)
 export const BRIDGE_DIR = resolveBridgeDir();
-export const GROUPS_CONFIG_PATH = path.join(BRIDGE_DIR, 'groups-config.json');
-export const PERSONAL_CONFIG_PATH = path.join(BRIDGE_DIR, 'personal-config.json');
-export const CHATGPT_CONFIG_PATH = path.join(BRIDGE_DIR, 'chatgpt-config.json');
-export const FANPAGE_CONFIG_PATH = path.join(BRIDGE_DIR, 'fanpage-config.json');
+function resolveConfigPath(filename: string, exampleFilename?: string): string {
+  const configsPath = path.join(BRIDGE_DIR, 'configs', filename);
+  const rootPath = path.join(BRIDGE_DIR, filename);
+
+  if (fs.existsSync(configsPath)) return configsPath;
+  if (fs.existsSync(rootPath)) return rootPath;
+
+  // Nếu chưa tồn tại, copy từ example vào configs/
+  const configsDir = path.join(BRIDGE_DIR, 'configs');
+  if (!fs.existsSync(configsDir)) {
+    try { fs.mkdirSync(configsDir, { recursive: true }); } catch {}
+  }
+  if (exampleFilename) {
+    const exampleInConfigs = path.join(configsDir, exampleFilename);
+    const exampleInRoot = path.join(BRIDGE_DIR, exampleFilename);
+    const examplePath = fs.existsSync(exampleInConfigs) ? exampleInConfigs : exampleInRoot;
+    if (fs.existsSync(examplePath)) {
+      try { fs.copyFileSync(examplePath, configsPath); } catch {}
+    }
+  }
+  return configsPath;
+}
+
+export const GROUPS_CONFIG_PATH = resolveConfigPath('groups-config.json', 'groups-config.example.json');
+export const PERSONAL_CONFIG_PATH = resolveConfigPath('personal-config.json', 'personal-config.example.json');
+export const CHATGPT_CONFIG_PATH = resolveConfigPath('chatgpt-config.json', 'chatgpt-config.example.json');
+export const FANPAGE_CONFIG_PATH = resolveConfigPath('fanpage-config.json', 'fanpage-config.example.json');
 
 export function readJsonFile<T>(filePath: string, fallback: T): T {
   try {
