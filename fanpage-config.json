@@ -2,8 +2,8 @@
   "accounts": [
     {
       "id": 1,
-      "name": "Facebook Fanpage Chính",
-      "pageUrl": "https://www.facebook.com/profile.php?id=100086705741966",
+      "name": "Facebook Fanpage DUDI",
+      "pageUrl": "https://www.facebook.com/dudi.websitechuyennghiep/",
       "profileDir": "n8n-chatgpt-profile",
       "port": 9222,
       "enabled": true,
