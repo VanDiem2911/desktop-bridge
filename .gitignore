@@ -2,3 +2,10 @@ node_modules/
 images/
 npm-debug.log*
 pnpm-debug.log*
+*.log
+
+# Mỗi máy tự cấu hình riêng qua Dashboard - KHÔNG commit vào Git
+fanpage-config.json
+personal-config.json
+chatgpt-config.json
+groups-config.json
