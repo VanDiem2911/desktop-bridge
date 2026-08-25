@@ -1,0 +1,15 @@
+{
+  "name": "chatgpt-desktop-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "start:groups": "node group-server.mjs",
+    "start:personal": "node personal-server.mjs"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "playwright-core": "^1.54.2"
+  }
+}

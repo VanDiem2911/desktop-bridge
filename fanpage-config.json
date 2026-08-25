@@ -1,0 +1,13 @@
+{
+  "accounts": [
+    {
+      "id": 1,
+      "name": "Facebook Fanpage Chính",
+      "pageUrl": "https://www.facebook.com/profile.php?id=100086705741966",
+      "profileDir": "n8n-chatgpt-profile",
+      "port": 9222,
+      "enabled": true,
+      "desc": "Profile Chrome đăng bài Fanpage chính (Dùng chung Chrome Profile 1 - Port 9222)"
+    }
+  ]
+}

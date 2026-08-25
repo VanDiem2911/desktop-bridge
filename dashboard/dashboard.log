@@ -1,0 +1,64 @@
+✓ Running next.config.ts took 59ms
+> Next.js Control Center ready at http://127.0.0.1:3000
+✓ Running next.config.ts took 55ms
+> Next.js Control Center ready at http://127.0.0.1:3000
+✓ Running next.config.ts took 64ms
+> Next.js Control Center ready at http://127.0.0.1:3000
+▲ Next.js 16.3.2
+- Local:         http://127.0.0.1:3000
+- Network:       http://127.0.0.1:3000
+✓ Ready in 329ms
+✓ Running next.config.ts took 72ms
+▲ Next.js 16.3.2
+- Local:         http://127.0.0.1:3000
+- Network:       http://127.0.0.1:3000
+✓ Ready in 252ms
+✓ Running next.config.ts took 55ms
+✓ Running next.config.ts took 58ms
+[Dashboard Server] Sẵn sàng tại http://127.0.0.1:3000
+node:internal/modules/esm/resolve:857
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'next' imported from D:\HUDI\n8n\desktop-bridge\dashboard-server.mjs
+    at packageResolve (node:internal/modules/esm/resolve:857:9)
+    at moduleResolve (node:internal/modules/esm/resolve:926:18)
+    at defaultResolve (node:internal/modules/esm/resolve:1056:11)
+    at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:654:12)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:603:25)
+    at ModuleLoader.resolve (node:internal/modules/esm/loader:586:38)
+    at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:242:38)
+    at ModuleJob._link (node:internal/modules/esm/module_job:135:49) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v22.13.0
+Đang khởi tạo Next.js Production Engine...
+✓ Running next.config.ts took 61ms
+[Dashboard Express UncaughtException] TypeError: Missing parameter name at index 1: *; visit https://git.new/pathToRegexpError for info
+    at ignore-listed frames {
+  originalPath: '*'
+}
+TypeError: Missing parameter name at index 1: *; visit https://git.new/pathToRegexpError for info
+    at ignore-listed frames {
+  originalPath: '*'
+}
+⨯ uncaughtException:  TypeError: Missing parameter name at index 1: *; visit https://git.new/pathToRegexpError for info
+    at ignore-listed frames {
+  originalPath: '*'
+}
+Đang khởi tạo Next.js Production Engine...
+✓ Running next.config.ts took 57ms
+====================================================
+🚀 Next.js Control Center Dashboard: http://127.0.0.1:3000
+====================================================
+Đang khởi tạo Next.js Production Engine...
+✓ Running next.config.ts took 69ms
+====================================================
+🚀 Next.js Control Center Dashboard: http://127.0.0.1:3000
+====================================================
+Đang khởi tạo Next.js Production Engine...
+✓ Running next.config.ts took 75ms
+====================================================
+🚀 Next.js Control Center Dashboard: http://127.0.0.1:3000
+====================================================

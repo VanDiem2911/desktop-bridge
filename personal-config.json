@@ -1,0 +1,32 @@
+{
+  "activeAccount": 1,
+  "accounts": [
+    {
+      "id": 1,
+      "name": "Facebook Cá nhân 1",
+      "profileDir": "n8n-personal-profile-1",
+      "port": 9230,
+      "profileUrl": "https://www.facebook.com/profile.php?id=100086705741966",
+      "enabled": true,
+      "description": "Tài khoản Facebook cá nhân chính (Port 9230)"
+    },
+    {
+      "id": 2,
+      "name": "Facebook Cá nhân 2 (Dự phòng)",
+      "profileDir": "n8n-personal-profile-2",
+      "port": 9231,
+      "profileUrl": "https://www.facebook.com/",
+      "enabled": false,
+      "description": "Tài khoản Facebook cá nhân phụ / dự phòng (Port 9231)"
+    },
+    {
+      "id": 3,
+      "name": "Facebook Cá nhân 3 (Dự phòng)",
+      "profileDir": "n8n-personal-profile-3",
+      "port": 9232,
+      "profileUrl": "https://www.facebook.com/",
+      "enabled": false,
+      "description": "Tài khoản Facebook cá nhân phụ 2 (Port 9232)"
+    }
+  ]
+}
