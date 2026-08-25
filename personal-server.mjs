@@ -455,28 +455,68 @@ async function publishFacebookPersonal({
       dialog = page.locator(dialogSelectors.join(',')).last();
     }
 
-    // Nhập nội dung bài viết
-    const composer = await firstVisible(dialog, [
-      '[contenteditable="true"][aria-placeholder*="Bạn đang nghĩ gì"]',
-      '[contenteditable="true"][aria-placeholder*="What\'s on your mind"]',
+    // 1. Nhập nội dung bài viết
+    const composerSelectors = [
+      '[role="dialog"] div[role="textbox"]',
+      '[role="dialog"] div[contenteditable="true"]',
+      '[role="dialog"] [data-lexical-editor="true"]',
+      '[role="dialog"] [data-editor="true"]',
+      '[role="dialog"] [aria-label*="nghĩ gì" i]',
+      '[role="dialog"] [aria-label*="mind" i]',
+      '[role="dialog"] [aria-placeholder*="nghĩ gì" i]',
+      'div[role="dialog"] div[contenteditable="true"]',
+      'div[role="textbox"][contenteditable="true"]',
+      '[contenteditable="true"][data-lexical-editor="true"]',
+      '[contenteditable="true"][aria-label*="nghĩ gì" i]',
       '[contenteditable="true"]',
-    ]);
-    if (!composer) throw new Error('Không tìm thấy ô nhập nội dung bài viết.');
-    await composer.fill(postCaption);
-    console.log('[Personal Post] Đã điền xong nội dung bài viết.');
+    ];
 
-    // Upload hình ảnh
-    const uploads = dialog.locator('input[type="file"][accept*="image"]');
-    if (!(await uploads.count())) {
-      const addPhotoBtn = dialog.locator('[aria-label*="Ảnh/video"], [aria-label*="Photo/video"]').first();
-      if (await addPhotoBtn.count() && await addPhotoBtn.isVisible()) {
-        await addPhotoBtn.click({ force: true });
-        await delay(1500);
+    let composer = null;
+    const composerDeadline = Date.now() + 15000;
+    while (Date.now() < composerDeadline) {
+      for (const sel of composerSelectors) {
+        const loc = page.locator(sel).last();
+        if (await loc.count()) {
+          try {
+            if (await loc.isVisible()) {
+              composer = loc;
+              break;
+            }
+          } catch {}
+        }
+      }
+      if (composer) break;
+      await delay(500);
+    }
+
+    if (!composer) {
+      const anyEditable = page.locator('[role="dialog"] [contenteditable]').first();
+      if (await anyEditable.count()) {
+        composer = anyEditable;
       }
     }
 
-    const finalUploads = dialog.locator('input[type="file"][accept*="image"]');
-    if (!(await finalUploads.count())) {
+    if (!composer) {
+      throw new Error('Không tìm thấy ô nhập nội dung bài viết.');
+    }
+
+    await composer.click({ force: true });
+    await delay(500);
+    await composer.fill(postCaption);
+    console.log('[Personal Post] Đã điền xong nội dung bài viết.');
+
+    // 2. Upload hình ảnh
+    let uploads = page.locator('[role="dialog"] input[type="file"][accept*="image"], input[type="file"][accept*="image"]');
+    if (!(await uploads.count())) {
+      const addPhotoBtn = page.locator('[role="dialog"] [aria-label*="Ảnh/video" i], [role="dialog"] [aria-label*="Photo/video" i], [role="dialog"] [aria-label*="Ảnh" i], [role="dialog"] div[aria-label*="Photo" i], [role="dialog"] [role="button"]:has-text("Ảnh")').first();
+      if (await addPhotoBtn.count() && await addPhotoBtn.isVisible()) {
+        await addPhotoBtn.click({ force: true });
+        await delay(2000);
+      }
+      uploads = page.locator('[role="dialog"] input[type="file"][accept*="image"], input[type="file"][accept*="image"]');
+    }
+
+    if (!(await uploads.count())) {
       throw new Error('Không tìm thấy ô upload hình ảnh trên trình soạn thảo Facebook.');
     }
 
