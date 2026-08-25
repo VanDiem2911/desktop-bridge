@@ -849,11 +849,17 @@ export default function DashboardPage() {
 
       showToast('Tạo ảnh xong! Đang xuất bản lên Facebook...', 'success');
 
-      // 2. Publish to Target
+      // 2. Publish to Target - Lấy link trực tiếp từ cấu hình đang bật trên Dashboard
+      const fanpageAcc = accounts.find(c => c.category === 'fanpage')?.items.find(i => i.enabled !== false);
+      const fanpageUrl = fanpageAcc?.pageUrl || fanpageAcc?.url;
+
+      const personalAcc = accounts.find(c => c.category === 'personal')?.items.find(i => i.enabled !== false);
+      const personalUrl = personalAcc?.profileUrl || personalAcc?.url;
+
       let pubUrl = 'http://127.0.0.1:3001/generate';
       let pubBody: Record<string, unknown> = {
         action: 'publish_facebook_page',
-        pageUrl: 'https://www.facebook.com/profile.php?id=100086705741966',
+        ...(fanpageUrl ? { pageUrl: fanpageUrl } : {}),
         caption: qpCaption,
         imageBase64: genData.imageBase64,
       };
@@ -864,8 +870,8 @@ export default function DashboardPage() {
       } else if (qpChannel === 'personal') {
         pubUrl = 'http://127.0.0.1:3003/generate';
         pubBody = {
-          action: 'publish_facebook_page',
-          pageUrl: 'https://www.facebook.com/profile.php?id=100087184532124',
+          action: 'publish_facebook_personal',
+          ...(personalUrl ? { pageUrl: personalUrl, profileUrl: personalUrl } : {}),
           caption: qpCaption,
           imageBase64: genData.imageBase64,
         };

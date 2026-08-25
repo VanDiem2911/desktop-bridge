@@ -242,10 +242,11 @@ async function openChatGptPage(account, { newConversation = false } = {}) {
 
 async function openFacebookPage(pageUrl) {
   const fanpageConfig = loadFanpageConfig();
+  const targetUrl = pageUrl || fanpageConfig.pageUrl || (fanpageConfig.accounts && fanpageConfig.accounts[0]?.pageUrl) || 'https://www.facebook.com/';
   const fbAccount = {
-    name: fanpageConfig.name || 'Facebook Fanpage',
-    profileDir: fanpageConfig.profileDir || 'n8n-chatgpt-profile',
-    port: fanpageConfig.port || 9222,
+    name: fanpageConfig.name || (fanpageConfig.accounts && fanpageConfig.accounts[0]?.name) || 'Facebook Fanpage',
+    profileDir: fanpageConfig.profileDir || (fanpageConfig.accounts && fanpageConfig.accounts[0]?.profileDir) || 'n8n-chatgpt-profile',
+    port: fanpageConfig.port || (fanpageConfig.accounts && fanpageConfig.accounts[0]?.port) || 9222,
   };
   const cdpUrl = await ensureChromeForGpt(fbAccount);
   let browser;
@@ -257,24 +258,20 @@ async function openFacebookPage(pageUrl) {
   const context = browser.contexts()[0];
   if (!context) throw new Error('Chrome has no browser context');
 
-  const matchingPages = [...context.pages()]
-    .reverse()
-    .filter((candidate) => candidate.url().startsWith(pageUrl));
-  let page;
-  for (const candidate of matchingPages) {
-    const dialog = candidate.locator('[role="dialog"]');
-    if (!(await dialog.count()) || !(await dialog.last().isVisible())) {
-      page = candidate;
-      break;
-    }
-  }
-  page ??= matchingPages[0];
+  // Tìm tab Facebook hoặc tạo mới
+  let page = context.pages().find((candidate) => candidate.url().includes('facebook.com'));
   if (!page) {
     page = await context.newPage();
-    await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   }
+
+  // Luôn điều hướng đến đúng URL Fanpage đã lưu từ giao diện Dashboard
+  if (!page.url().startsWith(targetUrl)) {
+    console.log(`[Fanpage Bridge] Đang điều hướng Chrome đến đúng Fanpage trên Dashboard: ${targetUrl}`);
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await delay(3000);
+  }
+
   await page.bringToFront();
-  await delay(3000);
   if (page.url().includes('/login')) {
     throw new Error('Facebook is not signed in in the controlled Chrome profile. Sign in once, then retry.');
   }

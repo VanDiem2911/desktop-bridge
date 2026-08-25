@@ -136,12 +136,12 @@
 
         <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap;">
           <div style="flex: 1; min-width: 250px;">
-            <label class="form-label">Chọn tài khoản xem nhóm:</label>
-            <select id="group-account-select" class="form-select" onchange="renderGroupList()"></select>
+            <label class="form-label" for="group-account-select">Chọn tài khoản xem nhóm:</label>
+            <select id="group-account-select" class="form-select" title="Chọn tài khoản xem nhóm" aria-label="Chọn tài khoản xem nhóm" onchange="renderGroupList()"></select>
           </div>
           <div style="flex: 1; min-width: 250px;">
-            <label class="form-label">Tìm kiếm nhóm:</label>
-            <input type="text" id="group-search" class="form-input" placeholder="Nhập từ khóa tìm link nhóm..." oninput="renderGroupList()">
+            <label class="form-label" for="group-search">Tìm kiếm nhóm:</label>
+            <input type="text" id="group-search" class="form-input" placeholder="Nhập từ khóa tìm link nhóm..." oninput="renderGroupList()" title="Tìm kiếm nhóm" aria-label="Tìm kiếm nhóm">
           </div>
         </div>
 
@@ -176,8 +176,8 @@
 
         <form id="quick-post-form" onsubmit="handleQuickPost(event)">
           <div class="form-group">
-            <label class="form-label">Chọn Kênh xuất bản:</label>
-            <select id="qp-channel" class="form-select" onchange="onChannelChange()">
+            <label class="form-label" for="qp-channel">Chọn Kênh xuất bản:</label>
+            <select id="qp-channel" class="form-select" title="Chọn Kênh xuất bản" aria-label="Chọn Kênh xuất bản" onchange="onChannelChange()">
               <option value="fanpage">Facebook Fanpage (Port 3001)</option>
               <option value="groups">Facebook Groups (Port 3002)</option>
               <option value="personal">Facebook Trang Cá Nhân (Port 3003)</option>
@@ -187,27 +187,27 @@
 
 
           <div class="form-group">
-            <label class="form-label">Nội dung Caption đăng bài:</label>
-            <textarea id="qp-caption" class="form-textarea" required placeholder="Nhập nội dung bài viết..."></textarea>
+            <label class="form-label" for="qp-caption">Nội dung Caption đăng bài:</label>
+            <textarea id="qp-caption" class="form-textarea" required placeholder="Nhập nội dung bài viết..." title="Nội dung Caption đăng bài" aria-label="Nội dung Caption đăng bài"></textarea>
           </div>
 
           <div class="form-group">
-            <label class="form-label">Prompt tạo ảnh ChatGPT:</label>
-            <textarea id="qp-prompt" class="form-textarea" placeholder="Nhập prompt tiếng Anh hoặc tiếng Việt để ChatGPT tạo ảnh..." style="min-height: 80px;"></textarea>
+            <label class="form-label" for="qp-prompt">Prompt tạo ảnh ChatGPT:</label>
+            <textarea id="qp-prompt" class="form-textarea" placeholder="Nhập prompt tiếng Anh hoặc tiếng Việt để ChatGPT tạo ảnh..." style="min-height: 80px;" title="Prompt tạo ảnh ChatGPT" aria-label="Prompt tạo ảnh ChatGPT"></textarea>
           </div>
 
           <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1.5rem;">
             <div style="flex: 1;">
-              <label class="form-label">Tỉ lệ ảnh:</label>
-              <select id="qp-aspect" class="form-select">
+              <label class="form-label" for="qp-aspect">Tỉ lệ ảnh:</label>
+              <select id="qp-aspect" class="form-select" title="Tỉ lệ ảnh" aria-label="Tỉ lệ ảnh">
                 <option value="4:5">4:5 (Khuyên dùng cho Facebook)</option>
                 <option value="16:9">16:9 (Hình ngang)</option>
                 <option value="1:1">1:1 (Hình vuông)</option>
               </select>
             </div>
             <div style="flex: 1;">
-              <label class="form-label">Ảnh Mascot Du:</label>
-              <select id="qp-has-du" class="form-select">
+              <label class="form-label" for="qp-has-du">Ảnh Mascot Du:</label>
+              <select id="qp-has-du" class="form-select" title="Ảnh Mascot Du" aria-label="Ảnh Mascot Du">
                 <option value="true">Có Mascot Du (Workflow Giờ Chẵn)</option>
                 <option value="false">Không Mascot - Người thật (Workflow Giờ Lẻ)</option>
               </select>
@@ -233,12 +233,12 @@
       <h3 style="margin-bottom: 1.25rem;">➕ Thêm Link Nhóm Facebook</h3>
       <form onsubmit="handleAddGroupSubmit(event)">
         <div class="form-group">
-          <label class="form-label">Chọn Tài khoản nhận nhóm:</label>
-          <select id="modal-add-group-acc" class="form-select" required></select>
+          <label class="form-label" for="modal-add-group-acc">Chọn Tài khoản nhận nhóm:</label>
+          <select id="modal-add-group-acc" class="form-select" title="Chọn Tài khoản nhận nhóm" aria-label="Chọn Tài khoản nhận nhóm" required></select>
         </div>
         <div class="form-group">
-          <label class="form-label">URL Nhóm Facebook:</label>
-          <input type="url" id="modal-add-group-url" class="form-input" placeholder="https://www.facebook.com/groups/..." required>
+          <label class="form-label" for="modal-add-group-url">URL Nhóm Facebook:</label>
+          <input type="url" id="modal-add-group-url" class="form-input" placeholder="https://www.facebook.com/groups/..." title="URL Nhóm Facebook" aria-label="URL Nhóm Facebook" required>
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 1.5rem;">
           <button type="button" class="btn btn-secondary" onclick="closeModal('modal-add-group')">Hủy</button>
@@ -254,12 +254,12 @@
       <h3 style="margin-bottom: 1.25rem;">📥 Import Hàng Loạt Link Nhóm</h3>
       <form onsubmit="handleBulkImportSubmit(event)">
         <div class="form-group">
-          <label class="form-label">Chọn Tài khoản:</label>
-          <select id="modal-bulk-acc" class="form-select" required></select>
+          <label class="form-label" for="modal-bulk-acc">Chọn Tài khoản:</label>
+          <select id="modal-bulk-acc" class="form-select" title="Chọn Tài khoản" aria-label="Chọn Tài khoản" required></select>
         </div>
         <div class="form-group">
-          <label class="form-label">Chế độ Import:</label>
-          <select id="modal-bulk-mode" class="form-select">
+          <label class="form-label" for="modal-bulk-mode">Chế độ Import:</label>
+          <select id="modal-bulk-mode" class="form-select" title="Chế độ Import" aria-label="Chế độ Import">
             <option value="append">Thêm nối tiếp vào danh sách cũ</option>
             <option value="replace">Ghi đè (Xóa cũ và thay bằng danh sách mới)</option>
           </select>

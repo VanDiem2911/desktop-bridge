@@ -385,7 +385,6 @@ async function handleQuickPost(e) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'publish_facebook_page',
-          pageUrl: 'https://www.facebook.com/profile.php?id=100086705741966',
           caption,
           imageBase64: genData.imageBase64,
         }),
@@ -404,8 +403,7 @@ async function handleQuickPost(e) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'publish_facebook_page',
-          pageUrl: 'https://www.facebook.com/profile.php?id=100087184532124',
+          action: 'publish_facebook_personal',
           caption,
           imageBase64: genData.imageBase64,
         }),
