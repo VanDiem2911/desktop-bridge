@@ -392,15 +392,16 @@ async function publishFacebookPersonal({
   fileName = 'personal-post.png',
 }) {
   const account = getActivePersonalAccount(accountId || reqAccountId);
-  const targetUrl = (profileUrl && typeof profileUrl === 'string' && profileUrl.startsWith('https://www.facebook.com/'))
-    ? profileUrl.trim()
-    : (pageUrl && typeof pageUrl === 'string' && pageUrl.startsWith('https://www.facebook.com/'))
-      ? pageUrl.trim()
-      : (account.profileUrl && account.profileUrl.startsWith('https://www.facebook.com/'))
-        ? account.profileUrl.trim()
+  // LUÔN LUÔN ƯU TIÊN LẤY LINK TRỰC TIẾP TỪ DASHBOARD (personal-config.json)
+  const targetUrl = (account.profileUrl && account.profileUrl.startsWith('https://www.facebook.com/'))
+    ? account.profileUrl.trim()
+    : (profileUrl && typeof profileUrl === 'string' && profileUrl.startsWith('https://www.facebook.com/'))
+      ? profileUrl.trim()
+      : (pageUrl && typeof pageUrl === 'string' && pageUrl.startsWith('https://www.facebook.com/'))
+        ? pageUrl.trim()
         : 'https://www.facebook.com/';
 
-  console.log(`[Personal Server 3003] Bắt đầu đăng bài lên Facebook Cá Nhân (${account.name} - Port ${account.port}) tại link: ${targetUrl}...`);
+  console.log(`[Personal Server 3003] Bắt đầu đăng bài lên Facebook Cá Nhân (${account.name} - Port ${account.port}) tại link Dashboard: ${targetUrl}...`);
 
   const { browser, page } = await openFacebookPersonalPage(account, targetUrl);
   try {

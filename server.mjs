@@ -33,9 +33,9 @@ function assertGenerateRequest(body) {
   }
   if (body.action === 'publish_facebook_page') {
     const fanpageConfig = loadFanpageConfig();
-    const targetUrl = (body.pageUrl && typeof body.pageUrl === 'string' && body.pageUrl.trim().length > 0)
-      ? body.pageUrl.trim()
-      : (fanpageConfig.pageUrl || 'https://www.facebook.com/');
+    // LUÔN LUÔN ƯU TIÊN LẤY LINK TRỰC TIẾP TỪ DASHBOARD (fanpage-config.json)
+    const dashboardUrl = fanpageConfig.pageUrl || (fanpageConfig.accounts && fanpageConfig.accounts.find(a => a.enabled !== false)?.pageUrl) || (fanpageConfig.accounts && fanpageConfig.accounts[0]?.pageUrl);
+    const targetUrl = dashboardUrl || (body.pageUrl && typeof body.pageUrl === 'string' && body.pageUrl.startsWith('https://www.facebook.com/') ? body.pageUrl.trim() : 'https://www.facebook.com/');
 
     if (!targetUrl.startsWith('https://www.facebook.com/')) {
       throw new Error('pageUrl không hợp lệ hoặc chưa được cấu hình đúng trên Dashboard');
