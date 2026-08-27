@@ -26,7 +26,62 @@ import {
   ArrowUpRight,
   ShieldCheck,
   UserPlus,
+  BarChart3,
+  TrendingUp,
+  TrendingDown,
+  Filter,
+  Calendar,
+  Download,
+  Eye,
+  HelpCircle,
+  Activity,
+  FileText,
+  X,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
+
+interface HistoryEntry {
+  id: string;
+  timestamp: string;
+  type: 'post' | 'image_generate';
+  channel: 'fanpage' | 'groups' | 'personal' | 'chatgpt';
+  channelName: string;
+  targetName?: string | null;
+  targetUrl?: string | null;
+  status: 'success' | 'failed';
+  title?: string;
+  caption?: string;
+  prompt?: string;
+  chatgptAccount?: string | null;
+  aspectRatio?: string;
+  hasMascotDu?: boolean;
+  durationMs?: number;
+  error?: string | null;
+  errorDetails?: string | null;
+  details?: Record<string, unknown>;
+}
+
+interface AnalyticsStats {
+  total: number;
+  successCount: number;
+  failedCount: number;
+  successRate: number;
+  byChannel: {
+    fanpage: { total: number; success: number; failed: number };
+    groups: { total: number; success: number; failed: number };
+    personal: { total: number; success: number; failed: number };
+    chatgpt: { total: number; success: number; failed: number };
+  };
+  byGpt: {
+    acc1: { name: string; count: number; errorCount: number };
+    acc2: { name: string; count: number; errorCount: number };
+    other: { name: string; count: number; errorCount: number };
+  };
+  topErrors: Array<{ reason: string; count: number; suggestion: string }>;
+  avgDurationSec: number;
+  lastRunAt: string | null;
+}
 
 interface ServerStatus {
   ok: boolean;
@@ -76,12 +131,27 @@ interface GroupAccount {
 }
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'accounts' | 'groups' | 'quick-post'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'accounts' | 'groups' | 'quick-post'>('overview');
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [accounts, setAccounts] = useState<AccountCategory[]>([]);
   const [groupsData, setGroupsData] = useState<{ accounts: GroupAccount[] }>({ accounts: [] });
   const [selectedGroupAcc, setSelectedGroupAcc] = useState<string>('acc_1');
   const [groupSearch, setGroupSearch] = useState<string>('');
+
+  // Analytics & History state
+  const [analyticsData, setAnalyticsData] = useState<{
+    stats: AnalyticsStats;
+    history: HistoryEntry[];
+    pagination: { totalEntries: number; page: number; limit: number; totalPages: number };
+  } | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [filterChannel, setFilterChannel] = useState<'all' | 'fanpage' | 'groups' | 'personal' | 'chatgpt'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'success' | 'failed'>('all');
+  const [filterGpt, setFilterGpt] = useState<'all' | 'acc1' | 'acc2'>('all');
+  const [analyticsSearch, setAnalyticsSearch] = useState('');
+  const [analyticsPage, setAnalyticsPage] = useState(1);
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState<HistoryEntry | null>(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   
   // Modals state - ChatGPT Accounts
   const [isAddChatGptOpen, setIsAddChatGptOpen] = useState(false);
@@ -203,16 +273,102 @@ export default function DashboardPage() {
     }
   };
 
+  // Load Analytics
+  const fetchAnalytics = async (page = 1) => {
+    setAnalyticsLoading(true);
+    try {
+      const params = new URLSearchParams({
+        channel: filterChannel,
+        status: filterStatus,
+        chatgpt: filterGpt,
+        search: analyticsSearch,
+        page: String(page),
+        limit: '25',
+      });
+      const res = await fetch(`/api/analytics?${params.toString()}`);
+      const data = await res.json();
+      if (data.ok) {
+        setAnalyticsData(data);
+        setAnalyticsPage(page);
+      }
+    } catch (err) {
+      console.error('Lỗi tải thống kê:', err);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  // Clear All History
+  const handleClearHistory = async () => {
+    if (!confirm('Bạn có chắc chắn muốn xóa toàn bộ nhật ký thống kê?')) return;
+    try {
+      const res = await fetch('/api/analytics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clear_history' }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message, 'success');
+        fetchAnalytics(1);
+      }
+    } catch (err) {
+      showToast('Lỗi xóa lịch sử', 'error');
+    }
+  };
+
+  // Delete Single History Entry
+  const handleDeleteHistoryEntry = async (id: string) => {
+    try {
+      const res = await fetch('/api/analytics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_entry', id }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message || 'Đã xóa bản ghi', 'success');
+        fetchAnalytics(analyticsPage);
+        if (selectedHistoryItem?.id === id) {
+          setIsDetailModalOpen(false);
+          setSelectedHistoryItem(null);
+        }
+      }
+    } catch (err) {
+      showToast('Lỗi xóa bản ghi', 'error');
+    }
+  };
+
+  // Export History as JSON
+  const handleExportHistory = () => {
+    if (!analyticsData?.history || analyticsData.history.length === 0) {
+      return showToast('Không có dữ liệu để xuất!', 'info');
+    }
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(analyticsData.history, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute('href', dataStr);
+    downloadAnchor.setAttribute('download', `dudi_analytics_history_${new Date().toISOString().slice(0, 10)}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    showToast('Đã tải xuống file JSON thống kê!', 'success');
+  };
+
   useEffect(() => {
     fetchStatus();
     fetchAccounts();
     fetchGroups();
+    fetchAnalytics(1);
     const interval = setInterval(() => {
       fetchStatus();
       fetchAccounts();
     }, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    fetchAnalytics(1);
+  }, [filterChannel, filterStatus, filterGpt]);
 
   // Toggle Account Enable/Disable
   const handleToggleAccount = async (category: string, accountId: string, currentEnabled: boolean) => {
@@ -962,10 +1118,10 @@ export default function DashboardPage() {
           </div>
 
           {/* Navigation Pill Switcher */}
-          <nav className="flex items-center bg-slate-200/60 p-1.5 rounded-2xl border border-slate-300/60 backdrop-blur-md shadow-xs">
+          <nav className="flex items-center bg-slate-200/60 p-1.5 rounded-2xl border border-slate-300/60 backdrop-blur-md shadow-xs flex-wrap gap-1">
             <button
               onClick={() => setActiveTab('overview')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
                 activeTab === 'overview'
                   ? 'bg-white text-blue-700 shadow-md shadow-slate-900/5 font-bold border border-slate-200/80'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
@@ -974,8 +1130,18 @@ export default function DashboardPage() {
               <LayoutDashboard className="w-4 h-4" /> Tổng quan
             </button>
             <button
+              onClick={() => { setActiveTab('analytics'); fetchAnalytics(1); }}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
+                activeTab === 'analytics'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/25 font-bold'
+                  : 'text-slate-600 hover:text-blue-700 hover:bg-white/60'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4" /> Thống kê & Lịch sử
+            </button>
+            <button
               onClick={() => setActiveTab('accounts')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
                 activeTab === 'accounts'
                   ? 'bg-white text-blue-700 shadow-md shadow-slate-900/5 font-bold border border-slate-200/80'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
@@ -985,7 +1151,7 @@ export default function DashboardPage() {
             </button>
             <button
               onClick={() => setActiveTab('groups')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
                 activeTab === 'groups'
                   ? 'bg-white text-blue-700 shadow-md shadow-slate-900/5 font-bold border border-slate-200/80'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
@@ -995,7 +1161,7 @@ export default function DashboardPage() {
             </button>
             <button
               onClick={() => setActiveTab('quick-post')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
                 activeTab === 'quick-post'
                   ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/25 font-bold'
                   : 'text-slate-600 hover:text-emerald-700 hover:bg-white/60'
@@ -1222,7 +1388,478 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ==================== TAB 2: QUẢN LÝ TÀI KHOẢN ==================== */}
+        {/* ==================== TAB 2: BÁO CÁO THỐNG KÊ & LỊCH SỬ (ANALYTICS) ==================== */}
+        {activeTab === 'analytics' && (
+          <div className="space-y-8">
+            
+            {/* Header Actions & Filter Controls */}
+            <div className="liquid-glass rounded-3xl p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200/80 pb-4">
+                <div>
+                  <h2 className="font-extrabold text-xl text-slate-900 tracking-tight flex items-center gap-2.5">
+                    <span className="p-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-100">
+                      <BarChart3 className="w-5 h-5" />
+                    </span>
+                    Báo cáo Thống kê & Lịch sử Đăng bài
+                  </h2>
+                  <p className="text-xs text-slate-500 font-medium mt-1">
+                    Theo dõi chi tiết mọi lượt tạo ảnh AI, kênh xuất bản (Fanpage, Groups, Cá nhân), tài khoản ChatGPT và nguyên nhân lỗi.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                  <button
+                    onClick={() => fetchAnalytics(analyticsPage)}
+                    className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl shadow-xs transition-all"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${analyticsLoading ? 'animate-spin' : ''}`} /> Làm mới
+                  </button>
+                  <button
+                    onClick={handleExportHistory}
+                    className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-xl shadow-xs transition-all"
+                  >
+                    <Download className="w-3.5 h-3.5 text-blue-600" /> Xuất JSON
+                  </button>
+                  <button
+                    onClick={handleClearHistory}
+                    className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-xl shadow-xs transition-all"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600" /> Xóa lịch sử
+                  </button>
+                </div>
+              </div>
+
+              {/* Filter Bar */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {/* Search */}
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={analyticsSearch}
+                    onChange={(e) => setAnalyticsSearch(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') fetchAnalytics(1); }}
+                    placeholder="Tìm theo Caption, Prompt, Lỗi..."
+                    className="liquid-input w-full rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900"
+                  />
+                </div>
+
+                {/* Status Filter */}
+                <div>
+                  <select
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value as any)}
+                    className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
+                  >
+                    <option value="all">🎯 Tất cả trạng thái</option>
+                    <option value="success">✅ Đăng thành công</option>
+                    <option value="failed">❌ Thất bại / Có lỗi</option>
+                  </select>
+                </div>
+
+                {/* Channel Filter */}
+                <div>
+                  <select
+                    value={filterChannel}
+                    onChange={(e) => setFilterChannel(e.target.value as any)}
+                    className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
+                  >
+                    <option value="all">🌐 Tất cả kênh xuất bản</option>
+                    <option value="fanpage">📄 Facebook Fanpage</option>
+                    <option value="groups">👥 Facebook Groups</option>
+                    <option value="personal">👤 Facebook Cá nhân</option>
+                    <option value="chatgpt">🤖 ChatGPT Image AI</option>
+                  </select>
+                </div>
+
+                {/* ChatGPT Account Filter */}
+                <div>
+                  <select
+                    value={filterGpt}
+                    onChange={(e) => setFilterGpt(e.target.value as any)}
+                    className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
+                  >
+                    <option value="all">🤖 Tất cả tài khoản ChatGPT</option>
+                    <option value="acc1">ChatGPT Tài khoản 1 (9222)</option>
+                    <option value="acc2">ChatGPT Tài khoản 2 (9242)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* 5 KPI Stat Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              {/* KPI 1: Tổng lượt chạy */}
+              <div className="liquid-glass rounded-3xl p-5 relative overflow-hidden">
+                <div className="flex justify-between items-start mb-2">
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Tổng Lượt Chạy</span>
+                  <span className="p-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-100">
+                    <Activity className="w-4 h-4" />
+                  </span>
+                </div>
+                <div className="text-3xl font-black text-slate-900 tracking-tight">
+                  {analyticsData?.stats.total || 0}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1 font-medium">Toàn bộ tác vụ đã ghi nhận</p>
+              </div>
+
+              {/* KPI 2: Đăng Thành Công */}
+              <div className="liquid-glass rounded-3xl p-5 relative overflow-hidden border-emerald-200/80 bg-gradient-to-br from-white/90 to-emerald-50/30">
+                <div className="flex justify-between items-start mb-2">
+                  <span className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Thành Công</span>
+                  <span className="p-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200">
+                    <CheckCircle2 className="w-4 h-4" />
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <div className="text-3xl font-black text-emerald-700 tracking-tight">
+                    {analyticsData?.stats.successCount || 0}
+                  </div>
+                  <span className="text-xs font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    {analyticsData?.stats.successRate ?? 100}%
+                  </span>
+                </div>
+                <p className="text-[11px] text-emerald-600/80 mt-1 font-medium">Xuất bản không gặp trở ngại</p>
+              </div>
+
+              {/* KPI 3: Lỗi / Thất Bại */}
+              <div className="liquid-glass rounded-3xl p-5 relative overflow-hidden border-rose-200/80 bg-gradient-to-br from-white/90 to-rose-50/30">
+                <div className="flex justify-between items-start mb-2">
+                  <span className="text-xs font-bold text-rose-700 uppercase tracking-wider">Gặp Lỗi / Thất Bại</span>
+                  <span className="p-2 rounded-xl bg-rose-50 text-rose-600 border border-rose-200">
+                    <AlertCircle className="w-4 h-4" />
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <div className="text-3xl font-black text-rose-700 tracking-tight">
+                    {analyticsData?.stats.failedCount || 0}
+                  </div>
+                  <span className="text-xs font-extrabold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
+                    {analyticsData?.stats.total ? Math.round(((analyticsData?.stats.failedCount || 0) / analyticsData.stats.total) * 100) : 0}%
+                  </span>
+                </div>
+                <p className="text-[11px] text-rose-600/80 mt-1 font-medium">Có phân tích nguyên nhân</p>
+              </div>
+
+              {/* KPI 4: Xoay vòng ChatGPT */}
+              <div className="liquid-glass rounded-3xl p-5 relative overflow-hidden">
+                <div className="flex justify-between items-start mb-2">
+                  <span className="text-xs font-bold text-violet-700 uppercase tracking-wider">Tài khoản ChatGPT</span>
+                  <span className="p-2 rounded-xl bg-violet-50 text-violet-600 border border-violet-100">
+                    <Bot className="w-4 h-4" />
+                  </span>
+                </div>
+                <div className="text-sm font-bold text-slate-800 space-y-1 mt-1">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-600">Acc 1 (9222):</span>
+                    <b className="text-violet-700">{analyticsData?.stats.byGpt.acc1.count || 0} lượt</b>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-600">Acc 2 (9242):</span>
+                    <b className="text-indigo-700">{analyticsData?.stats.byGpt.acc2.count || 0} lượt</b>
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1 font-medium">Tự động xen kẽ luân phiên</p>
+              </div>
+
+              {/* KPI 5: Thời gian TB */}
+              <div className="liquid-glass rounded-3xl p-5 relative overflow-hidden">
+                <div className="flex justify-between items-start mb-2">
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Thời Gian TB</span>
+                  <span className="p-2 rounded-xl bg-amber-50 text-amber-600 border border-amber-100">
+                    <Clock className="w-4 h-4" />
+                  </span>
+                </div>
+                <div className="text-3xl font-black text-slate-900 tracking-tight">
+                  {analyticsData?.stats.avgDurationSec || 0}<span className="text-sm font-bold text-slate-500 ml-1">giây</span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1 font-medium">Tốc độ xử lý mỗi bài viết</p>
+              </div>
+            </div>
+
+            {/* Row 2: Phân tích Kênh & Top Nguyên nhân Lỗi */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Breakdown Kênh */}
+              <div className="liquid-glass rounded-3xl p-6 space-y-4">
+                <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-blue-600" /> Phân Bổ Theo Kênh Xuất Bản
+                </h3>
+                
+                <div className="space-y-3 pt-1">
+                  {/* Fanpage */}
+                  <div>
+                    <div className="flex justify-between text-xs font-bold mb-1">
+                      <span className="text-blue-700 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-blue-500"></span> Facebook Fanpage
+                      </span>
+                      <span className="text-slate-700">
+                        {analyticsData?.stats.byChannel.fanpage.success || 0} thành công / {analyticsData?.stats.byChannel.fanpage.total || 0} bài
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                      <div
+                        className="bg-blue-600 h-2.5 rounded-full transition-all duration-500"
+                        style={{
+                          width: `${analyticsData?.stats.byChannel.fanpage.total ? (analyticsData.stats.byChannel.fanpage.success / analyticsData.stats.byChannel.fanpage.total) * 100 : 0}%`,
+                        }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  {/* Groups */}
+                  <div>
+                    <div className="flex justify-between text-xs font-bold mb-1">
+                      <span className="text-indigo-700 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-indigo-500"></span> Facebook Groups
+                      </span>
+                      <span className="text-slate-700">
+                        {analyticsData?.stats.byChannel.groups.success || 0} thành công / {analyticsData?.stats.byChannel.groups.total || 0} bài
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                      <div
+                        className="bg-indigo-600 h-2.5 rounded-full transition-all duration-500"
+                        style={{
+                          width: `${analyticsData?.stats.byChannel.groups.total ? (analyticsData.stats.byChannel.groups.success / analyticsData.stats.byChannel.groups.total) * 100 : 0}%`,
+                        }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  {/* Personal */}
+                  <div>
+                    <div className="flex justify-between text-xs font-bold mb-1">
+                      <span className="text-teal-700 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-teal-500"></span> Facebook Trang Cá Nhân
+                      </span>
+                      <span className="text-slate-700">
+                        {analyticsData?.stats.byChannel.personal.success || 0} thành công / {analyticsData?.stats.byChannel.personal.total || 0} bài
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                      <div
+                        className="bg-teal-600 h-2.5 rounded-full transition-all duration-500"
+                        style={{
+                          width: `${analyticsData?.stats.byChannel.personal.total ? (analyticsData.stats.byChannel.personal.success / analyticsData.stats.byChannel.personal.total) * 100 : 0}%`,
+                        }}
+                      ></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Top Lỗi & Gợi ý Khắc Phục */}
+              <div className="liquid-glass rounded-3xl p-6 space-y-4">
+                <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600" /> Bác Sĩ Chuẩn Đoán & Gợi Ý Khắc Phục
+                </h3>
+                
+                {(!analyticsData?.stats.topErrors || analyticsData.stats.topErrors.length === 0) ? (
+                  <div className="p-4 rounded-2xl bg-emerald-50/80 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    Hệ thống đang hoạt động hoàn hảo! Không có lỗi nào đáng chú ý được ghi nhận.
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {analyticsData.stats.topErrors.map((err, idx) => (
+                      <div key={idx} className="p-3 rounded-2xl bg-rose-50/70 border border-rose-200/90 text-xs space-y-1">
+                        <div className="flex justify-between items-start font-bold text-rose-900">
+                          <span className="flex-1 pr-2">⚠️ {err.reason}</span>
+                          <span className="px-2 py-0.5 rounded-md bg-rose-200/70 text-rose-900 text-[10px] font-black">{err.count} lần</span>
+                        </div>
+                        <div className="text-[11px] text-slate-600 font-medium">
+                          💡 <b className="text-slate-800">Giải pháp:</b> {err.suggestion}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Detailed History Table */}
+            <div className="liquid-glass rounded-3xl p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
+                <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-blue-600" /> Nhật Ký Chi Tiết Từng Bài Đăng
+                </h3>
+                <span className="text-xs text-slate-500 font-semibold">
+                  Hiển thị {analyticsData?.history.length || 0} / {analyticsData?.pagination.totalEntries || 0} bản ghi
+                </span>
+              </div>
+
+              <div className="border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs bg-white/60">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-100/90 border-b border-slate-200/90 text-slate-700 font-bold">
+                      <tr>
+                        <th className="py-3 px-3 w-10 text-center">STT</th>
+                        <th className="py-3 px-3 w-36">Thời gian</th>
+                        <th className="py-3 px-3 w-36">Kênh & Đích đến</th>
+                        <th className="py-3 px-3 w-40">Tài khoản ChatGPT</th>
+                        <th className="py-3 px-3 w-28 text-center">Trạng thái</th>
+                        <th className="py-3 px-4">Nội dung / Lỗi chi tiết</th>
+                        <th className="py-3 px-3 w-24 text-center">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(!analyticsData?.history || analyticsData.history.length === 0) ? (
+                        <tr>
+                          <td colSpan={7} className="py-12 text-center text-slate-400 font-medium">
+                            Chưa có nhật ký nào phù hợp với bộ lọc hiện tại.
+                          </td>
+                        </tr>
+                      ) : (
+                        analyticsData.history.map((item, idx) => {
+                          const isSuccess = item.status === 'success';
+                          const dateStr = new Date(item.timestamp).toLocaleString('vi-VN', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                          });
+
+                          return (
+                            <tr key={item.id} className="hover:bg-blue-50/30 transition-colors">
+                              <td className="py-3 px-3 text-center font-bold text-slate-400">
+                                {((analyticsPage - 1) * 25) + idx + 1}
+                              </td>
+                              <td className="py-3 px-3 text-slate-600 font-medium whitespace-nowrap">
+                                <div className="flex items-center gap-1">
+                                  <Clock className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                                  <span>{dateStr}</span>
+                                </div>
+                                {item.durationMs ? (
+                                  <span className="text-[10px] text-slate-400 block mt-0.5">
+                                    ⏱️ {(item.durationMs / 1000).toFixed(1)}s
+                                  </span>
+                                ) : null}
+                              </td>
+                              <td className="py-3 px-3">
+                                <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                                  {item.channel === 'fanpage' && <span className="p-1 rounded bg-blue-100 text-blue-700 text-[10px]">Fanpage</span>}
+                                  {item.channel === 'groups' && <span className="p-1 rounded bg-indigo-100 text-indigo-700 text-[10px]">Group</span>}
+                                  {item.channel === 'personal' && <span className="p-1 rounded bg-teal-100 text-teal-700 text-[10px]">Cá nhân</span>}
+                                  {item.channel === 'chatgpt' && <span className="p-1 rounded bg-violet-100 text-violet-700 text-[10px]">AI Image</span>}
+                                </div>
+                                {item.targetUrl && (
+                                  <a
+                                    href={item.targetUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-blue-600 hover:text-blue-800 hover:underline text-[11px] truncate max-w-[140px] block mt-0.5 font-medium"
+                                    title={item.targetUrl}
+                                  >
+                                    🔗 {item.targetName || item.targetUrl.replace(/^https?:\/\/(www\.)?facebook\.com\//, '')}
+                                  </a>
+                                )}
+                              </td>
+                              <td className="py-3 px-3">
+                                {item.chatgptAccount ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-violet-50 text-violet-700 border border-violet-200">
+                                    <Bot className="w-3 h-3" />
+                                    {item.chatgptAccount.replace('ChatGPT ', '')}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 text-[11px]">—</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 text-center">
+                                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black ${
+                                  isSuccess
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : 'bg-rose-50 text-rose-700 border border-rose-200 animate-pulse'
+                                }`}>
+                                  {isSuccess ? <CheckCircle2 className="w-3 h-3 text-emerald-600" /> : <AlertCircle className="w-3 h-3 text-rose-600" />}
+                                  {isSuccess ? 'Thành công' : 'Thất bại'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="max-w-md">
+                                  {item.caption && (
+                                    <p className="font-semibold text-slate-800 line-clamp-1 mb-0.5">
+                                      {item.caption}
+                                    </p>
+                                  )}
+                                  {item.prompt && (
+                                    <p className="text-[11px] text-slate-500 line-clamp-1 italic">
+                                      🎨 Prompt: {item.prompt}
+                                    </p>
+                                  )}
+                                  {!isSuccess && item.error && (
+                                    <div className="mt-1 p-1.5 rounded-lg bg-rose-100/90 text-rose-800 text-[11px] font-bold border border-rose-300">
+                                      ⚠️ Lý do lỗi: {item.error}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-3 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    onClick={() => { setSelectedHistoryItem(item); setIsDetailModalOpen(true); }}
+                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                    title="Xem chi tiết toàn bộ"
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteHistoryEntry(item.id)}
+                                    className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                                    title="Xóa bản ghi này"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination Bar */}
+                {analyticsData && analyticsData.pagination.totalPages > 1 && (
+                  <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-t border-slate-200">
+                    <span className="text-xs text-slate-500">
+                      Trang <b>{analyticsPage}</b> / <b>{analyticsData.pagination.totalPages}</b>
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        disabled={analyticsPage <= 1}
+                        onClick={() => fetchAnalytics(analyticsPage - 1)}
+                        className={`px-3 py-1 text-xs font-bold rounded-lg border ${
+                          analyticsPage <= 1
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        Trang trước
+                      </button>
+                      <button
+                        disabled={analyticsPage >= analyticsData.pagination.totalPages}
+                        onClick={() => fetchAnalytics(analyticsPage + 1)}
+                        className={`px-3 py-1 text-xs font-bold rounded-lg border ${
+                          analyticsPage >= analyticsData.pagination.totalPages
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        Trang sau
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* ==================== TAB 3: QUẢN LÝ TÀI KHOẢN ==================== */}
         {activeTab === 'accounts' && (
           <div className="space-y-8">
             {accounts.map(category => (
@@ -2492,6 +3129,122 @@ export default function DashboardPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL CHI TIẾT NHẬT KÝ BÀI ĐĂNG (ANALYTICS DETAIL) ==================== */}
+      {isDetailModalOpen && selectedHistoryItem && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="liquid-glass-modal rounded-3xl w-full max-w-2xl p-7 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto">
+            
+            <div className="flex items-center justify-between border-b border-slate-200/80 pb-4">
+              <div className="flex items-center gap-3">
+                <span className={`p-2.5 rounded-2xl ${
+                  selectedHistoryItem.status === 'success' ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-rose-50 text-rose-600 border border-rose-200'
+                }`}>
+                  {selectedHistoryItem.status === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+                </span>
+                <div>
+                  <h3 className="font-extrabold text-lg text-slate-900">Chi Tiết Nhật Ký Tác Vụ</h3>
+                  <p className="text-xs text-slate-500 font-mono">{selectedHistoryItem.id}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setIsDetailModalOpen(false); setSelectedHistoryItem(null); }}
+                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="text-slate-500 font-bold block mb-1">Thời gian thực hiện:</span>
+                <span className="font-bold text-slate-900">{new Date(selectedHistoryItem.timestamp).toLocaleString('vi-VN')}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="text-slate-500 font-bold block mb-1">Thời lượng xử lý:</span>
+                <span className="font-bold text-slate-900">{selectedHistoryItem.durationMs ? `${(selectedHistoryItem.durationMs / 1000).toFixed(2)} giây` : 'N/A'}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="text-slate-500 font-bold block mb-1">Kênh xuất bản:</span>
+                <span className="font-bold text-blue-700">{selectedHistoryItem.channelName || selectedHistoryItem.channel}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="text-slate-500 font-bold block mb-1">Tài khoản ChatGPT:</span>
+                <span className="font-bold text-violet-700">{selectedHistoryItem.chatgptAccount || 'Mặc định'}</span>
+              </div>
+            </div>
+
+            {selectedHistoryItem.targetUrl && (
+              <div className="p-3 rounded-xl bg-blue-50/60 border border-blue-200 text-xs">
+                <span className="text-blue-900 font-bold block mb-1">🔗 Đích đến (URL):</span>
+                <a
+                  href={selectedHistoryItem.targetUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-600 hover:underline break-all font-mono"
+                >
+                  {selectedHistoryItem.targetUrl}
+                </a>
+              </div>
+            )}
+
+            {selectedHistoryItem.caption && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-extrabold text-slate-800">📝 Nội dung Caption:</label>
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-800 whitespace-pre-wrap font-sans leading-relaxed">
+                  {selectedHistoryItem.caption}
+                </div>
+              </div>
+            )}
+
+            {selectedHistoryItem.prompt && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-extrabold text-slate-800">🎨 Prompt tạo ảnh AI:</label>
+                <div className="p-4 rounded-xl bg-violet-50/50 border border-violet-200 text-xs text-violet-900 italic font-sans leading-relaxed">
+                  {selectedHistoryItem.prompt}
+                </div>
+              </div>
+            )}
+
+            {selectedHistoryItem.error && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-extrabold text-rose-700 flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4" /> Nguyên nhân lỗi:
+                </label>
+                <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-900 font-semibold leading-relaxed">
+                  {selectedHistoryItem.error}
+                </div>
+                {selectedHistoryItem.errorDetails && (
+                  <details className="mt-2 text-xs">
+                    <summary className="text-slate-500 cursor-pointer hover:text-slate-800 font-bold">Chi tiết stack trace kĩ thuật</summary>
+                    <pre className="mt-2 p-3 rounded-xl bg-slate-900 text-slate-100 text-[11px] overflow-x-auto font-mono">
+                      {selectedHistoryItem.errorDetails}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-between items-center pt-3 border-t border-slate-200/80">
+              <button
+                type="button"
+                onClick={() => handleDeleteHistoryEntry(selectedHistoryItem.id)}
+                className="px-4 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-xs font-bold text-rose-700 flex items-center gap-1.5 transition-all"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Xóa bản ghi này
+              </button>
+              <button
+                type="button"
+                onClick={() => { setIsDetailModalOpen(false); setSelectedHistoryItem(null); }}
+                className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-bold text-white shadow-md transition-all"
+              >
+                Đóng
+              </button>
+            </div>
+
           </div>
         </div>
       )}

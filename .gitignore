@@ -9,7 +9,9 @@ dashboard/*.log
 __pycache__/
 *.pyc
 
-# Mỗi máy tự cấu hình riêng qua Dashboard - KHÔNG commit vào Git
+# Mỗi máy tự cấu hình và lưu lịch sử riêng qua Dashboard - KHÔNG commit vào Git
 *-config.json
 configs/*-config.json
 !configs/*-config.example.json
+configs/post-history.json
+post-history.json

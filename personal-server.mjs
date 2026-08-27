@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import https from 'node:https';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { logPostActivity } from './lib/history-logger.mjs';
 
 const host = '127.0.0.1';
 const port = 3003; // Server riêng cho Trang Cá Nhân & ChatGPT Profile mới
@@ -1098,6 +1099,9 @@ app.post('/generate', async (req, res) => {
     return res.status(429).json({ error: 'Một tác vụ khác đang chạy trên Personal Server. Vui lòng thử lại sau giây lát.' });
   }
 
+  const startTime = Date.now();
+  const isPostAction = ['publish_facebook_personal', 'publish_facebook_profile', 'publish_facebook_page'].includes(req.body?.action);
+
   try {
     assertRequest(req.body);
     activeJob = true;
@@ -1106,15 +1110,59 @@ app.post('/generate', async (req, res) => {
     let result;
     if (req.body.action === 'capture_latest_chatgpt_image') {
       result = await captureLatestPersonalImage(req.body.account);
-    } else if (['publish_facebook_personal', 'publish_facebook_profile', 'publish_facebook_page'].includes(req.body.action)) {
+    } else if (isPostAction) {
       result = await publishFacebookPersonal(req.body);
+      logPostActivity({
+        type: 'post',
+        channel: 'personal',
+        channelName: 'Facebook Trang Cá Nhân',
+        targetUrl: req.body.profileUrl || req.body.pageUrl,
+        status: 'success',
+        caption: req.body.caption,
+        durationMs: Date.now() - startTime,
+      });
     } else {
       result = await generateImage(req.body);
+      logPostActivity({
+        type: 'image_generate',
+        channel: 'chatgpt',
+        channelName: 'ChatGPT Image AI (Cá Nhân)',
+        status: 'success',
+        prompt: req.body.prompt,
+        chatgptAccount: result.account,
+        aspectRatio: req.body.aspectRatio,
+        durationMs: Date.now() - startTime,
+      });
     }
     res.json(result);
   } catch (error) {
-    console.error('[Personal Server Error]', error.message);
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown bridge error' });
+    const errorMsg = error instanceof Error ? error.message : 'Unknown bridge error';
+    console.error('[Personal Server Error]', errorMsg);
+    if (isPostAction) {
+      logPostActivity({
+        type: 'post',
+        channel: 'personal',
+        channelName: 'Facebook Trang Cá Nhân',
+        targetUrl: req.body?.profileUrl || req.body?.pageUrl,
+        status: 'failed',
+        caption: req.body?.caption,
+        error: errorMsg,
+        errorDetails: error.stack,
+        durationMs: Date.now() - startTime,
+      });
+    } else if (req.body?.action === 'generate_chatgpt_image') {
+      logPostActivity({
+        type: 'image_generate',
+        channel: 'chatgpt',
+        channelName: 'ChatGPT Image AI (Cá Nhân)',
+        status: 'failed',
+        prompt: req.body?.prompt,
+        error: errorMsg,
+        errorDetails: error.stack,
+        durationMs: Date.now() - startTime,
+      });
+    }
+    res.status(500).json({ error: errorMsg });
   } finally {
     activeJob = false;
     activeJobAt = 0;

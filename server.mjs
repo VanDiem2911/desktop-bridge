@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import https from 'node:https';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { logPostActivity } from './lib/history-logger.mjs';
 
 const host = '127.0.0.1';
 const port = 3001;
@@ -1284,19 +1285,68 @@ app.post('/generate', async (request, response) => {
     activeJob = false;
   }
   if (activeJob) return response.status(429).json({ error: 'An image job is already running. Try again shortly.' });
+
+  const startTime = Date.now();
   try {
     assertGenerateRequest(request.body);
     activeJob = true;
     activeJobAt = Date.now();
-    response.json(
-      request.body.action === 'capture_latest_chatgpt_image'
-        ? await captureLatestImage(request.body.account)
-        : request.body.action === 'publish_facebook_page'
-          ? await publishFacebookPage(request.body)
-          : await generateImage(request.body),
-    );
+
+    let result;
+    if (request.body.action === 'capture_latest_chatgpt_image') {
+      result = await captureLatestImage(request.body.account);
+    } else if (request.body.action === 'publish_facebook_page') {
+      result = await publishFacebookPage(request.body);
+      logPostActivity({
+        type: 'post',
+        channel: 'fanpage',
+        channelName: 'Facebook Fanpage',
+        targetUrl: request.body.pageUrl,
+        status: 'success',
+        caption: request.body.caption,
+        durationMs: Date.now() - startTime,
+      });
+    } else {
+      result = await generateImage(request.body);
+      logPostActivity({
+        type: 'image_generate',
+        channel: 'chatgpt',
+        channelName: 'ChatGPT Image AI',
+        status: 'success',
+        prompt: request.body.prompt,
+        chatgptAccount: result.account,
+        aspectRatio: request.body.aspectRatio,
+        durationMs: Date.now() - startTime,
+      });
+    }
+    response.json(result);
   } catch (error) {
-    response.status(500).json({ error: error instanceof Error ? error.message : 'Unknown bridge error' });
+    const errorMsg = error instanceof Error ? error.message : 'Unknown bridge error';
+    if (request.body.action === 'publish_facebook_page') {
+      logPostActivity({
+        type: 'post',
+        channel: 'fanpage',
+        channelName: 'Facebook Fanpage',
+        targetUrl: request.body.pageUrl,
+        status: 'failed',
+        caption: request.body.caption,
+        error: errorMsg,
+        errorDetails: error.stack,
+        durationMs: Date.now() - startTime,
+      });
+    } else if (request.body.action === 'generate_chatgpt_image') {
+      logPostActivity({
+        type: 'image_generate',
+        channel: 'chatgpt',
+        channelName: 'ChatGPT Image AI',
+        status: 'failed',
+        prompt: request.body.prompt,
+        error: errorMsg,
+        errorDetails: error.stack,
+        durationMs: Date.now() - startTime,
+      });
+    }
+    response.status(500).json({ error: errorMsg });
   } finally {
     activeJob = false;
     activeJobAt = 0;

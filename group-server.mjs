@@ -6,6 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { logPostActivity } from './lib/history-logger.mjs';
 
 const host = '127.0.0.1';
 const port = 3002;
@@ -421,12 +422,35 @@ async function executeGroupPosting(body) {
       await page.bringToFront();
 
       for (const groupUrl of targetGroupList) {
+        const postStartTime = Date.now();
         try {
           await postToSingleGroup(page, groupUrl, postCaption, finalImageBase64);
           accResult.groups.push({ groupUrl, status: 'success', timestamp: new Date().toISOString() });
+          logPostActivity({
+            type: 'post',
+            channel: 'groups',
+            channelName: 'Facebook Groups',
+            targetName: account.name,
+            targetUrl: groupUrl,
+            status: 'success',
+            caption: postCaption,
+            durationMs: Date.now() - postStartTime,
+          });
         } catch (groupError) {
           console.error(`[Group Server Error] Lỗi đăng nhóm ${groupUrl}:`, groupError.message);
           accResult.groups.push({ groupUrl, status: 'error', error: groupError.message });
+          logPostActivity({
+            type: 'post',
+            channel: 'groups',
+            channelName: 'Facebook Groups',
+            targetName: account.name,
+            targetUrl: groupUrl,
+            status: 'failed',
+            caption: postCaption,
+            error: groupError.message,
+            errorDetails: groupError.stack,
+            durationMs: Date.now() - postStartTime,
+          });
         }
         await delay(3000);
       }
@@ -844,11 +868,33 @@ app.get('/config', (_req, res) => {
 });
 
 app.post('/generate', async (req, res) => {
+  const startTime = Date.now();
   try {
     const result = await generateGroupImage(req.body);
+    logPostActivity({
+      type: 'image_generate',
+      channel: 'chatgpt',
+      channelName: 'ChatGPT Image AI (Nhóm)',
+      status: 'success',
+      prompt: req.body.prompt,
+      chatgptAccount: result.account,
+      aspectRatio: req.body.aspectRatio,
+      durationMs: Date.now() - startTime,
+    });
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error' });
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    logPostActivity({
+      type: 'image_generate',
+      channel: 'chatgpt',
+      channelName: 'ChatGPT Image AI (Nhóm)',
+      status: 'failed',
+      prompt: req.body?.prompt,
+      error: errorMsg,
+      errorDetails: error.stack,
+      durationMs: Date.now() - startTime,
+    });
+    res.status(500).json({ error: errorMsg });
   }
 });
 
