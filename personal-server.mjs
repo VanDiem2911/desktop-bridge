@@ -520,7 +520,7 @@ async function publishFacebookPersonal({
       throw new Error('Không tìm thấy ô upload hình ảnh trên trình soạn thảo Facebook.');
     }
 
-    const upload = finalUploads.last();
+    const upload = uploads.last();
     await upload.setInputFiles({
       name: fileName,
       mimeType,

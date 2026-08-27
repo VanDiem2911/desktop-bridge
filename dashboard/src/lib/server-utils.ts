@@ -6,12 +6,13 @@ import http from 'node:http';
 
 function resolveBridgeDir(): string {
   const candidates = [
-    path.resolve(process.cwd()),
     path.resolve(process.cwd(), '..'),
+    path.resolve(process.cwd()),
     path.resolve(process.cwd(), 'desktop-bridge'),
+    path.resolve(process.cwd(), '..', 'desktop-bridge'),
   ];
   for (const c of candidates) {
-    if (fs.existsSync(path.join(c, 'groups-config.json')) || fs.existsSync(path.join(c, 'server.mjs'))) {
+    if (fs.existsSync(path.join(c, 'group-server.mjs')) && fs.existsSync(path.join(c, 'personal-server.mjs'))) {
       return c;
     }
   }

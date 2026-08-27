@@ -4,11 +4,11 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")
 
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
-' Neu run-hidden.vbs nam trong scripts/, lay thu muc cha lam bridgeDir
-If fso.FolderExists(scriptDir & "\..\dashboard") Then
-    bridgeDir = fso.GetParentFolderName(scriptDir)
-Else
+
+If fso.FolderExists(scriptDir & "\dashboard") Then
     bridgeDir = scriptDir
+Else
+    bridgeDir = fso.GetAbsolutePathName(scriptDir & "\..")
 End If
 
 sh.CurrentDirectory = bridgeDir
@@ -24,4 +24,3 @@ sh.Run "cmd /c cd /d """ & bridgeDir & """ && node """ & bridgeDir & "\group-ser
 
 ' Server 3: Facebook Trang Ca Nhan & ChatGPT Rieng (port 3003)
 sh.Run "cmd /c cd /d """ & bridgeDir & """ && node """ & bridgeDir & "\personal-server.mjs"" >> """ & bridgeDir & "\personal-server.log"" 2>&1", 0, False
-

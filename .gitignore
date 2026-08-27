@@ -2,10 +2,14 @@ node_modules/
 images/
 npm-debug.log*
 pnpm-debug.log*
+package-lock.json
 *.log
+dashboard/*.log
+*.docx
+__pycache__/
+*.pyc
 
 # Mỗi máy tự cấu hình riêng qua Dashboard - KHÔNG commit vào Git
 *-config.json
 configs/*-config.json
 !configs/*-config.example.json
-

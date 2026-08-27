@@ -6,6 +6,13 @@
       "profileDir": "n8n-chatgpt-profile",
       "port": 9222,
       "enabled": true
+    },
+    {
+      "id": 2,
+      "name": "ChatGPT Tài khoản 2",
+      "profileDir": "n8n-chatgpt-profile-2",
+      "port": 9242,
+      "enabled": true
     }
   ]
 }
