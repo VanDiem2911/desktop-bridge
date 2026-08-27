@@ -33,9 +33,25 @@ Write-Host "`n=================================================" -ForegroundColo
 Write-Host "   KHOI DONG LAI TOAN BO 4 SERVERS...            " -ForegroundColor Cyan
 Write-Host "=================================================" -ForegroundColor Cyan
 
-# Kiem tra va build production bundle Next.js Dashboard
+# Kiem tra va cai dat dependencies cho ca Bridge va Dashboard
 $bridgeDir = if (Test-Path (Join-Path $PSScriptRoot "dashboard")) { $PSScriptRoot } else { Split-Path $PSScriptRoot -Parent }
 $dashDir = Join-Path $bridgeDir "dashboard"
+
+$rootModules = Join-Path $bridgeDir "node_modules"
+if (-not (Test-Path $rootModules)) {
+    Write-Host "-> Cai dat dependencies cho Bridge Server (express, playwright-core)..." -ForegroundColor Yellow
+    Push-Location $bridgeDir
+    & npm install
+    Pop-Location
+}
+
+$dashModules = Join-Path $dashDir "node_modules"
+if (-not (Test-Path $dashModules)) {
+    Write-Host "-> Cai dat dependencies cho Dashboard..." -ForegroundColor Yellow
+    Push-Location $dashDir
+    & npm install
+    Pop-Location
+}
 
 Write-Host "-> Dang build Next.js Dashboard Bundle de cap nhat code moi nhat..." -ForegroundColor Yellow
 Push-Location $dashDir

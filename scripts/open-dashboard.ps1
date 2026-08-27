@@ -22,10 +22,18 @@ if (-not $nodeVer) {
 }
 Write-Host "[OK] Node.js da san sang ($nodeVer)" -ForegroundColor Green
 
-# 2. Kiem tra node_modules trong dashboard
+# 2. Kiem tra node_modules trong bridge va dashboard
+$rootModules = Join-Path $bridgeDir "node_modules"
+if (-not (Test-Path $rootModules)) {
+    Write-Host "`n-> Dang cai dat dependencies cho Bridge Server (express, playwright-core)..." -ForegroundColor Yellow
+    Push-Location $bridgeDir
+    & npm install
+    Pop-Location
+}
+
 $dashModules = Join-Path $dashboardDir "node_modules"
 if (-not (Test-Path $dashModules)) {
-    Write-Host "`n-> Phat hien may moi: Dang cai dat dependencies cho Dashboard..." -ForegroundColor Yellow
+    Write-Host "`n-> Dang cai dat dependencies cho Dashboard..." -ForegroundColor Yellow
     Push-Location $dashboardDir
     & npm install
     Pop-Location
