@@ -335,14 +335,6 @@ async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType 
   console.log(`[Group Post] Hoàn thành đăng nhóm: ${groupUrl}`);
 }
 
-function saveConfig(configData) {
-  try {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(configData, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('[Config Error] Không thể lưu groups-config.json:', err.message);
-  }
-}
-
 /**
  * Xử lý tuần tự các tài khoản và đăng bài xoay vòng theo danh sách nhóm
  */
