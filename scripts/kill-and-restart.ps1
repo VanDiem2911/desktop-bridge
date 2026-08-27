@@ -33,16 +33,14 @@ Write-Host "`n=================================================" -ForegroundColo
 Write-Host "   KHOI DONG LAI TOAN BO 4 SERVERS...            " -ForegroundColor Cyan
 Write-Host "=================================================" -ForegroundColor Cyan
 
-# Kiem tra production build .next neu chua co tren may moi
+# Kiem tra va build production bundle Next.js Dashboard
 $bridgeDir = if (Test-Path (Join-Path $PSScriptRoot "dashboard")) { $PSScriptRoot } else { Split-Path $PSScriptRoot -Parent }
 $dashDir = Join-Path $bridgeDir "dashboard"
-$nextBuild = Join-Path $dashDir ".next"
-if (-not (Test-Path $nextBuild)) {
-    Write-Host "-> Phat hien chua build Dashboard: Dang thuc hien npm run build..." -ForegroundColor Yellow
-    Push-Location $dashDir
-    & npm run build
-    Pop-Location
-}
+
+Write-Host "-> Dang build Next.js Dashboard Bundle de cap nhat code moi nhat..." -ForegroundColor Yellow
+Push-Location $dashDir
+& npm run build
+Pop-Location
 
 $vbs = if (Test-Path (Join-Path $PSScriptRoot "run-hidden.vbs")) { Join-Path $PSScriptRoot "run-hidden.vbs" } else { Join-Path $bridgeDir "scripts\run-hidden.vbs" }
 Start-Process wscript -ArgumentList "`"$vbs`"" -WindowStyle Hidden
@@ -64,3 +62,5 @@ foreach ($srv in $servers) {
     }
 }
 Write-Host "=================================================" -ForegroundColor Cyan
+Start-Process "http://127.0.0.1:3000"
+

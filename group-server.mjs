@@ -15,48 +15,63 @@ const app = express();
 app.use(express.json({ limit: '25mb' }));
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-function resolveConfigFile(filename, exampleFilename) {
-  const configsDir = path.join(__dirname, 'configs');
-  const targetInConfigs = path.join(configsDir, filename);
-  const targetInRoot = path.join(__dirname, filename);
+function resolveGroupsConfigPath() {
+  const targetInConfigs = path.join(__dirname, 'configs', 'groups-config.json');
+  const targetInRoot = path.join(__dirname, 'groups-config.json');
 
   if (fs.existsSync(targetInConfigs)) return targetInConfigs;
-  if (fs.existsSync(targetInRoot)) return targetInRoot;
-
-  if (!fs.existsSync(configsDir)) {
-    try { fs.mkdirSync(configsDir, { recursive: true }); } catch {}
+  if (fs.existsSync(targetInRoot)) {
+    try {
+      const configsDir = path.join(__dirname, 'configs');
+      if (!fs.existsSync(configsDir)) fs.mkdirSync(configsDir, { recursive: true });
+      fs.copyFileSync(targetInRoot, targetInConfigs);
+    } catch {}
+    return targetInConfigs;
   }
-  const exampleInConfigs = path.join(configsDir, exampleFilename);
-  const exampleInRoot = path.join(__dirname, exampleFilename);
-  const examplePath = fs.existsSync(exampleInConfigs) ? exampleInConfigs : exampleInRoot;
 
+  const exampleInConfigs = path.join(__dirname, 'configs', 'groups-config.example.json');
+  const exampleInRoot = path.join(__dirname, 'groups-config.example.json');
+  const examplePath = fs.existsSync(exampleInConfigs) ? exampleInConfigs : exampleInRoot;
   if (fs.existsSync(examplePath)) {
     try {
+      const configsDir = path.join(__dirname, 'configs');
+      if (!fs.existsSync(configsDir)) fs.mkdirSync(configsDir, { recursive: true });
       fs.copyFileSync(examplePath, targetInConfigs);
-      console.log(`[Config] Đã tạo ${filename} từ file mẫu trong thư mục configs/. Mở Dashboard để cấu hình.`);
     } catch {}
   }
   return targetInConfigs;
 }
 
-const CONFIG_PATH = resolveConfigFile('groups-config.json', 'groups-config.example.json');
-
 let activeGroupJob = false;
 
 function loadConfig() {
+  const configPath = resolveGroupsConfigPath();
   try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      const data = fs.readFileSync(CONFIG_PATH, 'utf-8');
+    if (fs.existsSync(configPath)) {
+      const data = fs.readFileSync(configPath, 'utf-8');
       const parsed = JSON.parse(data);
-      console.log(`[Config] Đã đọc thành công groups-config.json (${parsed.accounts?.length || 0} tài khoản) từ: ${CONFIG_PATH}`);
+      const totalUrls = (parsed.accounts || []).reduce((sum, a) => sum + (a.groupUrls?.length || 0), 0);
+      console.log(`[Config] Đã đọc groups-config.json (${parsed.accounts?.length || 0} tài khoản, tổng ${totalUrls} link nhóm) từ: ${configPath}`);
       return parsed;
     } else {
-      console.error(`[Config Error] File không tồn tại: ${CONFIG_PATH}`);
+      console.error(`[Config Error] File không tồn tại: ${configPath}`);
     }
   } catch (err) {
     console.error('[Config Error] Không thể đọc groups-config.json:', err.message);
   }
   return { accounts: [] };
+}
+
+function saveConfig(config) {
+  try {
+    const configPath = resolveGroupsConfigPath();
+    const dir = path.dirname(configPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    console.log(`[Config] Đã lưu thành công groups-config.json tại: ${configPath}`);
+  } catch (err) {
+    console.error('[Config Error] Không thể lưu groups-config.json:', err.message);
+  }
 }
 
 function getChromeExecutable() {
