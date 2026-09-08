@@ -33,15 +33,11 @@ function assertGenerateRequest(body) {
     throw new Error('prompt must be a non-empty string');
   }
   if (body.action === 'publish_facebook_page') {
-    const fanpageConfig = loadFanpageConfig();
-    // LUÔN LUÔN ƯU TIÊN LẤY LINK TRỰC TIẾP TỪ DASHBOARD (fanpage-config.json)
-    const dashboardUrl = fanpageConfig.pageUrl || (fanpageConfig.accounts && fanpageConfig.accounts.find(a => a.enabled !== false)?.pageUrl) || (fanpageConfig.accounts && fanpageConfig.accounts[0]?.pageUrl);
-    const targetUrl = dashboardUrl || (body.pageUrl && typeof body.pageUrl === 'string' && body.pageUrl.startsWith('https://www.facebook.com/') ? body.pageUrl.trim() : 'https://www.facebook.com/');
-
-    if (!targetUrl.startsWith('https://www.facebook.com/')) {
-      throw new Error('pageUrl không hợp lệ hoặc chưa được cấu hình đúng trên Dashboard');
+    const allAccounts = loadFanpageAccounts();
+    const enabledAccounts = allAccounts.filter((a) => a.enabled !== false);
+    if (enabledAccounts.length === 0 && !body.pageUrl) {
+      throw new Error('Chưa có tài khoản Fanpage nào được bật trên Dashboard');
     }
-    body.pageUrl = targetUrl;
 
     const captionText = facebookCaption(body.caption);
     if (!captionText) {
@@ -153,28 +149,37 @@ function resolveConfigFile(filename, exampleFilename) {
 const CONFIG_CHATGPT_PATH = resolveConfigFile('chatgpt-config.json', 'chatgpt-config.example.json');
 const CONFIG_FANPAGE_PATH = resolveConfigFile('fanpage-config.json', 'fanpage-config.example.json');
 
-function loadFanpageConfig() {
+function loadFanpageAccounts() {
   try {
     if (fs.existsSync(CONFIG_FANPAGE_PATH)) {
       const parsed = JSON.parse(fs.readFileSync(CONFIG_FANPAGE_PATH, 'utf-8'));
       if (parsed && typeof parsed === 'object') {
         if (Array.isArray(parsed.accounts) && parsed.accounts.length > 0) {
-          const active = parsed.accounts.find((a) => a.enabled !== false) || parsed.accounts[0];
-          return active;
+          return parsed.accounts;
         }
-        return parsed;
+        if (parsed.pageUrl) {
+          return [parsed];
+        }
       }
     }
   } catch (err) {
     console.error('[Fanpage Config Error]', err.message);
   }
-  return {
-    name: 'Facebook Fanpage Chính',
-    pageUrl: 'https://www.facebook.com/',
-    profileDir: 'n8n-chatgpt-profile',
-    port: 9222,
-    enabled: true,
-  };
+  return [
+    {
+      id: 1,
+      name: 'Facebook Fanpage Chính',
+      pageUrl: 'https://www.facebook.com/',
+      profileDir: 'n8n-chatgpt-profile',
+      port: 9222,
+      enabled: true,
+    },
+  ];
+}
+
+function loadFanpageConfig() {
+  const accounts = loadFanpageAccounts();
+  return accounts.find((a) => a.enabled !== false) || accounts[0];
 }
 
 function loadChatGptAccounts() {
@@ -207,8 +212,8 @@ async function isPortReady(targetPort) {
   }
 }
 
-/** Tự động bật Chrome cho tài khoản ChatGPT tương ứng nếu chưa chạy. */
-async function ensureChromeForGpt(account) {
+/** Tự động bật Chrome cho tài khoản ChatGPT / Fanpage tương ứng nếu chưa chạy. */
+async function ensureChromeForGpt(account, defaultUrl = 'https://chatgpt.com/') {
   const targetPort = account.port;
   if (await isPortReady(targetPort)) return `http://127.0.0.1:${targetPort}`;
 
@@ -223,7 +228,7 @@ async function ensureChromeForGpt(account) {
       `--remote-debugging-port=${targetPort}`,
       `--user-data-dir=${profilePath}`,
       '--start-maximized',
-      'https://chatgpt.com/',
+      defaultUrl,
     ],
     { detached: true, stdio: 'ignore' },
   ).unref();
@@ -233,12 +238,12 @@ async function ensureChromeForGpt(account) {
   while (Date.now() < deadline) {
     await delay(1500);
     if (await isPortReady(targetPort)) {
-      console.log(`[Chrome] Cửa sổ Chrome ${account.name} đã sẵn sàng trên cổng ${targetPort}. Chờ 8s load...`);
-      await delay(8000);
+      console.log(`[Chrome] Cửa sổ Chrome ${account.name} đã sẵn sàng trên cổng ${targetPort}. Chờ 5s load...`);
+      await delay(5000);
       return `http://127.0.0.1:${targetPort}`;
     }
   }
-  throw new Error(`Chrome không khởi động được trên cổng ${targetPort} cho ${account.name}. Hãy chạy open-setup-chatgpt.ps1 để kiểm tra.`);
+  throw new Error(`Chrome không khởi động được trên cổng ${targetPort} cho ${account.name}. Hãy kiểm tra xem tài khoản đã được thiết lập chưa.`);
 }
 
 async function openChatGptPage(account, { newConversation = false } = {}) {
@@ -266,20 +271,20 @@ async function openChatGptPage(account, { newConversation = false } = {}) {
   return { browser, page };
 }
 
-async function openFacebookPage(pageUrl) {
-  const fanpageConfig = loadFanpageConfig();
-  const targetUrl = pageUrl || fanpageConfig.pageUrl || (fanpageConfig.accounts && fanpageConfig.accounts[0]?.pageUrl) || 'https://www.facebook.com/';
+async function openFacebookPage(account, pageUrl) {
+  const targetUrl = pageUrl || account?.pageUrl || 'https://www.facebook.com/';
   const fbAccount = {
-    name: fanpageConfig.name || (fanpageConfig.accounts && fanpageConfig.accounts[0]?.name) || 'Facebook Fanpage',
-    profileDir: fanpageConfig.profileDir || (fanpageConfig.accounts && fanpageConfig.accounts[0]?.profileDir) || 'n8n-chatgpt-profile',
-    port: fanpageConfig.port || (fanpageConfig.accounts && fanpageConfig.accounts[0]?.port) || 9222,
+    name: account?.name || 'Facebook Fanpage',
+    profileDir: account?.profileDir || 'n8n-chatgpt-profile',
+    port: account?.port || 9222,
+    pageUrl: targetUrl,
   };
-  const cdpUrl = await ensureChromeForGpt(fbAccount);
+  const cdpUrl = await ensureChromeForGpt(fbAccount, targetUrl);
   let browser;
   try {
     browser = await chromium.connectOverCDP(cdpUrl);
   } catch {
-    throw new Error('Chrome is not ready on port ' + fbAccount.port + '. Sign in to Facebook in the Chrome window.');
+    throw new Error(`Chrome không sẵn sàng trên cổng ${fbAccount.port} cho ${fbAccount.name}. Hãy chắc chắn Chrome đang mở và đã đăng nhập Facebook.`);
   }
   const context = browser.contexts()[0];
   if (!context) throw new Error('Chrome has no browser context');
@@ -291,13 +296,13 @@ async function openFacebookPage(pageUrl) {
   }
 
   // Luôn điều hướng trực tiếp đến đúng URL Fanpage cấu hình từ Dashboard
-  console.log(`[Fanpage Bridge] Đang truy cập thẳng vào link Fanpage Dashboard: ${targetUrl}`);
+  console.log(`[Fanpage Bridge] [${fbAccount.name}] Đang truy cập thẳng vào link Fanpage: ${targetUrl}`);
   await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await delay(3000);
 
   await page.bringToFront();
   if (page.url().includes('/login')) {
-    throw new Error('Facebook is not signed in in the controlled Chrome profile. Sign in once, then retry.');
+    throw new Error(`Tài khoản ${fbAccount.name} chưa đăng nhập Facebook trên profile ${fbAccount.profileDir}.`);
   }
   return { browser, page };
 }
@@ -420,13 +425,12 @@ async function clickDialogActionButton(page) {
   return null;
 }
 
-async function publishFacebookPage({ pageUrl, caption, imageBase64, mimeType = 'image/png', fileName = 'image.png' }) {
-  const fanpageConfig = loadFanpageConfig();
-  const targetPageUrl = (pageUrl && typeof pageUrl === 'string' && pageUrl.startsWith('https://www.facebook.com/'))
-    ? pageUrl.trim()
-    : (fanpageConfig.pageUrl || 'https://www.facebook.com/');
-  console.log(`[Fanpage Server 3001] Đang xuất bản bài viết lên Fanpage (${targetPageUrl})...`);
-  const { browser, page } = await openFacebookPage(targetPageUrl);
+async function publishSingleFacebookPage(account, { caption, imageBase64, mimeType = 'image/png', fileName = 'image.png' }) {
+  const targetPageUrl = (account?.pageUrl && typeof account.pageUrl === 'string' && account.pageUrl.startsWith('https://www.facebook.com/'))
+    ? account.pageUrl.trim()
+    : 'https://www.facebook.com/';
+  console.log(`[Fanpage Server 3001] Đang xuất bản bài viết lên Fanpage: "${account.name}" (${targetPageUrl}) trên cổng ${account.port}...`);
+  const { browser, page } = await openFacebookPage(account, targetPageUrl);
   try {
     await handleFacebookCtaPopup(page);
 
@@ -491,7 +495,7 @@ async function publishFacebookPage({ pageUrl, caption, imageBase64, mimeType = '
     }
 
     if (!composer) {
-      throw new Error('Không tìm thấy ô nhập nội dung bài viết trên Fanpage.');
+      throw new Error(`Không tìm thấy ô nhập nội dung bài viết trên Fanpage "${account.name}".`);
     }
 
     await composer.click({ force: true });
@@ -521,7 +525,7 @@ async function publishFacebookPage({ pageUrl, caption, imageBase64, mimeType = '
     await delay(5000);
 
     // Tiến hành bấm Tiếp -> (Thêm nút nếu có) -> Đăng
-    console.log('Bắt đầu quy trình bấm Tiếp và Đăng bài viết...');
+    console.log(`[Fanpage Server 3001] [${account.name}] Bắt đầu quy trình bấm Tiếp và Đăng bài viết...`);
     const publishDeadline = Date.now() + 60000;
     while (Date.now() < publishDeadline) {
       await delay(1500);
@@ -529,7 +533,7 @@ async function publishFacebookPage({ pageUrl, caption, imageBase64, mimeType = '
       // Kiểm tra xem dialog có còn mở không
       const activeDialog = page.locator('[role="dialog"]').last();
       if (!(await activeDialog.count()) || !(await activeDialog.isVisible())) {
-        console.log('Hộp thoại Đăng bài đã đóng hoàn toàn (Facebook xuất bản thành công).');
+        console.log(`[Fanpage Server 3001] [${account.name}] Hộp thoại Đăng bài đã đóng hoàn toàn (Facebook xuất bản thành công).`);
         break;
       }
 
@@ -538,14 +542,111 @@ async function publishFacebookPage({ pageUrl, caption, imageBase64, mimeType = '
     }
 
     // Chờ thêm buffer an toàn để Facebook hoàn tất ghi dữ liệu
-    console.log('Chờ thêm 8 giây để đảm bảo bài viết đã lên sóng 100%...');
+    console.log(`[Fanpage Server 3001] [${account.name}] Chờ thêm 8 giây để đảm bảo bài viết đã lên sóng 100%...`);
     await delay(8000);
 
-    console.log('Đăng bài Facebook hoàn tất! Giữ nguyên tab Facebook trên trình duyệt.');
-    return { ok: true, source: 'facebook-web', pageUrl, publishedAt: new Date().toISOString() };
+    console.log(`[Fanpage Server 3001] [${account.name}] Đăng bài Fanpage hoàn tất!`);
+    return { ok: true, source: 'facebook-web', account: account.name, pageUrl: targetPageUrl, publishedAt: new Date().toISOString() };
   } finally {
-    await browser.close(); // Ngắt kết nối CDP, giữ nguyên tab Facebook và Chrome vẫn mở
+    try {
+      await browser.close(); // Ngắt kết nối CDP, giữ nguyên tab Facebook và Chrome vẫn mở
+    } catch {}
   }
+}
+
+async function publishFacebookPage(body) {
+  const allAccounts = loadFanpageAccounts();
+  let targetAccounts = allAccounts.filter((a) => a.enabled !== false);
+
+  // Nếu request chỉ định rõ accountId cụ thể
+  if (body.accountId) {
+    const specific = allAccounts.find((a) => String(a.id) === String(body.accountId));
+    if (specific) targetAccounts = [specific];
+  } else if (body.pageUrl && typeof body.pageUrl === 'string' && !allAccounts.some(a => a.pageUrl === body.pageUrl)) {
+    // Nếu truyền một pageUrl cụ thể không nằm trong danh sách
+    targetAccounts = [{
+      id: 999,
+      name: 'Facebook Fanpage',
+      pageUrl: body.pageUrl.trim(),
+      profileDir: allAccounts[0]?.profileDir || 'n8n-chatgpt-profile',
+      port: allAccounts[0]?.port || 9222,
+      enabled: true,
+    }];
+  }
+
+  if (targetAccounts.length === 0) {
+    throw new Error('Không có tài khoản Fanpage nào đang Bật để đăng bài.');
+  }
+
+  console.log(`[Fanpage Server 3001] Bắt đầu đăng bài lên ${targetAccounts.length} tài khoản Fanpage...`);
+  const successList = [];
+  const errorList = [];
+
+  for (let i = 0; i < targetAccounts.length; i++) {
+    const acc = targetAccounts[i];
+    const accStartTime = Date.now();
+    console.log(`\n======================================================`);
+    console.log(`[Fanpage Server 3001] [${i + 1}/${targetAccounts.length}] Đang xuất bản lên Fanpage: "${acc.name}" (Port ${acc.port})`);
+    console.log(`======================================================`);
+
+    try {
+      const res = await publishSingleFacebookPage(acc, body);
+      successList.push({
+        account: acc.name,
+        pageUrl: acc.pageUrl,
+        publishedAt: res.publishedAt,
+      });
+
+      logPostActivity({
+        type: 'post',
+        channel: 'fanpage',
+        channelName: acc.name || 'Facebook Fanpage',
+        targetUrl: acc.pageUrl,
+        status: 'success',
+        caption: body.caption,
+        durationMs: Date.now() - accStartTime,
+      });
+
+      // Nếu còn Fanpage tiếp theo, chờ 5 giây trước khi chuyển tài khoản
+      if (i < targetAccounts.length - 1) {
+        console.log(`[Fanpage Server 3001] Chờ 5 giây trước khi chuyển sang Fanpage tiếp theo...`);
+        await delay(5000);
+      }
+    } catch (err) {
+      console.error(`[Fanpage Server 3001] Lỗi khi đăng Fanpage "${acc.name}":`, err.message);
+      errorList.push({
+        account: acc.name,
+        pageUrl: acc.pageUrl,
+        error: err.message,
+      });
+
+      logPostActivity({
+        type: 'post',
+        channel: 'fanpage',
+        channelName: acc.name || 'Facebook Fanpage',
+        targetUrl: acc.pageUrl,
+        status: 'failed',
+        caption: body.caption,
+        error: err.message,
+        durationMs: Date.now() - accStartTime,
+      });
+    }
+  }
+
+  if (successList.length === 0 && errorList.length > 0) {
+    throw new Error(`Đăng bài Fanpage thất bại trên tất cả ${targetAccounts.length} tài khoản: ${errorList.map(e => `${e.account}: ${e.error}`).join('; ')}`);
+  }
+
+  return {
+    ok: true,
+    source: 'facebook-web',
+    total: targetAccounts.length,
+    successCount: successList.length,
+    failedCount: errorList.length,
+    successList,
+    errorList,
+    publishedAt: new Date().toISOString(),
+  };
 }
 
 async function promptBox(page) {
@@ -1233,12 +1334,14 @@ async function generateImage(params) {
 app.get('/health', async (_request, response) => {
   const accounts = loadChatGptAccounts();
   const fanpage = loadFanpageConfig();
+  const fanpageAccounts = loadFanpageAccounts();
   response.json({
     ok: true,
     status: 'online',
     server: 'server.mjs (Fanpage & ChatGPT Xen Kẽ)',
     port,
     fanpage,
+    fanpageAccounts,
     accounts,
   });
 });
@@ -1262,15 +1365,6 @@ app.post('/generate', async (request, response) => {
       result = await captureLatestImage(request.body.account);
     } else if (request.body.action === 'publish_facebook_page') {
       result = await publishFacebookPage(request.body);
-      logPostActivity({
-        type: 'post',
-        channel: 'fanpage',
-        channelName: 'Facebook Fanpage',
-        targetUrl: request.body.pageUrl,
-        status: 'success',
-        caption: request.body.caption,
-        durationMs: Date.now() - startTime,
-      });
     } else {
       result = await generateImage(request.body);
       logPostActivity({
