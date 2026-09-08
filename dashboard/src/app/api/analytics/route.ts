@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(10, parseInt(searchParams.get('limit') || '50', 10)));
 
-    let allEntries = getHistoryData();
+    const allEntries = getHistoryData();
 
     // 1. Tính toán thống kê tổng hợp (toàn diện trước khi lọc phân trang)
     const total = allEntries.length;
@@ -115,6 +115,10 @@ export async function GET(req: NextRequest) {
           cleanReason = 'Giao diện Facebook thay đổi / không tìm thấy nút đính kèm ảnh';
         } else if (cleanReason.includes('Chrome is not ready') || cleanReason.includes('chưa đăng nhập') || cleanReason.includes('cổng')) {
           cleanReason = 'Chrome Profile chưa đăng nhập Facebook / ChatGPT';
+        } else if (cleanReason.includes('Timeout') || cleanReason.includes('timeout')) {
+          cleanReason = 'Hết thời gian chờ (Timeout 30s) trên Facebook';
+        } else if (cleanReason.includes('browser has been closed') || cleanReason.includes('Target page')) {
+          cleanReason = 'Trình duyệt Chrome bị đóng đột ngột';
         }
         errorReasonMap[cleanReason] = (errorReasonMap[cleanReason] || 0) + 1;
       }
@@ -129,6 +133,10 @@ export async function GET(req: NextRequest) {
           suggestion = 'Bật cả 2 tài khoản ChatGPT trên Dashboard để tự động luân phiên hoặc chờ hết giờ giới hạn.';
         } else if (reason.includes('đăng nhập')) {
           suggestion = 'Nhấn nút "Mở Chrome Profile" tương ứng trên Dashboard để đăng nhập tài khoản một lần.';
+        } else if (reason.includes('Timeout')) {
+          suggestion = 'Kiểm tra kết nối mạng hoặc mở Profile Chrome xem giao diện Facebook có bị chặn/treo không.';
+        } else if (reason.includes('đóng đột ngột')) {
+          suggestion = 'Đảm bảo không tắt thủ công cửa sổ Chrome tự động trong khi hệ thống đang chạy.';
         }
         return { reason, count, suggestion };
       })

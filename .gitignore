@@ -4,14 +4,25 @@ npm-debug.log*
 pnpm-debug.log*
 package-lock.json
 *.log
-dashboard/*.log
+*/*.log
+**/*.log
+*-err.log
+**/*-err.log
 *.docx
 __pycache__/
 *.pyc
+temp_*.png
+test_*.png
+screenshot_*.png
+error_*.png
+.env
+.env.local
 
-# Mỗi máy tự cấu hình và lưu lịch sử riêng qua Dashboard - KHÔNG commit vào Git
+# Cấu hình cá nhân & Lịch sử đăng bài (mỗi máy tự lưu riêng biệt, tuyệt đối không đẩy lên Git)
+configs/*.json
+!configs/*.example.json
 *-config.json
-configs/*-config.json
-!configs/*-config.example.json
-configs/post-history.json
+!*-config.example.json
 post-history.json
+configs/post-history.json
+

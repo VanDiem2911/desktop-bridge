@@ -48,6 +48,22 @@ export const GROUPS_CONFIG_PATH = resolveConfigPath('groups-config.json', 'group
 export const PERSONAL_CONFIG_PATH = resolveConfigPath('personal-config.json', 'personal-config.example.json');
 export const CHATGPT_CONFIG_PATH = resolveConfigPath('chatgpt-config.json', 'chatgpt-config.example.json');
 export const FANPAGE_CONFIG_PATH = resolveConfigPath('fanpage-config.json', 'fanpage-config.example.json');
+export const BOT_CONFIG_PATH = resolveConfigPath('bot-config.json', 'bot-config.example.json');
+export const POST_HISTORY_PATH = path.join(BRIDGE_DIR, 'configs', 'post-history.json');
+
+export interface BotConfig {
+  botToken?: string;
+  chatId?: string;
+  allowedChatIds?: string[];
+  enableAlerts?: boolean;
+  enableDailyDigest?: boolean;
+  dailyDigestTime?: string;
+  alertOnServerDown?: boolean;
+  alertOnCheckpoint?: boolean;
+  alertOnJobError?: boolean;
+  checkIntervalSeconds?: number;
+}
+
 
 export function readJsonFile<T>(filePath: string, fallback: T): T {
   try {

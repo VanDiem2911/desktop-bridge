@@ -923,117 +923,82 @@ Respond ONLY with text in JSON format (no image, no markdown, no extra text):
 
 const DEFAULT_DU_REFERENCE_URL = 'https://res.cloudinary.com/dbwahdjzg/image/upload/v1786351452/4022ffed-ef18-4faf-bf7e-156716aa5d4e.png';
 
-// Phát hiện chủ đề từ nội dung prompt để chọn background phù hợp
-function detectTopicBackground(promptText) {
-  const text = promptText.toLowerCase();
+// 20 BACKGROUND NỔI BẬT ĐA DẠNG MÀU SẮC (Tím, Xanh nước biển, Lục bảo, Đỏ, Cyberpunk, 3D Luxury)
+const VIBRANT_BACKGROUNDS = [
+  // 1. Tím Neon Cyberpunk
+  'futuristic cyberpunk stage bathed in intense neon violet and electric purple lighting, glowing purple holographic geometry, dark glossy floor with vivid reflections, cinematic atmospheric purple fog',
+  // 2. Xanh Nước Biển Sapphire
+  'stunning deep ocean sapphire showroom with glowing electric blue and cyan light ribbons, sleek dark glass pedestal, immersive aquatic blue ambient glow, high-contrast cool atmosphere',
+  // 3. Lục Bảo Cao Cấp & Mint
+  'luxurious 3D digital gallery with deep emerald green and glowing mint neon accents, dark obsidian marble reflective floor, floating jade light crystals, premium modern aesthetic',
+  // 4. Đỏ Rực Cyberpunk & Ruby
+  'high-impact futuristic showroom bathed in dramatic crimson red and glowing ruby neon lighting, dark carbon-fiber textured panels, striking red rim lighting and sharp reflections',
+  // 5. Tím Midnight & Magenta
+  'luxurious midnight indigo studio with vibrant magenta and purple neon light tubes, floating frosted glass geometric prisms, deep amethyst backdrop, futuristic soft glow',
+  // 6. Xanh Băng Tuyết & Cyan
+  'cutting-edge futuristic stage with glowing ice blue neon pillars, sleek frosted glass architectural elements, clean minimalist deep cobalt and arctic cyan lighting',
+  // 7. Lục Bảo Sinh Học & Teal Garden
+  'breathtaking futuristic indoor bio-tech garden with glowing teal and emerald flora, sleek architectural glass arches, soft cyan and mint lighting, modern tech vibe',
+  // 8. Đỏ Scarlet & Đen Obsidian
+  'dramatic dark obsidian stage with glowing scarlet red neon light rings, floating red holographic geometric shapes, bold and energetic high-tech atmosphere',
+  // 9. Tím Vũ Trụ & Cosmic Matrix
+  'abstract 3D luxury stage with curved glossy purple panels, floating glowing violet rings, deep galaxy purple backdrop with shimmering starlight ambient glow',
+  // 10. Xanh Biển Điện Tử & Cobalt Matrix
+  'sleek dark cobalt blue virtual space with floating glowing neon cyan data nodes, interconnected digital light lines, futuristic technology showroom aesthetic',
+  // 11. Lục Bảo & Neon Mint Aqua
+  'futuristic high-tech lab with glowing neon emerald and bright mint green light strips, holographic matrix projections, dark charcoal metallic surfaces, vibrant green ambient glow',
+  // 12. Đỏ Ruby & Lưới Laser
+  'cutting-edge technology studio with glowing ruby red laser grid lines, floating glass panels, dark matte background with vivid crimson backlight and sleek reflections',
+  // 13. Tím Hoàng Hôn Penthouse
+  'dramatic high-tech penthouse terrace overlooking a glowing neon cyberpunk city at dusk, rich purple and neon violet glow, soft city bokeh lights, reflective glass railings',
+  // 14. Xanh Đại Dương Royal Blue
+  'futuristic high-tech digital studio bathed in electric royal blue and glowing cyan neon lighting, transparent holographic interfaces, sleek reflective floor, cool blue atmosphere',
+  // 15. Lục Bảo & Ngọc Bích Showroom
+  'modern digital showroom with deep teal and dark aqua tones, glowing mint neon light tubes, floating 3D geometric glass prisms, crisp emerald reflections',
+  // 16. Đỏ Năng Động & Lửa Neon
+  'energetic futuristic presentation stage with warm crimson red and glowing neon scarlet arches, sleek polished dark podium, dynamic cinematic lighting',
+  // 17. Tím Neon Laser Hologram
+  'sleek futuristic exhibition stage with glowing violet laser light grids, floating holographic data crystals, deep dark purple backdrop with neon purple accents',
+  // 18. Xanh Biển Pha Lê Sapphire
+  'sleek panoramic lounge overlooking a neon-lit futuristic city with glowing blue and cyan skyscrapers at night, polished dark marble surfaces, rich cool blue tones',
+  // 19. Lục Bảo Pha Lê 3D
+  'abstract 3D stage featuring floating glowing emerald crystals, neon mint ambient lighting, dark glossy floor reflecting vibrant green light',
+  // 20. Đỏ Cyber Metropolis
+  'futuristic urban terrace overlooking a neon red cyberpunk cityscape at night, glowing ruby billboards in background, sleek dark metal architecture, high-contrast glow',
+];
 
-  // Mỗi topic có 2 background options để vẫn còn chút đa dạng
-  const topicMap = [
-    {
-      keywords: ['website', 'landing page', 'ui', 'ux', 'frontend', 'web design', 'interface', 'mockup', 'wireframe'],
-      backgrounds: [
-        'elegant minimalist white studio with floating holographic UI screens and website wireframe projections, clean white surfaces, soft blue ambient glow, futuristic tech atmosphere',
-        'bright modern creative agency office with large monitor screens displaying website designs, sleek desk setup, soft daylight, professional and creative atmosphere',
-      ],
-    },
-    {
-      keywords: ['seo', 'marketing', 'ads', 'traffic', 'keyword', 'ranking', 'google', 'quảng cáo', 'tiếp thị', 'digital'],
-      backgrounds: [
-        'vibrant co-working creative studio with colorful accent walls, neon signs, laptop screens glowing with analytics dashboards, energetic and dynamic creative atmosphere',
-        'bright modern open-plan office with large screens showing graphs and SEO metrics, whiteboards with strategy notes, energetic startup vibe',
-      ],
-    },
-    {
-      keywords: ['crm', 'erp', 'phần mềm', 'software', 'quản lý', 'doanh nghiệp', 'enterprise', 'management', 'automation', 'hệ thống'],
-      backgrounds: [
-        'sleek corporate conference room with a large presentation screen showing CRM dashboards and business charts, dark wood table, professional warm lighting, executive atmosphere',
-        'bright modern glass-wall office interior with clean workstations, indoor plants, soft indoor daylight, city skyline visible through floor-to-ceiling windows',
-      ],
-    },
-    {
-      keywords: ['ai', 'artificial intelligence', 'chatbot', 'machine learning', 'automation', 'robot', 'trí tuệ nhân tạo', 'tự động'],
-      backgrounds: [
-        'futuristic eco-tech lab with glowing circuit board patterns on walls, holographic data streams, clean white and neon blue surfaces, advanced AI atmosphere',
-        'sleek modern server room with dramatic blue and cyan lighting, clean glass panels, floating holographic data visualizations, cutting-edge tech feel',
-      ],
-    },
-    {
-      keywords: ['doanh thu', 'revenue', 'lợi nhuận', 'profit', 'tài chính', 'finance', 'kế toán', 'accounting', 'báo cáo tài chính', 'tăng trưởng', 'growth'],
-      backgrounds: [
-        'elegant executive office with an upward-trending financial chart on a large wall screen, polished marble desk, warm golden lighting, sophisticated professional atmosphere',
-        'bright modern boardroom with floor-to-ceiling windows, financial graphs projected on screen, clean minimalist design, confident and prosperous feeling',
-      ],
-    },
-    {
-      keywords: ['tuyển dụng', 'nhân sự', 'hr', 'recruitment', 'team', 'nhân viên', 'employee', 'workforce', 'hiring'],
-      backgrounds: [
-        'bright open collaborative office space with diverse happy team working in background, warm natural light, plants and colorful accents, welcoming and energetic atmosphere',
-        'modern HR office with a warm reception area, smiling people, bright natural light, open plan design, inclusive and professional environment',
-      ],
-    },
-    {
-      keywords: ['ecommerce', 'thương mại điện tử', 'shop', 'bán hàng', 'sản phẩm', 'product', 'order', 'delivery', 'cart', 'online store'],
-      backgrounds: [
-        'bright vibrant product showroom with colorful merchandise displays, clean white shelving, warm accent lighting, modern retail aesthetic',
-        'modern ecommerce fulfillment center with bright lighting, organized shelves, clean white and orange color accents, energetic and efficient atmosphere',
-      ],
-    },
-    {
-      keywords: ['học', 'giáo dục', 'education', 'training', 'course', 'khóa học', 'tutorial', 'kỹ năng', 'skill', 'certificate', 'chứng chỉ'],
-      backgrounds: [
-        'bright airy modern library or e-learning studio with bookshelves, open laptop, warm reading light, calm and focused learning atmosphere',
-        'cheerful modern classroom with large windows, digital screens, plants on windowsills, motivational atmosphere for learning and growth',
-      ],
-    },
-    {
-      keywords: ['tết', 'lễ', 'festival', 'holiday', 'seasonal', 'truyền thống', 'traditional', 'vietnamese culture', 'đèn lồng', 'hoa đào', 'trung thu'],
-      backgrounds: [
-        'festive outdoor Vietnamese street scene with colorful silk lanterns, blooming peach blossom trees, warm golden evening glow, joyful cultural celebration atmosphere',
-        'elegant traditional Vietnamese courtyard with red lanterns, white flowers, candles, and decorative cultural elements, warm and festive ambiance',
-      ],
-    },
-    {
-      keywords: ['sức khỏe', 'health', 'wellness', 'clinic', 'bệnh viện', 'hospital', 'medical', 'spa', 'fitness', 'yoga'],
-      backgrounds: [
-        'clean modern wellness clinic interior with white and mint green palette, soft natural light, fresh potted plants, calm and trustworthy healing atmosphere',
-        'bright airy spa or wellness studio with bamboo accents, white linen, soft green foliage, natural light, serene and rejuvenating atmosphere',
-      ],
-    },
-  ];
+// Bộ đếm xoay vòng tuần tự để xen kẽ 100% không trùng lặp bối cảnh
+let currentBgIndex = Math.floor(Math.random() * VIBRANT_BACKGROUNDS.length);
+let currentLayoutIndex = Math.floor(Math.random() * 5);
+let currentPoseIndex = Math.floor(Math.random() * 7);
 
-  // Tìm topic khớp với nhiều keywords nhất
-  let bestMatch = null;
-  let bestScore = 0;
-  for (const topic of topicMap) {
-    const score = topic.keywords.filter(kw => text.includes(kw)).length;
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = topic;
-    }
-  }
-
-  // Fallback nếu không khớp topic nào
-  const fallbackBackgrounds = [
-    'bright modern glass-wall office interior with indoor plants, clean workstation, soft indoor daylight, city skyline visible through floor-to-ceiling windows',
-    'warm airy tropical café with rattan furniture, white walls, potted monstera plants, golden morning sunlight streaming through large windows',
-    'bright open rooftop garden terrace at golden hour, lush greenery planters, city skyline blurred in background, warm sunset tones',
-  ];
-
-  const pool = bestMatch ? bestMatch.backgrounds : fallbackBackgrounds;
-  const chosen = pool[Math.floor(Math.random() * pool.length)];
-  const topicName = bestScore > 0 ? `(matched ${bestScore} keywords)` : '(no match → fallback)';
-  console.log(`[Topic Detection] ${topicName}`);
-  return chosen;
+function getNextBackground() {
+  const bg = VIBRANT_BACKGROUNDS[currentBgIndex % VIBRANT_BACKGROUNDS.length];
+  const bgNumber = (currentBgIndex % VIBRANT_BACKGROUNDS.length) + 1;
+  currentBgIndex = (currentBgIndex + 1) % VIBRANT_BACKGROUNDS.length;
+  return { bg, bgNumber };
 }
 
-// Layout và pose vẫn random để đa dạng bố cục, background khớp chủ đề
-// hasDu = true: Workflow giờ chẵn (có Du) | hasDu = false: Workflow giờ lẻ (người thật photorealistic)
+function getNextLayout(layouts) {
+  const layout = layouts[currentLayoutIndex % layouts.length];
+  const layoutNumber = (currentLayoutIndex % layouts.length) + 1;
+  currentLayoutIndex = (currentLayoutIndex + 1) % layouts.length;
+  return { layout, layoutNumber };
+}
+
+function getNextPose(poses) {
+  const pose = poses[currentPoseIndex % poses.length];
+  const poseNumber = (currentPoseIndex % poses.length) + 1;
+  currentPoseIndex = (currentPoseIndex + 1) % poses.length;
+  return { pose, poseNumber };
+}
+
+// Layout, Pose và Background xoay vòng xen kẽ (Tím -> Xanh biển -> Lục bảo -> Đỏ -> ...)
 function pickVariation(promptText = '', hasDu = true) {
-  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
-  const bg = detectTopicBackground(promptText);
+  const { bg, bgNumber } = getNextBackground();
 
   if (!hasDu) {
-    // Workflow Giờ Lẻ: NGƯỜI THẬT PHOTOREALISTIC, BỐ CỤC ĐA DẠNG KHÔNG LẶP LAI, FULL BLEED BG
+    // Workflow Giờ Lẻ: NGƯỜI THẬT PHOTOREALISTIC, BỐ CỤC ĐA DẠNG KHÔNG LẶP LẠI, FULL BLEED BG
     const humanLayouts = [
       'FULL-BLEED SCENE WITH SOFT CURVED OVERLAY CARD (Right): Environmental background spans 100% full-bleed. A sleek semi-transparent white frosted glass panel with smooth curved edges rests on the RIGHT side (50% width), containing all headline text. A photorealistic Vietnamese professional model stands on the LEFT side.',
 
@@ -1056,10 +1021,10 @@ function pickVariation(promptText = '', hasDu = true) {
       'standing near floating holographic UI dashboards, interacting with data graphics with one hand',
     ];
 
-    const layout = pick(humanLayouts);
-    const pose = pick(humanPoses);
+    const { layout, layoutNumber } = getNextLayout(humanLayouts);
+    const { pose, poseNumber } = getNextPose(humanPoses);
 
-    console.log(`[Variation] Human Model Layout: ${humanLayouts.indexOf(layout)+1}/5 | Pose: ${humanPoses.indexOf(pose)+1}/7 | BG: topic-matched`);
+    console.log(`[Variation] Human Model Layout: ${layoutNumber}/${humanLayouts.length} | Pose: ${poseNumber}/${humanPoses.length} | BG: #${bgNumber}/20 (Xoay vòng xen kẽ)`);
     return [
       '⚠️ MANDATORY COMPOSITION OVERRIDE — YOU MUST FOLLOW THIS EXACTLY:',
       '1. BACKGROUND: The environmental background scene MUST be FULL-BLEED, spanning 100% of the entire image canvas corner-to-corner (no solid split color panels cutting the background).',
@@ -1098,10 +1063,10 @@ function pickVariation(promptText = '', hasDu = true) {
     'leaning forward slightly with one hand raised in a friendly wave gesture',
   ];
 
-  const layout = pick(duLayouts);
-  const pose = pick(duPoses);
+  const { layout, layoutNumber } = getNextLayout(duLayouts);
+  const { pose, poseNumber } = getNextPose(duPoses);
 
-  console.log(`[Variation] Du Layout: ${duLayouts.indexOf(layout)+1}/5 | Pose: ${duPoses.indexOf(pose)+1}/7 | BG: topic-matched`);
+  console.log(`[Variation] Du Layout: ${layoutNumber}/${duLayouts.length} | Pose: ${poseNumber}/${duPoses.length} | BG: #${bgNumber}/20 (Xoay vòng xen kẽ)`);
 
   return [
     '⚠️ MANDATORY COMPOSITION OVERRIDE — YOU MUST FOLLOW THIS EXACTLY:',

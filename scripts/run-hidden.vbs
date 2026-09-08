@@ -24,3 +24,6 @@ sh.Run "cmd /c cd /d """ & bridgeDir & """ && node """ & bridgeDir & "\group-ser
 
 ' Server 3: Facebook Trang Ca Nhan & ChatGPT Rieng (port 3003)
 sh.Run "cmd /c cd /d """ & bridgeDir & """ && node """ & bridgeDir & "\personal-server.mjs"" >> """ & bridgeDir & "\personal-server.log"" 2>&1", 0, False
+
+' Server 4: Telegram Bot & Remote Watchdog (port 3004)
+sh.Run "cmd /c cd /d """ & bridgeDir & """ && node """ & bridgeDir & "\bot-server.mjs"" >> """ & bridgeDir & "\bot-server.log"" 2>&1", 0, False

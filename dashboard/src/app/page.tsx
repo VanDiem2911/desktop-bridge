@@ -39,6 +39,11 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Maximize2,
+  Database,
+  Shuffle,
+  XCircle,
+  RotateCcw,
 } from 'lucide-react';
 
 interface HistoryEntry {
@@ -130,13 +135,150 @@ interface GroupAccount {
   groupUrls?: string[];
 }
 
+interface CentralPoolItem {
+  id: string;
+  url: string;
+  name?: string;
+  addedAt: string;
+  assignedAccountId?: string | null;
+  assignedAccountName?: string | null;
+  joinedStatus?: 'joined' | 'pending' | 'not_joined' | 'unknown';
+  joinedUpdatedAt?: string;
+  lastPostStatus?: 'success' | 'failed' | 'not_posted';
+  lastPostError?: string | null;
+  lastPostedAt?: string | null;
+}
+
+function parseErrorMessage(rawError?: string | null): {
+  summary: string;
+  suggestion?: string;
+  technicalDetails?: string;
+  raw: string;
+} {
+  if (!rawError) return { summary: 'Không có thông tin lỗi', raw: '' };
+
+  // Loại bỏ mã màu ANSI và escape sequences (ví dụ: [2m, [22m, \u001b[...m)
+  const clean = String(rawError)
+    .replace(/\u001b\[[0-9;]*[a-zA-Z]/g, '')
+    .replace(/\[\d+m/g, '')
+    .trim();
+
+  let mainError = clean;
+  let technicalDetails = '';
+
+  // Tách Call log hoặc stack trace nếu có
+  if (clean.includes('Call log:')) {
+    const parts = clean.split('Call log:');
+    mainError = parts[0].trim();
+    technicalDetails = 'Call log:\n' + parts.slice(1).join('Call log:').trim();
+  } else if (clean.includes('=========================== logs ===========================')) {
+    const parts = clean.split('=========================== logs ===========================');
+    mainError = parts[0].trim();
+    technicalDetails = parts.slice(1).join('').trim();
+  } else if (clean.includes('\n')) {
+    const lines = clean.split('\n').map((l) => l.trim()).filter(Boolean);
+    mainError = lines[0] || clean;
+    if (lines.length > 1) {
+      technicalDetails = lines.slice(1).join('\n');
+    }
+  }
+
+  let summary = mainError;
+  let suggestion = '';
+
+  if (/timeout.*exceeded/i.test(mainError)) {
+    summary = 'Hết thời gian chờ (Timeout 30s): Facebook phản hồi chậm hoặc không tìm thấy nút bấm tương tác.';
+    suggestion = 'Vui lòng kiểm tra lại đường truyền mạng hoặc bấm nút "Mở Chrome Profile" của tài khoản để kiểm tra giao diện Facebook.';
+  } else if (/Target page, context or browser has been closed/i.test(mainError)) {
+    summary = 'Cửa sổ Chrome bị đóng đột ngột trong khi đang thực hiện tác vụ.';
+    suggestion = 'Đảm bảo không tắt thủ công cửa sổ Chrome tự động và không có tiến trình nào can thiệp kill Chrome.';
+  } else if (/chưa tham gia nhóm|phê duyệt/i.test(mainError)) {
+    summary = 'Tài khoản chưa tham gia nhóm này hoặc nhóm đang yêu cầu Quản trị viên duyệt thành viên.';
+    suggestion = 'Bấm "Mở Chrome Profile" của tài khoản, truy cập nhóm và ấn Tham gia / trả lời câu hỏi của quản trị viên trước.';
+  } else if (/Rate limit|Quota Exceeded|giới hạn/i.test(mainError)) {
+    summary = 'Tài khoản ChatGPT đã đạt giới hạn quota tạo ảnh hoặc bị rate limit.';
+    suggestion = 'Bật cả 2 tài khoản ChatGPT trên Dashboard để tự động luân phiên hoặc chờ qua khung giờ giới hạn.';
+  } else if (/Chrome is not ready|chưa đăng nhập|net::ERR_CONNECTION_REFUSED/i.test(mainError)) {
+    summary = 'Không thể kết nối đến Chrome Profile (Cổng bị ngắt kết nối hoặc chưa đăng nhập).';
+    suggestion = 'Kiểm tra trạng thái server, khởi động lại hệ thống hoặc mở Chrome Profile để đăng nhập lại tài khoản.';
+  } else if (/không tìm thấy ô upload|không tìm thấy ô đăng bài/i.test(mainError)) {
+    summary = 'Không tìm thấy khung soạn thảo hoặc nút đính kèm ảnh trên Facebook.';
+    suggestion = 'Giao diện trang Facebook có thể đã đổi sang mẫu mới. Thử mở Chrome Profile để xem trạng thái trang.';
+  }
+
+  return { summary, suggestion, technicalDetails, raw: clean };
+}
+
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'accounts' | 'groups' | 'quick-post'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'accounts' | 'groups' | 'quick-post' | 'bot'>('overview');
   const [status, setStatus] = useState<ServerStatus | null>(null);
+
+  // Telegram Bot & Watchdog State
+  const [botConfig, setBotConfig] = useState({
+    botToken: '',
+    chatId: '',
+    allowedChatIds: [] as string[],
+    enableAlerts: true,
+    enableDailyDigest: true,
+    dailyDigestTime: '22:00',
+    alertOnServerDown: true,
+    alertOnCheckpoint: true,
+    alertOnJobError: true,
+    checkIntervalSeconds: 30,
+  });
+  const [isBotRunning, setIsBotRunning] = useState<boolean>(false);
+  const [botLoading, setBotLoading] = useState<boolean>(false);
+  const [botTesting, setBotTesting] = useState<boolean>(false);
+  const [showTokenSecret, setShowTokenSecret] = useState<boolean>(false);
+  const [botInfo, setBotInfo] = useState<{ username?: string; firstName?: string } | null>(null);
   const [accounts, setAccounts] = useState<AccountCategory[]>([]);
-  const [groupsData, setGroupsData] = useState<{ accounts: GroupAccount[] }>({ accounts: [] });
+  const [groupsData, setGroupsData] = useState<{ accounts: GroupAccount[]; centralPool?: CentralPoolItem[] }>({ accounts: [], centralPool: [] });
+  const [poolStats, setPoolStats] = useState<{
+    total: number;
+    assigned: number;
+    unassigned: number;
+    postedSuccess: number;
+    postedFailed: number;
+    notPosted: number;
+    joined: number;
+    pending: number;
+    notJoined: number;
+  }>({
+    total: 0,
+    assigned: 0,
+    unassigned: 0,
+    postedSuccess: 0,
+    postedFailed: 0,
+    notPosted: 0,
+    joined: 0,
+    pending: 0,
+    notJoined: 0,
+  });
+
+  const [groupViewMode, setGroupViewMode] = useState<'pool' | 'by_account'>('pool');
   const [selectedGroupAcc, setSelectedGroupAcc] = useState<string>('acc_1');
   const [groupSearch, setGroupSearch] = useState<string>('');
+
+  // Kho chung Filter & Modal state
+  const [poolSearch, setPoolSearch] = useState('');
+  const [poolFilterAccount, setPoolFilterAccount] = useState<string>('all');
+  const [poolFilterPostStatus, setPoolFilterPostStatus] = useState<string>('all');
+  const [poolFilterJoinStatus, setPoolFilterJoinStatus] = useState<string>('all');
+
+  const [isPoolImportOpen, setIsPoolImportOpen] = useState(false);
+  const [poolImportText, setPoolImportText] = useState('');
+  const [poolImportAutoDistribute, setPoolImportAutoDistribute] = useState(false);
+  const [poolImportAssignAcc, setPoolImportAssignAcc] = useState<string>('');
+
+  const [isDistributeModalOpen, setIsDistributeModalOpen] = useState(false);
+  const [distributeMode, setDistributeMode] = useState<'unassigned_only' | 'all'>('unassigned_only');
+  const [distributeSelectedAccs, setDistributeSelectedAccs] = useState<string[]>([]);
+  const [distributeLoading, setDistributeLoading] = useState(false);
+  const [isRevokeModalOpen, setIsRevokeModalOpen] = useState(false);
+  const [revokeMode, setRevokeMode] = useState<'unposted_only' | 'all'>('unposted_only');
+  const [revokeTargetAcc, setRevokeTargetAcc] = useState<string>('all');
+  const [revokeLoading, setRevokeLoading] = useState(false);
+  const [viewingGroupError, setViewingGroupError] = useState<{ url: string; error: string } | null>(null);
 
   // Analytics & History state
   const [analyticsData, setAnalyticsData] = useState<{
@@ -152,6 +294,7 @@ export default function DashboardPage() {
   const [analyticsPage, setAnalyticsPage] = useState(1);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<HistoryEntry | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [viewingErrorItem, setViewingErrorItem] = useState<HistoryEntry | null>(null);
   
   // Modals state - ChatGPT Accounts
   const [isAddChatGptOpen, setIsAddChatGptOpen] = useState(false);
@@ -264,6 +407,7 @@ export default function DashboardPage() {
       const data = await res.json();
       if (data.ok) {
         setGroupsData(data.data);
+        if (data.stats) setPoolStats(data.stats);
         if (data.data.accounts?.length > 0 && !data.data.accounts.some((a: GroupAccount) => a.id === selectedGroupAcc)) {
           setSelectedGroupAcc(data.data.accounts[0].id);
         }
@@ -354,11 +498,104 @@ export default function DashboardPage() {
     showToast('Đã tải xuống file JSON thống kê!', 'success');
   };
 
+  // Load Telegram Bot Config
+  const fetchBotConfig = async () => {
+    try {
+      setBotLoading(true);
+      const res = await fetch('/api/bot');
+      const data = await res.json();
+      if (data.ok) {
+        setBotConfig(data.config);
+        setIsBotRunning(data.isBotRunning);
+        if (data.botInfo) setBotInfo(data.botInfo);
+      }
+    } catch (err) {
+      console.error('Lỗi tải bot config:', err);
+    } finally {
+      setBotLoading(false);
+    }
+  };
+
+  // Save Bot Config
+  const handleSaveBotConfig = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    try {
+      setBotLoading(true);
+      const res = await fetch('/api/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save_config', config: botConfig }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast('Đã lưu cấu hình Bot Telegram thành công!', 'success');
+        fetchBotConfig();
+      } else {
+        showToast(data.error || 'Lỗi lưu cấu hình', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    } finally {
+      setBotLoading(false);
+    }
+  };
+
+  // Test Telegram Bot Message
+  const handleTestBotMessage = async () => {
+    try {
+      setBotTesting(true);
+      showToast('Đang gửi tin nhắn thử nghiệm tới Telegram...', 'info');
+      const res = await fetch('/api/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'test_message',
+          botToken: botConfig.botToken,
+          chatId: botConfig.chatId,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast('Tin nhắn thử nghiệm đã gửi thành công tới Telegram của bạn!', 'success');
+      } else {
+        showToast(data.error || 'Lỗi gửi tin nhắn test', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    } finally {
+      setBotTesting(false);
+    }
+  };
+
+  // Trigger Daily Digest
+  const handleTriggerDigest = async () => {
+    try {
+      showToast('Đang gửi thử báo cáo Daily Digest 22h...', 'info');
+      const res = await fetch('/api/bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'trigger_digest' }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast('Đã gửi báo cáo Daily Digest thành công!', 'success');
+      } else {
+        showToast(data.error || 'Lỗi gửi Daily Digest', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
     fetchAccounts();
     fetchGroups();
     fetchAnalytics(1);
+    fetchBotConfig();
     const interval = setInterval(() => {
       fetchStatus();
       fetchAccounts();
@@ -901,9 +1138,9 @@ export default function DashboardPage() {
 
   // Restart Servers
   const handleRestartServers = async () => {
-    if (!confirm('Khởi động lại toàn bộ 3 Server Bridge (3001, 3002, 3003)?')) return;
+    if (!confirm('Khởi động lại toàn bộ hệ thống (Dashboard Port 3000 + 3 Server Bridge 3001, 3002, 3003)?')) return;
     try {
-      showToast('Đang khởi động lại các servers...', 'info');
+      showToast('Đang khởi động lại Dashboard & các servers...', 'info');
       const res = await fetch('/api/servers/restart', { method: 'POST' });
       const data = await res.json();
       showToast(data.message, 'success');
@@ -926,10 +1163,12 @@ export default function DashboardPage() {
       });
       const data = await res.json();
       if (data.ok) {
-        showToast('Đã thêm link nhóm!', 'success');
+        showToast(data.message || 'Đã thêm link nhóm!', 'success');
         setNewGroupUrl('');
         setIsAddGroupOpen(false);
         fetchGroups();
+      } else {
+        showToast(data.error || 'Link nhóm đã tồn tại hoặc không hợp lệ', 'error');
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -970,6 +1209,158 @@ export default function DashboardPage() {
         setBulkGroupText('');
         setIsBulkGroupOpen(false);
         fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi import nhóm', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    }
+  };
+
+  // Central Pool Handlers
+  const handlePoolImport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!poolImportText.trim()) return;
+    try {
+      const res = await fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'pool_import',
+          urlsText: poolImportText,
+          autoDistribute: poolImportAutoDistribute,
+          assignedAccountId: poolImportAssignAcc || null,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message, 'success');
+        setIsPoolImportOpen(false);
+        setPoolImportText('');
+        setPoolImportAutoDistribute(false);
+        setPoolImportAssignAcc('');
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi import link', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    }
+  };
+
+  const openDistributeModal = () => {
+    const enabledIds = (groupsData.accounts || []).filter(a => a.enabled !== false).map(a => a.id);
+    setDistributeSelectedAccs(enabledIds.length > 0 ? enabledIds : (groupsData.accounts || []).map(a => a.id));
+    setIsDistributeModalOpen(true);
+  };
+
+  const handlePoolDistribute = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (distributeSelectedAccs.length === 0) {
+      showToast('Vui lòng chọn ít nhất 1 tài khoản nhận link', 'error');
+      return;
+    }
+    setDistributeLoading(true);
+    try {
+      const res = await fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'pool_distribute',
+          targetAccountIds: distributeSelectedAccs,
+          mode: distributeMode,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message, 'success');
+        setIsDistributeModalOpen(false);
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi chia link', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    } finally {
+      setDistributeLoading(false);
+    }
+  };
+
+  const handlePoolRevoke = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRevokeLoading(true);
+    try {
+      const res = await fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'pool_revoke',
+          mode: revokeMode,
+          targetAccountId: revokeTargetAcc === 'all' ? null : revokeTargetAcc,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message, 'success');
+        setIsRevokeModalOpen(false);
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi thu hồi link', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    } finally {
+      setRevokeLoading(false);
+    }
+  };
+
+  const handlePoolUpdateStatus = async (
+    id: string,
+    url?: string,
+    joinedStatus?: 'joined' | 'pending' | 'not_joined' | 'unknown',
+    assignedAccountId?: string | null
+  ) => {
+    try {
+      const payload: Record<string, unknown> = { action: 'pool_update_item', id, url };
+      if (joinedStatus) payload.joinedStatus = joinedStatus;
+      if (assignedAccountId !== undefined) payload.assignedAccountId = assignedAccountId;
+
+      const res = await fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message, 'success');
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi cập nhật', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    }
+  };
+
+  const handlePoolDeleteItem = async (id: string, url: string) => {
+    if (!confirm(`Xóa link này khỏi kho chung?\n${url}`)) return;
+    try {
+      const res = await fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pool_delete_item', id, url }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message, 'success');
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi xóa link', 'error');
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1067,6 +1458,47 @@ export default function DashboardPage() {
   const activeGroupAccount = groupsData.accounts?.find(a => a.id === selectedGroupAcc);
   const filteredGroups = (activeGroupAccount?.groupUrls || []).filter(u => u.toLowerCase().includes(groupSearch.toLowerCase()));
 
+  // Filtered Central Pool
+  const filteredPool = (groupsData.centralPool || []).filter((item) => {
+    if (poolSearch.trim()) {
+      const q = poolSearch.trim().toLowerCase();
+      const matchUrl = item.url.toLowerCase().includes(q);
+      const matchName = item.assignedAccountName?.toLowerCase().includes(q) || false;
+      const matchErr = item.lastPostError?.toLowerCase().includes(q) || false;
+      if (!matchUrl && !matchName && !matchErr) return false;
+    }
+
+    if (poolFilterAccount === 'unassigned') {
+      if (item.assignedAccountId) return false;
+    } else if (poolFilterAccount !== 'all') {
+      if (item.assignedAccountId !== poolFilterAccount) return false;
+    }
+
+    if (poolFilterPostStatus !== 'all') {
+      if (poolFilterPostStatus === 'not_posted') {
+        if (item.lastPostStatus && item.lastPostStatus !== 'not_posted') return false;
+      } else {
+        if (item.lastPostStatus !== poolFilterPostStatus) return false;
+      }
+    }
+
+    if (poolFilterJoinStatus !== 'all') {
+      if (item.joinedStatus !== poolFilterJoinStatus) return false;
+    }
+
+    return true;
+  });
+
+  // Map to quickly lookup pool item by url for the by_account view
+  const poolItemByUrl = React.useMemo(() => {
+    const map = new Map<string, CentralPoolItem>();
+    for (const item of groupsData.centralPool || []) {
+      const clean = item.url.trim().replace(/\/+$/, '');
+      map.set(clean, item);
+    }
+    return map;
+  }, [groupsData.centralPool]);
+
   const chatgptAccounts = accounts.find(c => c.category === 'chatgpt')?.items || [];
 
   return (
@@ -1100,18 +1532,18 @@ export default function DashboardPage() {
           
           {/* Brand Logo & Name */}
           <div className="flex items-center gap-3.5">
-            <div className="relative group cursor-pointer">
-              <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-500 rounded-2xl blur-sm opacity-60 group-hover:opacity-100 transition duration-300"></div>
-              <div className="relative bg-gradient-to-tr from-blue-600 via-indigo-600 to-blue-700 text-white font-black px-4 py-2 rounded-2xl text-lg tracking-wider shadow-md">
-                DUDI
-              </div>
+            <div className="relative group cursor-pointer flex-shrink-0">
+              <div className="absolute -inset-0.5 bg-red-500/30 rounded-2xl blur-sm opacity-60 group-hover:opacity-100 transition duration-300"></div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logo.png"
+                alt="DUDI software"
+                className="relative w-11 h-11 rounded-xl object-cover shadow-md border border-red-500/20 group-hover:scale-105 transition-transform duration-200"
+              />
             </div>
             <div>
               <div className="font-extrabold text-lg text-slate-900 tracking-tight flex items-center gap-2">
                 Control Center
-                <span className="text-[11px] bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-0.5 rounded-full font-semibold shadow-xs">
-                  ✨ Liquid Glass
-                </span>
               </div>
               <p className="text-xs text-slate-500 font-medium">Hệ thống Điều phối Tự động Hóa Tài khoản & AI Content</p>
             </div>
@@ -1168,6 +1600,19 @@ export default function DashboardPage() {
               }`}
             >
               <Send className="w-4 h-4" /> Đăng bài Nhanh
+            </button>
+            <button
+              onClick={() => { setActiveTab('bot'); fetchBotConfig(); }}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
+                activeTab === 'bot'
+                  ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-md shadow-sky-500/25 font-bold'
+                  : 'text-slate-600 hover:text-sky-700 hover:bg-white/60'
+              }`}
+            >
+              <Bot className="w-4 h-4" /> Telegram Bot & Giám sát
+              {isBotRunning && (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              )}
             </button>
           </nav>
 
@@ -1788,11 +2233,29 @@ export default function DashboardPage() {
                                       🎨 Prompt: {item.prompt}
                                     </p>
                                   )}
-                                  {!isSuccess && item.error && (
-                                    <div className="mt-1 p-1.5 rounded-lg bg-rose-100/90 text-rose-800 text-[11px] font-bold border border-rose-300">
-                                      ⚠️ Lý do lỗi: {item.error}
-                                    </div>
-                                  )}
+                                  {!isSuccess && item.error && (() => {
+                                    const parsed = parseErrorMessage(item.error);
+                                    return (
+                                      <div
+                                        onClick={() => setViewingErrorItem(item)}
+                                        className="mt-1.5 p-1.5 px-2.5 rounded-xl bg-rose-50 border border-rose-200/90 text-rose-800 text-[11px] flex items-center justify-between gap-2 max-w-md shadow-xs group/err hover:bg-rose-100/80 hover:border-rose-300 transition-all cursor-pointer"
+                                        title="Nhấp để mở to xem chi tiết lỗi"
+                                      >
+                                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                          <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                          <span className="font-bold truncate text-rose-900">
+                                            Lỗi: {parsed.summary}
+                                          </span>
+                                        </div>
+                                        <span
+                                          className="shrink-0 px-2 py-0.5 rounded-lg text-[10px] font-black bg-rose-200 group-hover/err:bg-rose-300 text-rose-900 flex items-center gap-1 transition-all shadow-xs"
+                                        >
+                                          <Maximize2 className="w-2.5 h-2.5" />
+                                          Xem lỗi
+                                        </span>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               </td>
                               <td className="py-3 px-3 text-center">
@@ -2058,10 +2521,11 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ==================== TAB 3: LINK NHÓM FACEBOOK ==================== */}
+        {/* ==================== TAB 3: LINK NHÓM FACEBOOK & KHO CHUNG ==================== */}
         {activeTab === 'groups' && (
           <div className="liquid-glass rounded-3xl p-7 space-y-6">
             
+            {/* Header with Title & Primary Actions */}
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
               <div>
                 <h3 className="font-extrabold text-lg text-slate-900 flex items-center gap-2.5">
@@ -2070,124 +2534,511 @@ export default function DashboardPage() {
                   </span>
                   Quản lý Link Nhóm Facebook
                 </h3>
-                <p className="text-xs text-slate-500 font-medium mt-1">Danh sách các nhóm Facebook được gán theo từng tài khoản nick đăng bài</p>
+                <p className="text-xs text-slate-500 font-medium mt-1">
+                  Kho tập trung link Facebook, tự động chia đều cho các Nick và theo dõi trạng thái tham gia &amp; đăng bài
+                </p>
               </div>
 
-              <div className="flex items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <button
-                  onClick={() => setIsAddAccountOpen(true)}
-                  className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl text-blue-700 shadow-xs transition-all"
+                  onClick={() => setIsPoolImportOpen(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-md shadow-blue-600/25 transition-all"
                 >
-                  <UserPlus className="w-4 h-4" /> Thêm Nick Group
+                  <Database className="w-4 h-4" /> Import vào Kho chung
                 </button>
                 <button
-                  onClick={() => setIsBulkGroupOpen(true)}
-                  className="flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-slate-700 shadow-xs hover:shadow-sm transition-all"
+                  onClick={openDistributeModal}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl shadow-md shadow-violet-600/25 transition-all"
                 >
-                  📥 Import hàng loạt
+                  <Shuffle className="w-4 h-4" /> Chia đều cho các Nick
+                </button>
+                <button
+                  onClick={() => setIsRevokeModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl shadow-md shadow-amber-500/25 transition-all"
+                  title="Thu hồi các link đã gán về lại Kho chung"
+                >
+                  <RotateCcw className="w-4 h-4" /> Thu hồi link đã chia
+                </button>
+                <button
+                  onClick={() => setIsAddAccountOpen(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-slate-700 shadow-xs transition-all"
+                >
+                  <UserPlus className="w-4 h-4 text-blue-600" /> Thêm Nick
                 </button>
                 <button
                   onClick={() => setIsAddGroupOpen(true)}
-                  className="flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-md shadow-blue-600/30 hover:shadow-lg transition-all"
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-slate-700 shadow-xs transition-all"
                 >
-                  <Plus className="w-4 h-4" /> Thêm link nhóm
+                  <Plus className="w-4 h-4 text-emerald-600" /> Thêm link lẻ
                 </button>
               </div>
             </div>
 
-            {/* Selector & Search Filter */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-bold text-slate-700">Chọn tài khoản xem nhóm:</label>
-                  {activeGroupAccount && (
-                    <button
-                      onClick={() => handleToggleAccount('groups', activeGroupAccount.id, activeGroupAccount.enabled !== false)}
-                      className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
-                        activeGroupAccount.enabled !== false
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-slate-100 text-slate-500 border-slate-200'
-                      }`}
+            {/* View Switcher Pills */}
+            <div className="flex items-center gap-2 p-1.5 bg-slate-100/90 rounded-2xl w-fit border border-slate-200/80">
+              <button
+                onClick={() => setGroupViewMode('pool')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                  groupViewMode === 'pool'
+                    ? 'bg-white text-blue-700 shadow-sm shadow-slate-200'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Database className="w-3.5 h-3.5" />
+                🏢 Kho chung link Facebook
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-blue-100 text-blue-800 font-extrabold">
+                  {poolStats.total || groupsData.centralPool?.length || 0}
+                </span>
+              </button>
+              <button
+                onClick={() => setGroupViewMode('by_account')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                  groupViewMode === 'by_account'
+                    ? 'bg-white text-blue-700 shadow-sm shadow-slate-200'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                👤 Xem theo từng Nick
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200 text-slate-700 font-extrabold">
+                  {groupsData.accounts?.length || 0} nick
+                </span>
+              </button>
+            </div>
+
+            {/* Metric Cards - Quick Overview of Pool */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
+              <div className="p-4 rounded-2xl bg-white/70 border border-slate-200/90 shadow-2xs">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">📦 Tổng link trong kho</span>
+                <span className="text-xl font-extrabold text-slate-900">{poolStats.total || groupsData.centralPool?.length || 0}</span>
+                <span className="text-[11px] text-slate-400 block mt-0.5">Tất cả link nhóm</span>
+              </div>
+              <div className="p-4 rounded-2xl bg-blue-50/60 border border-blue-200/80 shadow-2xs">
+                <span className="text-[11px] font-bold text-blue-700 uppercase tracking-wider block mb-1">👥 Đã gán Nick</span>
+                <span className="text-xl font-extrabold text-blue-900">{poolStats.assigned || 0}</span>
+                <span className="text-[11px] text-blue-600/80 block mt-0.5 font-medium">Chưa gán: <b>{poolStats.unassigned || 0}</b> link</span>
+              </div>
+              <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200/80 shadow-2xs">
+                <span className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider block mb-1">🟢 Đã đăng thành công</span>
+                <span className="text-xl font-extrabold text-emerald-900">{poolStats.postedSuccess || 0}</span>
+                <span className="text-[11px] text-emerald-600/80 block mt-0.5 font-medium">Chưa đăng: <b>{poolStats.notPosted || 0}</b> link</span>
+              </div>
+              <div className="p-4 rounded-2xl bg-rose-50/60 border border-rose-200/80 shadow-2xs">
+                <span className="text-[11px] font-bold text-rose-700 uppercase tracking-wider block mb-1">🔴 Gặp lỗi đăng bài</span>
+                <span className="text-xl font-extrabold text-rose-900">{poolStats.postedFailed || 0}</span>
+                <span className="text-[11px] text-rose-600/80 block mt-0.5 font-medium">Cần kiểm tra lại</span>
+              </div>
+              <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/80 shadow-2xs">
+                <span className="text-[11px] font-bold text-amber-700 uppercase tracking-wider block mb-1">🤝 Trạng thái nhóm</span>
+                <span className="text-xl font-extrabold text-amber-900">{poolStats.joined || 0} <span className="text-xs font-semibold text-slate-500">đã vào</span></span>
+                <span className="text-[11px] text-amber-700 block mt-0.5 font-medium">Chờ duyệt: <b>{poolStats.pending || 0}</b></span>
+              </div>
+            </div>
+
+            {/* ================= MODE 1: KHO CHUNG (POOL) ================= */}
+            {groupViewMode === 'pool' && (
+              <div className="space-y-4">
+                {/* Search & Filters */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                    <input
+                      type="text"
+                      value={poolSearch}
+                      onChange={(e) => setPoolSearch(e.target.value)}
+                      placeholder="Tìm link, nick phụ trách, lỗi..."
+                      className="liquid-input w-full rounded-xl pl-10 pr-4 py-2.5 text-xs md:text-sm text-slate-900 placeholder:text-slate-400"
+                    />
+                  </div>
+
+                  <div>
+                    <select
+                      value={poolFilterAccount}
+                      onChange={(e) => setPoolFilterAccount(e.target.value)}
+                      className="liquid-input w-full rounded-xl px-3.5 py-2.5 text-xs md:text-sm font-medium text-slate-800"
                     >
-                      {activeGroupAccount.enabled !== false ? '🟢 Tài khoản đang Bật' : '⚪ Tài khoản đang Tắt'}
-                    </button>
-                  )}
-                </div>
-                <select
-                  value={selectedGroupAcc}
-                  onChange={(e) => setSelectedGroupAcc(e.target.value)}
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-900"
-                >
-                  {groupsData.accounts?.map(acc => (
-                    <option key={acc.id} value={acc.id}>
-                      {acc.name} ({acc.groupUrls?.length || 0} link nhóm) {acc.enabled === false ? '— [Đã Tắt]' : '— [Đang Bật]'}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                      <option value="all">👤 Tất cả Nick (Tất cả)</option>
+                      <option value="unassigned">⚪ Chỉ link Chưa gán ({poolStats.unassigned || 0})</option>
+                      {groupsData.accounts?.map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          👤 Nick: {acc.name} ({acc.groupUrls?.length || 0} link)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">Tìm kiếm trong nhóm:</label>
-                <div className="relative">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                  <input
-                    type="text"
-                    value={groupSearch}
-                    onChange={(e) => setGroupSearch(e.target.value)}
-                    placeholder="Nhập link hoặc từ khóa nhóm..."
-                    className="liquid-input w-full rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400"
-                  />
+                  <div>
+                    <select
+                      value={poolFilterPostStatus}
+                      onChange={(e) => setPoolFilterPostStatus(e.target.value)}
+                      className="liquid-input w-full rounded-xl px-3.5 py-2.5 text-xs md:text-sm font-medium text-slate-800"
+                    >
+                      <option value="all">📝 Tất cả trạng thái đăng</option>
+                      <option value="success">🟢 Đã đăng thành công</option>
+                      <option value="failed">🔴 Gặp lỗi đăng bài</option>
+                      <option value="not_posted">⚪ Chưa từng đăng</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <select
+                      value={poolFilterJoinStatus}
+                      onChange={(e) => setPoolFilterJoinStatus(e.target.value)}
+                      className="liquid-input w-full rounded-xl px-3.5 py-2.5 text-xs md:text-sm font-medium text-slate-800"
+                    >
+                      <option value="all">🤝 Tất cả trạng thái tham gia</option>
+                      <option value="joined">🟢 Đã tham gia nhóm</option>
+                      <option value="pending">🟡 Đang chờ phê duyệt</option>
+                      <option value="not_joined">🔴 Chưa tham gia nhóm</option>
+                      <option value="unknown">⚪ Chưa kiểm tra</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Pool Table */}
+                <div className="border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs bg-white/70">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs md:text-sm">
+                      <thead className="bg-slate-100/80 border-b border-slate-200/90 text-slate-700 font-bold">
+                        <tr>
+                          <th className="py-3 px-3.5 w-12 text-center">STT</th>
+                          <th className="py-3 px-3.5">Đường dẫn nhóm Facebook</th>
+                          <th className="py-3 px-3.5 w-44">Nick phụ trách</th>
+                          <th className="py-3 px-3.5 w-40 text-center">Trạng thái nhóm</th>
+                          <th className="py-3 px-3.5 w-44 text-center">Trạng thái đăng bài</th>
+                          <th className="py-3 px-3.5 w-24 text-center">Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {filteredPool.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="py-12 text-center text-slate-400 text-xs font-medium">
+                              {groupsData.centralPool?.length === 0
+                                ? 'Kho chung hiện chưa có link nào. Hãy bấm "Import vào Kho chung" ở góc trên để thêm.'
+                                : 'Không tìm thấy link nhóm nào khớp với bộ lọc.'}
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredPool.map((item, idx) => {
+                            const acc = groupsData.accounts?.find((a) => a.id === item.assignedAccountId);
+                            return (
+                              <tr key={item.id} className="hover:bg-blue-50/30 transition-colors">
+                                <td className="py-3 px-3.5 text-center font-bold text-slate-400 text-xs">
+                                  {idx + 1}
+                                </td>
+
+                                {/* Group URL */}
+                                <td className="py-3 px-3.5 font-medium">
+                                  <div className="flex items-center gap-1.5 break-all">
+                                    <a
+                                      href={item.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1.5 font-mono text-xs"
+                                    >
+                                      <ExternalLink className="w-3.5 h-3.5 flex-shrink-0 text-blue-500" />
+                                      {item.url}
+                                    </a>
+                                  </div>
+                                </td>
+
+                                {/* Assigned Account */}
+                                <td className="py-3 px-3.5">
+                                  <select
+                                    value={item.assignedAccountId || ''}
+                                    onChange={(e) => handlePoolUpdateStatus(item.id, item.url, undefined, e.target.value || null)}
+                                    className={`w-full text-xs font-semibold rounded-lg px-2.5 py-1.5 border transition-all ${
+                                      item.assignedAccountId
+                                        ? 'bg-blue-50/70 border-blue-200 text-blue-900'
+                                        : 'bg-slate-100 border-slate-200 text-slate-500 italic'
+                                    }`}
+                                  >
+                                    <option value="">⚪ Chưa gán (Kho trống)</option>
+                                    {groupsData.accounts?.map((a) => (
+                                      <option key={a.id} value={a.id}>
+                                        👤 {a.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </td>
+
+                                {/* Joined Status */}
+                                <td className="py-3 px-3.5 text-center">
+                                  <select
+                                    value={item.joinedStatus || 'unknown'}
+                                    onChange={(e) =>
+                                      handlePoolUpdateStatus(
+                                        item.id,
+                                        item.url,
+                                        e.target.value as 'joined' | 'pending' | 'not_joined' | 'unknown'
+                                      )
+                                    }
+                                    className={`text-xs font-bold rounded-lg px-2.5 py-1.5 border cursor-pointer ${
+                                      item.joinedStatus === 'joined'
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        : item.joinedStatus === 'pending'
+                                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                        : item.joinedStatus === 'not_joined'
+                                        ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                                    }`}
+                                  >
+                                    <option value="joined">🟢 Đã tham gia</option>
+                                    <option value="pending">🟡 Đang chờ duyệt</option>
+                                    <option value="not_joined">🔴 Chưa tham gia</option>
+                                    <option value="unknown">⚪ Chưa kiểm tra</option>
+                                  </select>
+                                </td>
+
+                                {/* Post Status */}
+                                <td className="py-3 px-3.5 text-center">
+                                  {item.lastPostStatus === 'success' ? (
+                                    <div className="inline-flex flex-col items-center">
+                                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Đã đăng bài
+                                      </span>
+                                      {item.lastPostedAt && (
+                                        <span className="text-[10px] text-slate-400 mt-0.5 font-mono">
+                                          {new Date(item.lastPostedAt).toLocaleDateString('vi-VN', {
+                                            day: '2-digit',
+                                            month: '2-digit',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                          })}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : item.lastPostStatus === 'failed' ? (
+                                    <div className="inline-flex flex-col items-center">
+                                      <button
+                                        onClick={() =>
+                                          setViewingGroupError({
+                                            url: item.url,
+                                            error: item.lastPostError || 'Lỗi không xác định khi đăng bài',
+                                          })
+                                        }
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100 transition-all cursor-pointer"
+                                        title="Bấm để xem chi tiết lỗi"
+                                      >
+                                        <XCircle className="w-3.5 h-3.5 text-rose-600" /> Lỗi đăng bài
+                                      </button>
+                                      {item.lastPostedAt && (
+                                        <span className="text-[10px] text-slate-400 mt-0.5 font-mono">
+                                          {new Date(item.lastPostedAt).toLocaleDateString('vi-VN', {
+                                            day: '2-digit',
+                                            month: '2-digit',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                          })}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-500 border border-slate-200">
+                                      <Clock className="w-3 h-3 text-slate-400" /> Chưa đăng
+                                    </span>
+                                  )}
+                                </td>
+
+                                {/* Action buttons */}
+                                <td className="py-3 px-3.5 text-center">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    {acc?.profileDir && (
+                                      <button
+                                        onClick={() => {
+                                          const accNum = parseInt(String(acc.id).replace(/\D/g, ''), 10) || 1;
+                                          const port = 9222 + accNum;
+                                          handleOpenChrome(acc.profileDir || `n8n-fb-group-profile-${accNum}`, port, item.url);
+                                        }}
+                                        className="p-1 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                        title={`Mở Chrome nick "${acc.name}" vào thẳng nhóm này`}
+                                      >
+                                        <ExternalLink className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => handlePoolDeleteItem(item.id, item.url)}
+                                      className="p-1 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-lg transition-all"
+                                      title="Xóa link này khỏi kho chung"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* Groups Table */}
-            <div className="border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs bg-white/60">
-              <table className="w-full text-left text-xs md:text-sm">
-                <thead className="bg-slate-100/80 border-b border-slate-200/90 text-slate-700 font-bold">
-                  <tr>
-                    <th className="py-3.5 px-4 w-12 text-center">STT</th>
-                    <th className="py-3.5 px-4">Đường dẫn nhóm Facebook</th>
-                    <th className="py-3.5 px-4 w-28 text-center">Thao tác</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredGroups.length === 0 ? (
-                    <tr>
-                      <td colSpan={3} className="py-10 text-center text-slate-400 text-xs font-medium">
-                        Không có nhóm nào phù hợp. Bấm &quot;Thêm link nhóm&quot; để thêm.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredGroups.map((url, idx) => (
-                      <tr key={idx} className="hover:bg-blue-50/40 transition-colors">
-                        <td className="py-3.5 px-4 text-center font-bold text-slate-400">{idx + 1}</td>
-                        <td className="py-3.5 px-4 font-medium">
-                          <a
-                            href={url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1.5 break-all"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5 flex-shrink-0 text-blue-500" />
-                            {url}
-                          </a>
-                        </td>
-                        <td className="py-3.5 px-4 text-center">
-                          <button
-                            onClick={() => handleRemoveGroup(url)}
-                            className="p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-lg transition-all"
-                            title="Xóa link nhóm này"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            {/* ================= MODE 2: XEM THEO TỪNG NICK ================= */}
+            {groupViewMode === 'by_account' && (
+              <div className="space-y-4">
+                {/* Selector & Search Filter */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700">Chọn tài khoản xem nhóm:</label>
+                      {activeGroupAccount && (
+                        <button
+                          onClick={() => handleToggleAccount('groups', activeGroupAccount.id, activeGroupAccount.enabled !== false)}
+                          className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
+                            activeGroupAccount.enabled !== false
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-slate-100 text-slate-500 border-slate-200'
+                          }`}
+                        >
+                          {activeGroupAccount.enabled !== false ? '🟢 Tài khoản đang Bật' : '⚪ Tài khoản đang Tắt'}
+                        </button>
+                      )}
+                    </div>
+                    <select
+                      value={selectedGroupAcc}
+                      onChange={(e) => setSelectedGroupAcc(e.target.value)}
+                      className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-900"
+                    >
+                      {groupsData.accounts?.map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.name} ({acc.groupUrls?.length || 0} link nhóm) {acc.enabled === false ? '— [Đã Tắt]' : '— [Đang Bật]'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Tìm kiếm trong nhóm của nick này:</label>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                      <input
+                        type="text"
+                        value={groupSearch}
+                        onChange={(e) => setGroupSearch(e.target.value)}
+                        placeholder="Nhập link hoặc từ khóa nhóm..."
+                        className="liquid-input w-full rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Groups Table of Selected Account with Status Enriched */}
+                <div className="border border-slate-200/90 rounded-2xl overflow-hidden shadow-xs bg-white/70">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs md:text-sm">
+                      <thead className="bg-slate-100/80 border-b border-slate-200/90 text-slate-700 font-bold">
+                        <tr>
+                          <th className="py-3 px-3.5 w-12 text-center">STT</th>
+                          <th className="py-3 px-3.5">Đường dẫn nhóm Facebook</th>
+                          <th className="py-3 px-3.5 w-36 text-center">Trạng thái nhóm</th>
+                          <th className="py-3 px-3.5 w-40 text-center">Trạng thái đăng bài</th>
+                          <th className="py-3 px-3.5 w-24 text-center">Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {filteredGroups.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-10 text-center text-slate-400 text-xs font-medium">
+                              Không có nhóm nào phù hợp. Bấm &quot;Thêm link lẻ&quot; hoặc &quot;Chia đều từ Kho chung&quot; để gán nhóm.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredGroups.map((url, idx) => {
+                            const clean = url.trim().replace(/\/+$/, '');
+                            const poolItem = poolItemByUrl.get(clean);
+
+                            return (
+                              <tr key={idx} className="hover:bg-blue-50/40 transition-colors">
+                                <td className="py-3 px-3.5 text-center font-bold text-slate-400 text-xs">{idx + 1}</td>
+                                <td className="py-3 px-3.5 font-medium">
+                                  <a
+                                    href={url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1.5 break-all font-mono text-xs"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5 flex-shrink-0 text-blue-500" />
+                                    {url}
+                                  </a>
+                                </td>
+
+                                {/* Group Joined Status */}
+                                <td className="py-3 px-3.5 text-center">
+                                  <select
+                                    value={poolItem?.joinedStatus || 'unknown'}
+                                    onChange={(e) =>
+                                      handlePoolUpdateStatus(
+                                        poolItem?.id || '',
+                                        url,
+                                        e.target.value as 'joined' | 'pending' | 'not_joined' | 'unknown'
+                                      )
+                                    }
+                                    className={`text-xs font-bold rounded-lg px-2.5 py-1.5 border cursor-pointer ${
+                                      poolItem?.joinedStatus === 'joined'
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                        : poolItem?.joinedStatus === 'pending'
+                                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                        : poolItem?.joinedStatus === 'not_joined'
+                                        ? 'bg-rose-50 text-rose-800 border-rose-200'
+                                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                                    }`}
+                                  >
+                                    <option value="joined">🟢 Đã tham gia</option>
+                                    <option value="pending">🟡 Đang chờ duyệt</option>
+                                    <option value="not_joined">🔴 Chưa tham gia</option>
+                                    <option value="unknown">⚪ Chưa kiểm tra</option>
+                                  </select>
+                                </td>
+
+                                {/* Post Status */}
+                                <td className="py-3 px-3.5 text-center">
+                                  {poolItem?.lastPostStatus === 'success' ? (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Đã đăng
+                                    </span>
+                                  ) : poolItem?.lastPostStatus === 'failed' ? (
+                                    <button
+                                      onClick={() =>
+                                        setViewingGroupError({
+                                          url,
+                                          error: poolItem?.lastPostError || 'Gặp lỗi khi đăng bài vào nhóm này',
+                                        })
+                                      }
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100 transition-all cursor-pointer"
+                                      title="Bấm xem chi tiết lỗi"
+                                    >
+                                      <XCircle className="w-3.5 h-3.5 text-rose-600" /> Lỗi đăng
+                                    </button>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-500 border border-slate-200">
+                                      <Clock className="w-3 h-3 text-slate-400" /> Chưa đăng
+                                    </span>
+                                  )}
+                                </td>
+
+                                {/* Action */}
+                                <td className="py-3 px-3.5 text-center">
+                                  <button
+                                    onClick={() => handleRemoveGroup(url)}
+                                    className="p-1.5 text-rose-500 hover:bg-rose-50 hover:text-rose-700 rounded-lg transition-all"
+                                    title="Xóa link nhóm này khỏi tài khoản"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
 
           </div>
         )}
@@ -2313,6 +3164,393 @@ export default function DashboardPage() {
                 )}
               </div>
             )}
+
+          </div>
+        )}
+
+        {/* ==================== TAB 5: TELEGRAM BOT & GIÁM SÁT TỪ XA ==================== */}
+        {activeTab === 'bot' && (
+          <div className="space-y-8 max-w-5xl mx-auto">
+            
+            {/* Header Banner */}
+            <div className="liquid-glass rounded-3xl p-6 md:p-8 relative overflow-hidden">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <span className="p-3 rounded-2xl bg-gradient-to-tr from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-500/30">
+                      <Bot className="w-6 h-6" />
+                    </span>
+                    <div>
+                      <h2 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">
+                        Giám Sát Từ Xa & Telegram Command Bot
+                      </h2>
+                      <p className="text-xs md:text-sm text-slate-500 font-medium">
+                        Quản lý toàn bộ hệ thống từ điện thoại, nhận cảnh báo lỗi kèm ảnh chụp màn hình tức thì và báo cáo tổng kết 22h tối.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Status Badges */}
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className={`px-4 py-2.5 rounded-2xl text-xs font-bold border flex items-center gap-2 ${
+                    isBotRunning 
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                      : 'bg-rose-50 text-rose-800 border-rose-200'
+                  }`}>
+                    <span className={`w-2.5 h-2.5 rounded-full ${isBotRunning ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
+                    {isBotRunning ? 'Bot Service: Online (Port 3004)' : 'Bot Service: Đang tắt (Port 3004)'}
+                  </div>
+
+                  <div className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold border flex items-center gap-1.5 ${
+                    botConfig.botToken && botConfig.chatId
+                      ? 'bg-blue-50 text-blue-800 border-blue-200'
+                      : 'bg-amber-50 text-amber-800 border-amber-200'
+                  }`}>
+                    {botConfig.botToken && botConfig.chatId ? '🟢 Đã cấu hình' : '⚠️ Chưa đủ Token / Chat ID'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Actions Bar */}
+              <div className="mt-6 pt-5 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleTestBotMessage}
+                    disabled={botTesting || !botConfig.botToken || !botConfig.chatId}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-600 hover:to-blue-700 text-white font-bold text-xs shadow-md shadow-sky-500/25 transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    {botTesting ? 'Đang gửi test...' : 'Test Gửi Tin Nhắn Telegram'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleTriggerDigest}
+                    disabled={!isBotRunning || !botConfig.botToken || !botConfig.chatId}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold text-xs shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                    Gửi thử Báo cáo 22h tối (Daily Digest)
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={fetchBotConfig}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Làm mới cấu hình
+                </button>
+              </div>
+              {/* Direct Telegram Bot Link & Start Reminder */}
+              {botInfo?.username && (
+                <div className="mt-5 p-4 rounded-2xl bg-sky-50 border border-sky-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                  <div className="flex items-center gap-3">
+                    <span className="p-2.5 rounded-xl bg-sky-500 text-white shadow-sm">
+                      <Bot className="w-5 h-5" />
+                    </span>
+                    <div>
+                      <p className="text-xs font-black text-slate-900 flex items-center gap-2">
+                        Bot của bạn: <span className="text-sky-700 font-mono text-sm">@{botInfo.username}</span>
+                        {botInfo.firstName && <span className="text-slate-500 font-medium">({botInfo.firstName})</span>}
+                      </p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">
+                        👉 <b>Bắt buộc:</b> Bạn cần mở Telegram, vào bot và bấm nút <b>&quot;START&quot;</b> thì Telegram mới cho phép Bot gửi tin nhắn cho bạn.
+                      </p>
+                    </div>
+                  </div>
+                  <a
+                    href={`https://t.me/${botInfo.username}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-xs shadow-md shadow-sky-600/25 transition-all cursor-pointer text-center justify-center"
+                  >
+                    <ExternalLink className="w-4 h-4" /> Mở Bot & Ấn START
+                  </a>
+                </div>
+              )}
+            </div>
+
+            {/* Form Settings Grid */}
+            <form onSubmit={handleSaveBotConfig} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              
+              {/* Cột 1: Thông tin kết nối Telegram */}
+              <div className="liquid-glass rounded-3xl p-6 md:p-7 space-y-5">
+                <div className="border-b border-slate-200/80 pb-3 flex items-center justify-between">
+                  <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+                    <span className="p-1.5 rounded-lg bg-sky-100 text-sky-700">
+                      <Bot className="w-4 h-4" />
+                    </span>
+                    Thông Tin Kết Nối Telegram
+                  </h3>
+                  <span className="text-[11px] font-bold text-sky-600 bg-sky-50 px-2 py-0.5 rounded-md border border-sky-200">
+                    Long Polling (Không cần mở port)
+                  </span>
+                </div>
+
+                {/* Bot Token */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700">Telegram Bot Token (từ @BotFather):</label>
+                    <button
+                      type="button"
+                      onClick={() => setShowTokenSecret(!showTokenSecret)}
+                      className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-1"
+                    >
+                      <Eye className="w-3 h-3" /> {showTokenSecret ? 'Ẩn token' : 'Hiện token'}
+                    </button>
+                  </div>
+                  <input
+                    type={showTokenSecret ? 'text' : 'password'}
+                    value={botConfig.botToken || ''}
+                    onChange={(e) => setBotConfig({ ...botConfig, botToken: e.target.value })}
+                    placeholder="VD: 7123456789:AAFlmP_abc1234xyz..."
+                    className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs md:text-sm font-mono text-slate-900"
+                  />
+                  <div className="p-3 rounded-xl bg-sky-50/70 border border-sky-200 text-[11px] text-sky-900 space-y-1">
+                    <p className="font-bold">💡 Cách lấy Token trong 1 phút:</p>
+                    <ol className="list-decimal pl-4 space-y-0.5 text-slate-600">
+                      <li>Mở ứng dụng Telegram, tìm bot <b>@BotFather</b></li>
+                      <li>Gửi lệnh <code>/newbot</code>, đặt tên hiển thị và username bot (kết thúc bằng từ bot)</li>
+                      <li>Sao chép dòng <b>HTTP API Token</b> và dán vào ô trên.</li>
+                    </ol>
+                  </div>
+                </div>
+
+                {/* Chat ID */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 block">Telegram Chat ID (Cá nhân hoặc Nhóm nhận tin):</label>
+                  <input
+                    type="text"
+                    value={botConfig.chatId || ''}
+                    onChange={(e) => setBotConfig({ ...botConfig, chatId: e.target.value })}
+                    placeholder="VD: 123456789 (dạng số)"
+                    className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs md:text-sm font-mono text-slate-900"
+                  />
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 space-y-1">
+                    <p className="font-bold text-slate-800">💡 Cách lấy Chat ID của bạn:</p>
+                    <p>
+                      Mở Telegram, tìm bot <b>@userinfobot</b> và bấm <b>Start</b>. Bot sẽ gửi lại cho bạn một dãy số <code>Id: 123456789</code>. Hãy nhập dãy số đó vào ô này.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Allowed Chat IDs */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 block">Chat ID phụ (Tùy chọn, cách nhau bằng dấu phẩy):</label>
+                  <input
+                    type="text"
+                    value={Array.isArray(botConfig.allowedChatIds) ? botConfig.allowedChatIds.join(', ') : ''}
+                    onChange={(e) => {
+                      const ids = e.target.value.split(',').map((s) => s.trim()).filter(Boolean);
+                      setBotConfig({ ...botConfig, allowedChatIds: ids });
+                    }}
+                    placeholder="VD: 987654321, 555666777"
+                    className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs md:text-sm font-mono text-slate-900"
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    Bảo mật: Chỉ các Chat ID được liệt kê ở đây mới có quyền điều khiển các lệnh <code>/restart</code> hoặc <code>/post_now</code>.
+                  </p>
+                </div>
+
+              </div>
+
+              {/* Cột 2: Cài đặt Cảnh báo & Tự động hóa */}
+              <div className="liquid-glass rounded-3xl p-6 md:p-7 space-y-5">
+                <div className="border-b border-slate-200/80 pb-3">
+                  <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+                    <span className="p-1.5 rounded-lg bg-indigo-100 text-indigo-700">
+                      <ShieldCheck className="w-4 h-4" />
+                    </span>
+                    Chính Sách Cảnh Báo & Tự Động Hóa
+                  </h3>
+                </div>
+
+                <div className="space-y-3">
+                  
+                  {/* Master Alert Toggle */}
+                  <label className="flex items-start gap-3 p-3.5 rounded-2xl border border-blue-200/80 bg-blue-50/50 cursor-pointer hover:bg-blue-50 transition-all">
+                    <input
+                      type="checkbox"
+                      checked={botConfig.enableAlerts !== false}
+                      onChange={(e) => setBotConfig({ ...botConfig, enableAlerts: e.target.checked })}
+                      className="w-4 h-4 mt-0.5 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-blue-950 block">⚡ Bật Hệ Thống Cảnh Báo Lỗi Tức Thì</span>
+                      <span className="text-[11px] text-blue-800">
+                        Bot tự động bắn tin nhắn ngay khi phát hiện sự cố hệ thống hoặc tiến trình đăng bài bị lỗi.
+                      </span>
+                    </div>
+                  </label>
+
+                  {/* Alert on Server Down */}
+                  <label className="flex items-start gap-3 p-3 rounded-xl border border-slate-200 bg-white/70 cursor-pointer hover:bg-white transition-all">
+                    <input
+                      type="checkbox"
+                      checked={botConfig.alertOnServerDown !== false}
+                      onChange={(e) => setBotConfig({ ...botConfig, alertOnServerDown: e.target.checked })}
+                      className="w-4 h-4 mt-0.5 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 block">Cảnh báo khi Server Bridge mất kết nối</span>
+                      <span className="text-[11px] text-slate-500">
+                        Bắn cảnh báo nếu các cổng 3001, 3002, 3003 hoặc n8n bị tắt/dừng đột ngột.
+                      </span>
+                    </div>
+                  </label>
+
+                  {/* Alert on Checkpoint */}
+                  <label className="flex items-start gap-3 p-3 rounded-xl border border-slate-200 bg-white/70 cursor-pointer hover:bg-white transition-all">
+                    <input
+                      type="checkbox"
+                      checked={botConfig.alertOnCheckpoint !== false}
+                      onChange={(e) => setBotConfig({ ...botConfig, alertOnCheckpoint: e.target.checked })}
+                      className="w-4 h-4 mt-0.5 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 block">Cảnh báo Checkpoint Facebook (Kèm ảnh chụp màn hình)</span>
+                      <span className="text-[11px] text-slate-500">
+                        Tự động phát hiện khi tài khoản Facebook bị văng ra trang xác minh checkpoint và chụp ảnh báo ngay.
+                      </span>
+                    </div>
+                  </label>
+
+                  {/* Alert on Job Error */}
+                  <label className="flex items-start gap-3 p-3 rounded-xl border border-slate-200 bg-white/70 cursor-pointer hover:bg-white transition-all">
+                    <input
+                      type="checkbox"
+                      checked={botConfig.alertOnJobError !== false}
+                      onChange={(e) => setBotConfig({ ...botConfig, alertOnJobError: e.target.checked })}
+                      className="w-4 h-4 mt-0.5 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-slate-800 block">Cảnh báo khi xuất bản bài viết thất bại</span>
+                      <span className="text-[11px] text-slate-500">
+                        Gửi chi tiết thông báo lỗi và ảnh chụp của bài viết khi đăng nhóm hoặc fanpage bị chặn.
+                      </span>
+                    </div>
+                  </label>
+
+                  {/* Daily Digest Setting */}
+                  <div className="p-3.5 rounded-2xl border border-indigo-200 bg-indigo-50/40 space-y-3">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={botConfig.enableDailyDigest !== false}
+                        onChange={(e) => setBotConfig({ ...botConfig, enableDailyDigest: e.target.checked })}
+                        className="w-4 h-4 mt-0.5 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                      />
+                      <div>
+                        <span className="text-xs font-bold text-indigo-950 block">🌙 Báo Cáo Tổng Kết Ngày (Daily Digest)</span>
+                        <span className="text-[11px] text-indigo-800">
+                          Tự động tổng hợp số bài đã đăng, bài lỗi, số nhóm đã phủ sóng và tình trạng tài khoản.
+                        </span>
+                      </div>
+                    </label>
+
+                    <div className="flex items-center gap-3 pl-7">
+                      <label className="text-xs font-bold text-slate-700">Giờ gửi báo cáo:</label>
+                      <input
+                        type="time"
+                        value={botConfig.dailyDigestTime || '22:00'}
+                        onChange={(e) => setBotConfig({ ...botConfig, dailyDigestTime: e.target.value })}
+                        className="liquid-input rounded-xl px-3 py-1.5 text-xs font-bold font-mono text-indigo-900 border border-indigo-300"
+                      />
+                      <span className="text-[11px] text-slate-500">(Mặc định: 22:00 tối)</span>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Save Button */}
+                <div className="pt-3 border-t border-slate-200/80">
+                  <button
+                    type="submit"
+                    disabled={botLoading}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold text-sm shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    {botLoading ? 'Đang lưu cấu hình...' : 'Lưu Cấu Hình Bot Telegram'}
+                  </button>
+                </div>
+
+              </div>
+
+            </form>
+
+            {/* Remote Command Cheatsheet Card */}
+            <div className="liquid-glass rounded-3xl p-6 md:p-8 space-y-4">
+              <div className="border-b border-slate-200/80 pb-3 flex items-center justify-between">
+                <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+                  <span className="p-1.5 rounded-lg bg-teal-100 text-teal-700">
+                    <Activity className="w-4 h-4" />
+                  </span>
+                  Danh Sách Lệnh Điều Khiển Từ Xa (Gõ trên Telegram)
+                </h3>
+                <span className="text-xs font-semibold text-slate-500">
+                  Có sẵn bàn phím bấm nhanh tiện lợi
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                
+                <div className="p-4 rounded-2xl bg-white/70 border border-slate-200/80 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <code className="text-xs font-black text-blue-700 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                      /status
+                    </code>
+                    <span className="text-[10px] font-bold text-slate-400">Kiểm tra</span>
+                  </div>
+                  <p className="text-xs font-bold text-slate-800">Trạng thái hệ thống</p>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Xem tình trạng 4 server bridge, n8n, 5 chrome profile và số bài đăng thành công trong ngày.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white/70 border border-slate-200/80 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <code className="text-xs font-black text-teal-700 bg-teal-50 px-2 py-1 rounded-md border border-teal-200">
+                      /screenshot
+                    </code>
+                    <span className="text-[10px] font-bold text-slate-400">Xem ảnh</span>
+                  </div>
+                  <p className="text-xs font-bold text-slate-800">Chụp màn hình Chrome</p>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Chụp trực tiếp tab Chrome đang chạy trên máy tính và gửi ảnh về điện thoại trong 1 giây.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white/70 border border-slate-200/80 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <code className="text-xs font-black text-rose-700 bg-rose-50 px-2 py-1 rounded-md border border-rose-200">
+                      /restart
+                    </code>
+                    <span className="text-[10px] font-bold text-slate-400">Khởi động</span>
+                  </div>
+                  <p className="text-xs font-bold text-slate-800">Khởi động lại Servers</p>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Tự động chạy script <code>kill-and-restart.ps1</code> và báo lại khi toàn bộ hệ thống đã online trở lại.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white/70 border border-slate-200/80 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <code className="text-xs font-black text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200">
+                      /post_now
+                    </code>
+                    <span className="text-[10px] font-bold text-slate-400">Đăng ngay</span>
+                  </div>
+                  <p className="text-xs font-bold text-slate-800">Đăng bài khẩn cấp</p>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Kích hoạt duyệt và xuất bản ngay lập tức một bài viết vào nhóm đang chờ mà không cần chờ lịch hẹn.
+                  </p>
+                </div>
+
+              </div>
+            </div>
 
           </div>
         )}
@@ -2727,6 +3965,419 @@ export default function DashboardPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL IMPORT VÀO KHO CHUNG ==================== */}
+      {isPoolImportOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="liquid-glass-modal rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+              <h3 className="font-extrabold text-lg text-slate-900 flex items-center gap-2">
+                <Database className="w-5 h-5 text-blue-600" /> Import Link vào Kho chung
+              </h3>
+              <button
+                onClick={() => setIsPoolImportOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handlePoolImport} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Danh sách link nhóm Facebook (Mỗi link 1 dòng):
+                </label>
+                <textarea
+                  value={poolImportText}
+                  onChange={(e) => setPoolImportText(e.target.value)}
+                  rows={6}
+                  placeholder="https://www.facebook.com/groups/nhom1&#10;https://www.facebook.com/groups/nhom2&#10;https://www.facebook.com/groups/nhom3..."
+                  required
+                  className="liquid-input w-full rounded-xl px-3.5 py-2.5 text-sm text-slate-900 font-mono text-xs"
+                />
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  Hệ thống sẽ tự động lọc bỏ các link trùng lặp và link không hợp lệ.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Gán luôn cho Nick (Tùy chọn):
+                </label>
+                <select
+                  value={poolImportAssignAcc}
+                  onChange={(e) => setPoolImportAssignAcc(e.target.value)}
+                  className="liquid-input w-full rounded-xl px-3.5 py-2.5 text-sm font-semibold text-slate-900"
+                >
+                  <option value="">⚪ Để trống (Lưu vào Kho chung chưa gán)</option>
+                  {groupsData.accounts?.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      👤 Gán ngay cho: {acc.name} ({acc.groupUrls?.length || 0} link hiện có)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {!poolImportAssignAcc && (
+                <div className="flex items-center gap-2.5 p-3 rounded-xl bg-violet-50/80 border border-violet-200">
+                  <input
+                    type="checkbox"
+                    id="poolAutoDist"
+                    checked={poolImportAutoDistribute}
+                    onChange={(e) => setPoolImportAutoDistribute(e.target.checked)}
+                    className="w-4 h-4 rounded text-violet-600 focus:ring-violet-500 border-slate-300 cursor-pointer"
+                  />
+                  <label htmlFor="poolAutoDist" className="text-xs font-bold text-violet-900 cursor-pointer">
+                    ⚡ Tự động chia đều cho các Nick đang bật ngay sau khi nạp
+                  </label>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPoolImportOpen(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white shadow-md shadow-blue-600/30"
+                >
+                  Thực hiện Import
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL TỰ ĐỘNG CHIA ĐỀU ==================== */}
+      {isDistributeModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="liquid-glass-modal rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+              <h3 className="font-extrabold text-lg text-slate-900 flex items-center gap-2">
+                <Shuffle className="w-5 h-5 text-violet-600" /> Tự động Chia đều Link Nhóm
+              </h3>
+              <button
+                onClick={() => setIsDistributeModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handlePoolDistribute} className="space-y-4">
+              {/* Mode Selection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-2">Chế độ phân bổ:</label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setDistributeMode('unassigned_only')}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      distributeMode === 'unassigned_only'
+                        ? 'bg-violet-50/90 border-violet-400 text-violet-900 shadow-xs'
+                        : 'bg-white/60 border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="text-xs font-extrabold block">⚪ Chỉ link Chưa gán</span>
+                    <span className="text-[11px] text-slate-500 mt-0.5 block">
+                      Phân bổ <b>{poolStats.unassigned || 0}</b> link chưa có chủ
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDistributeMode('all')}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      distributeMode === 'all'
+                        ? 'bg-violet-50/90 border-violet-400 text-violet-900 shadow-xs'
+                        : 'bg-white/60 border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="text-xs font-extrabold block">🔄 Chia lại toàn bộ</span>
+                    <span className="text-[11px] text-slate-500 mt-0.5 block">
+                      Phân bổ đều lại cả <b>{poolStats.total || groupsData.centralPool?.length || 0}</b> link
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Account Selection */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-700">Chọn các Nick nhận link:</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const allIds = (groupsData.accounts || []).map((a) => a.id);
+                      setDistributeSelectedAccs(
+                        distributeSelectedAccs.length === allIds.length ? [] : allIds
+                      );
+                    }}
+                    className="text-[11px] font-bold text-blue-600 hover:underline"
+                  >
+                    {distributeSelectedAccs.length === (groupsData.accounts?.length || 0)
+                      ? 'Bỏ chọn tất cả'
+                      : 'Chọn tất cả'}
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {groupsData.accounts?.map((acc) => {
+                    const isChecked = distributeSelectedAccs.includes(acc.id);
+                    return (
+                      <label
+                        key={acc.id}
+                        className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
+                          isChecked
+                            ? 'bg-blue-50/70 border-blue-300 text-blue-950'
+                            : 'bg-slate-50/60 border-slate-200 text-slate-500'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setDistributeSelectedAccs([...distributeSelectedAccs, acc.id]);
+                              } else {
+                                setDistributeSelectedAccs(
+                                  distributeSelectedAccs.filter((id) => id !== acc.id)
+                                );
+                              }
+                            }}
+                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                          />
+                          <span className="text-xs font-bold">{acc.name}</span>
+                          {acc.enabled === false && (
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-200 text-slate-600">Đã tắt</span>
+                          )}
+                        </div>
+                        <span className="text-xs text-slate-500 font-mono">
+                          {acc.groupUrls?.length || 0} link
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Estimation Summary Box */}
+              {(() => {
+                const totalToDist =
+                  distributeMode === 'all'
+                    ? poolStats.total || groupsData.centralPool?.length || 0
+                    : poolStats.unassigned || 0;
+                const accCount = distributeSelectedAccs.length;
+                const approxPerAcc = accCount > 0 ? Math.ceil(totalToDist / accCount) : 0;
+
+                return (
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-200 text-xs">
+                    <span className="text-violet-950 font-bold block mb-1">📊 Dự kiến kết quả phân bổ:</span>
+                    <p className="text-violet-800 font-medium leading-relaxed">
+                      Sẽ chia <b>{totalToDist} link</b> cho <b>{accCount} tài khoản</b> đã chọn.<br />
+                      Mỗi tài khoản sẽ nhận trung bình khoảng <b>~{approxPerAcc} link</b> theo thuật toán xoay vòng cân bằng.
+                    </p>
+                  </div>
+                );
+              })()}
+
+              <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-200/80">
+                <button
+                  type="button"
+                  onClick={() => setIsDistributeModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={distributeLoading || distributeSelectedAccs.length === 0}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-xs font-bold text-white shadow-md shadow-violet-600/30 disabled:opacity-50"
+                >
+                  {distributeLoading ? 'Đang chia đều...' : 'Xác nhận Chia đều'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL THU HỒI LINK ĐÃ CHIA ==================== */}
+      {isRevokeModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="liquid-glass-modal rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+              <h3 className="font-extrabold text-lg text-slate-900 flex items-center gap-2">
+                <RotateCcw className="w-5 h-5 text-amber-500" /> Thu hồi Link Nhóm đã chia
+              </h3>
+              <button
+                onClick={() => setIsRevokeModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handlePoolRevoke} className="space-y-4">
+              {/* Account Scope Selection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">Thu hồi từ tài khoản:</label>
+                <select
+                  value={revokeTargetAcc}
+                  onChange={(e) => setRevokeTargetAcc(e.target.value)}
+                  className="w-full text-xs font-medium bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus:bg-white focus:border-amber-500 transition-all outline-none"
+                >
+                  <option value="all">⚡ Tất cả các Nick (Toàn bộ hệ thống)</option>
+                  {groupsData.accounts?.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      👤 Nick {acc.name} ({acc.groupUrls?.length || 0} link đang giữ)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Mode Selection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-2">Chế độ thu hồi:</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setRevokeMode('unposted_only')}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      revokeMode === 'unposted_only'
+                        ? 'bg-amber-50/90 border-amber-400 text-amber-950 shadow-xs'
+                        : 'bg-white/60 border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="text-xs font-extrabold flex items-center gap-1.5">
+                      ⭐ Chỉ link Chưa đăng
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold">Khuyên dùng</span>
+                    </span>
+                    <span className="text-[11px] text-slate-500 mt-1 block">
+                      Giữ lại các nhóm đã đăng thành công của nick, chỉ thu hồi các link chưa đăng để phân bổ lại.
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setRevokeMode('all')}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      revokeMode === 'all'
+                        ? 'bg-rose-50/90 border-rose-400 text-rose-950 shadow-xs'
+                        : 'bg-white/60 border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="text-xs font-extrabold block text-rose-700">⚠️ Thu hồi toàn bộ link</span>
+                    <span className="text-[11px] text-slate-500 mt-1 block">
+                      Gỡ sạch toàn bộ link khỏi nick được chọn, đưa tất cả về trạng thái Chưa gán.
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Preview Box */}
+              {(() => {
+                const pool = groupsData.centralPool || [];
+                const targetPool = pool.filter((item) => {
+                  if (!item.assignedAccountId) return false;
+                  if (revokeTargetAcc !== 'all' && item.assignedAccountId !== revokeTargetAcc) return false;
+                  if (revokeMode === 'unposted_only' && item.lastPostStatus === 'success') return false;
+                  return true;
+                });
+                const count = targetPool.length;
+
+                return (
+                  <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200 text-xs">
+                    <span className="text-amber-950 font-bold block mb-1">📋 Dự kiến số lượng thu hồi:</span>
+                    <p className="text-amber-900 font-medium leading-relaxed">
+                      Hệ thống sẽ thu hồi <b>{count} link</b> {revokeMode === 'unposted_only' ? 'chưa đăng bài' : 'đang gán'} về lại trạng thái <b>Chưa gán</b> trong Kho chung.
+                    </p>
+                  </div>
+                );
+              })()}
+
+              <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-200/80">
+                <button
+                  type="button"
+                  onClick={() => setIsRevokeModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={revokeLoading}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-xs font-bold text-white shadow-md shadow-amber-500/30 disabled:opacity-50"
+                >
+                  {revokeLoading ? 'Đang thu hồi...' : 'Xác nhận Thu hồi'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL XEM CHI TIẾT LỖI NHÓM ==================== */}
+      {viewingGroupError && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="liquid-glass-modal rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+              <h3 className="font-extrabold text-base text-rose-700 flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-rose-600" /> Chi tiết lỗi đăng nhóm
+              </h3>
+              <button
+                onClick={() => setViewingGroupError(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                <span className="font-bold text-slate-600 block mb-1">🔗 Đường dẫn nhóm:</span>
+                <a
+                  href={viewingGroupError.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-600 hover:underline break-all font-mono"
+                >
+                  {viewingGroupError.url}
+                </a>
+              </div>
+
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs">
+                <span className="font-bold text-rose-900 block mb-1">⚠️ Nội dung thông báo lỗi:</span>
+                <p className="text-rose-800 font-mono leading-relaxed">{viewingGroupError.error}</p>
+              </div>
+
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs">
+                <span className="font-bold text-amber-900 block mb-1">💡 Hướng dẫn xử lý:</span>
+                <ul className="list-disc pl-4 text-amber-800 space-y-1">
+                  <li>Nếu lỗi <b>&quot;Chưa tham gia nhóm&quot;</b> hoặc <b>&quot;Chờ phê duyệt&quot;</b>: Hãy mở Chrome Profile của Nick, vào nhóm và ấn Tham gia / trả lời câu hỏi của Quản trị viên.</li>
+                  <li>Nếu lỗi <b>&quot;Timeout&quot;</b>: Kiểm tra đường truyền mạng hoặc giao diện Facebook có bị chậm không.</li>
+                  <li>Nếu lỗi <b>&quot;Không tìm thấy ô đăng bài&quot;</b>: Nhóm có thể đang tạm khóa tính năng đăng bài của thành viên.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setViewingGroupError(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
+              >
+                Đóng
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3209,24 +4860,48 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {selectedHistoryItem.error && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-extrabold text-rose-700 flex items-center gap-1.5">
-                  <AlertCircle className="w-4 h-4" /> Nguyên nhân lỗi:
-                </label>
-                <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-900 font-semibold leading-relaxed">
-                  {selectedHistoryItem.error}
+            {selectedHistoryItem.error && (() => {
+              const parsed = parseErrorMessage(selectedHistoryItem.error);
+              const hasTechDetails = parsed.technicalDetails || selectedHistoryItem.errorDetails;
+              const fullTechDetails = selectedHistoryItem.errorDetails 
+                ? (parsed.technicalDetails ? `${parsed.technicalDetails}\n\n--- Stack Trace ---\n${selectedHistoryItem.errorDetails}` : selectedHistoryItem.errorDetails)
+                : parsed.technicalDetails;
+
+              return (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-extrabold text-rose-700 flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4" /> Nguyên nhân lỗi:
+                    </label>
+                    <button
+                      onClick={() => copyToClipboard(parsed.summary, `detail_err_${selectedHistoryItem.id}`)}
+                      className="text-[11px] font-bold text-rose-700 hover:text-rose-900 flex items-center gap-1 bg-rose-100 px-2 py-0.5 rounded-md hover:bg-rose-200 transition-all cursor-pointer"
+                    >
+                      {copiedId === `detail_err_${selectedHistoryItem.id}` ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      Sao chép lỗi
+                    </button>
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-900 font-bold leading-relaxed">
+                    {parsed.summary}
+                  </div>
+                  {parsed.suggestion && (
+                    <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                      💡 <b>Khắc phục:</b> {parsed.suggestion}
+                    </div>
+                  )}
+                  {hasTechDetails && (
+                    <details className="mt-2 text-xs">
+                      <summary className="text-slate-500 cursor-pointer hover:text-slate-800 font-bold select-none">
+                        ⚙️ Xem chi tiết kỹ thuật (Call log & Stack trace)
+                      </summary>
+                      <pre className="mt-2 p-3 rounded-xl bg-slate-900 text-rose-300 text-[11px] overflow-x-auto font-mono max-h-60 leading-relaxed">
+                        {fullTechDetails}
+                      </pre>
+                    </details>
+                  )}
                 </div>
-                {selectedHistoryItem.errorDetails && (
-                  <details className="mt-2 text-xs">
-                    <summary className="text-slate-500 cursor-pointer hover:text-slate-800 font-bold">Chi tiết stack trace kĩ thuật</summary>
-                    <pre className="mt-2 p-3 rounded-xl bg-slate-900 text-slate-100 text-[11px] overflow-x-auto font-mono">
-                      {selectedHistoryItem.errorDetails}
-                    </pre>
-                  </details>
-                )}
-              </div>
-            )}
+              );
+            })()}
 
             <div className="flex justify-between items-center pt-3 border-t border-slate-200/80">
               <button
@@ -3248,6 +4923,173 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* ==================== MODAL CHI TIẾT LỖI TÁC VỤ (ERROR DETAIL MODAL) ==================== */}
+      {viewingErrorItem && (() => {
+        const parsed = parseErrorMessage(viewingErrorItem.error);
+        const hasTechDetails = parsed.technicalDetails || viewingErrorItem.errorDetails;
+        const fullTechDetails = viewingErrorItem.errorDetails 
+          ? (parsed.technicalDetails ? `${parsed.technicalDetails}\n\n--- Stack Trace ---\n${viewingErrorItem.errorDetails}` : viewingErrorItem.errorDetails)
+          : parsed.technicalDetails;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="liquid-glass-modal rounded-3xl w-full max-w-2xl p-6 md:p-7 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto border border-rose-200/80">
+              
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-rose-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <span className="p-2.5 rounded-2xl bg-rose-100 text-rose-600 border border-rose-200 shadow-sm">
+                    <AlertCircle className="w-6 h-6" />
+                  </span>
+                  <div>
+                    <h3 className="font-black text-lg text-slate-900 flex items-center gap-2">
+                      Chi Tiết Lỗi Thất Bại
+                    </h3>
+                    <p className="text-xs text-slate-500 font-mono">
+                      Mã tác vụ: {viewingErrorItem.id} • {new Date(viewingErrorItem.timestamp).toLocaleString('vi-VN')}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setViewingErrorItem(null)}
+                  className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Context Info */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                  <span className="text-slate-500 font-bold block mb-0.5">Kênh xuất bản:</span>
+                  <span className="font-extrabold text-blue-700">{viewingErrorItem.channelName || viewingErrorItem.channel}</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                  <span className="text-slate-500 font-bold block mb-0.5">Tài khoản đích:</span>
+                  <span className="font-extrabold text-slate-800">{viewingErrorItem.targetName || 'Mặc định'}</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 col-span-2 sm:col-span-1">
+                  <span className="text-slate-500 font-bold block mb-0.5">Tài khoản AI:</span>
+                  <span className="font-extrabold text-violet-700">{viewingErrorItem.chatgptAccount || '—'}</span>
+                </div>
+              </div>
+
+              {/* Target URL if present */}
+              {viewingErrorItem.targetUrl && (
+                <div className="p-2.5 rounded-xl bg-blue-50/70 border border-blue-200 text-xs flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 overflow-hidden">
+                    <span className="text-blue-900 font-bold shrink-0">🔗 Đường dẫn:</span>
+                    <a
+                      href={viewingErrorItem.targetUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-600 hover:underline truncate font-mono"
+                    >
+                      {viewingErrorItem.targetUrl}
+                    </a>
+                  </div>
+                  <button
+                    onClick={() => copyToClipboard(viewingErrorItem.targetUrl!, `url_${viewingErrorItem.id}`)}
+                    className="shrink-0 p-1 text-blue-600 hover:bg-blue-100 rounded-lg transition-all cursor-pointer"
+                    title="Sao chép link"
+                  >
+                    {copiedId === `url_${viewingErrorItem.id}` ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              )}
+
+              {/* Clean Error Message */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-rose-800 flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4 text-rose-600" /> Nội Dung Lỗi Gặp Phải:
+                  </label>
+                  <button
+                    onClick={() => copyToClipboard(parsed.summary, `err_msg_${viewingErrorItem.id}`)}
+                    className="text-[11px] font-bold text-rose-700 hover:text-rose-900 flex items-center gap-1 bg-rose-100/80 px-2 py-0.5 rounded-md hover:bg-rose-200 transition-all cursor-pointer"
+                  >
+                    {copiedId === `err_msg_${viewingErrorItem.id}` ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                    Sao chép lỗi
+                  </button>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-950 font-bold text-xs leading-relaxed shadow-xs">
+                  {parsed.summary}
+                </div>
+              </div>
+
+              {/* Suggestion / Fix guidance */}
+              {parsed.suggestion && (
+                <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-xs space-y-1">
+                  <div className="font-extrabold text-amber-900 flex items-center gap-1.5">
+                    💡 Hướng dẫn khắc phục:
+                  </div>
+                  <p className="text-amber-800 font-medium leading-relaxed">
+                    {parsed.suggestion}
+                  </p>
+                </div>
+              )}
+
+              {/* Technical Stack / Call Log */}
+              {hasTechDetails && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      ⚙️ Chi tiết nhật ký kỹ thuật (Call Log / Stack Trace):
+                    </label>
+                    <button
+                      onClick={() => copyToClipboard(fullTechDetails || '', `err_tech_${viewingErrorItem.id}`)}
+                      className="text-[11px] font-bold text-slate-600 hover:text-slate-900 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-md hover:bg-slate-200 transition-all cursor-pointer"
+                    >
+                      {copiedId === `err_tech_${viewingErrorItem.id}` ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      Sao chép log
+                    </button>
+                  </div>
+                  <pre className="p-3.5 rounded-2xl bg-slate-900 text-rose-300 text-[11px] font-mono leading-relaxed overflow-x-auto max-h-56 border border-slate-800 shadow-inner">
+                    {fullTechDetails}
+                  </pre>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex justify-between items-center pt-3 border-t border-slate-200/80">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleDeleteHistoryEntry(viewingErrorItem.id);
+                    setViewingErrorItem(null);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-xs font-bold text-rose-700 flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Xóa bản ghi này
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const item = viewingErrorItem;
+                      setViewingErrorItem(null);
+                      setSelectedHistoryItem(item);
+                      setIsDetailModalOpen(true);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5" /> Xem toàn bộ tác vụ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewingErrorItem(null)}
+                    className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-bold text-white shadow-md transition-all cursor-pointer"
+                  >
+                    Đóng
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

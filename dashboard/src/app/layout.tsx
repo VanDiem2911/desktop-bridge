@@ -4,6 +4,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "DUDI Control Center — Quản lý Tài khoản, Nhóm FB & Nội dung AI",
   description: "Hệ thống quản trị tập trung tài khoản ChatGPT, Facebook Fanpage, Groups và kho nội dung tự động",
+  icons: {
+    icon: "/logo.png",
+  },
 };
 
 export default function RootLayout({

@@ -197,7 +197,209 @@ async function firstVisible(page, selectors, timeout = 15000) {
 }
 
 /**
- * Đăng bài vào 1 Facebook Group (Áp dụng 100% cấu trúc chuẩn như server.mjs)
+ * Tự động xử lý popup trả lời câu hỏi / đồng ý quy tắc nhóm nếu Facebook hiện lên sau khi bấm "Tham gia nhóm"
+ */
+async function handleMembershipQuestionsPopup(page) {
+  const deadline = Date.now() + 12000;
+  while (Date.now() < deadline) {
+    const dialogs = page.locator('[role="dialog"]');
+    if (!(await dialogs.count())) break;
+    const dialog = dialogs.last();
+    if (!(await dialog.isVisible())) break;
+
+    console.log('[Group Join] Phát hiện popup xác nhận / câu hỏi tham gia nhóm...');
+
+    // 1. Tự động tick tất cả checkbox đồng ý quy tắc nhóm (Tôi đồng ý với quy tắc...)
+    try {
+      const checkboxes = dialog.locator('input[type="checkbox"], [role="checkbox"]');
+      const cbCount = await checkboxes.count();
+      for (let c = 0; c < cbCount; c++) {
+        const cb = checkboxes.nth(c);
+        if (await cb.isVisible()) {
+          const isChecked = await cb.isChecked().catch(() => false);
+          const ariaChecked = await cb.getAttribute('aria-checked').catch(() => null);
+          if (!isChecked && ariaChecked !== 'true') {
+            await cb.click({ force: true }).catch(() => {});
+            console.log(`[Group Join] Đã tick đồng ý quy tắc nhóm (#${c + 1}).`);
+            await delay(500);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Group Join] Lỗi khi tick checkbox quy tắc:', e.message);
+    }
+
+    // 2. Tự động điền câu trả lời ngắn nếu có ô textarea/text rỗng
+    try {
+      const textInputs = dialog.locator('textarea, input[type="text"]:not([readonly])');
+      const inputCount = await textInputs.count();
+      for (let t = 0; t < inputCount; t++) {
+        const input = textInputs.nth(t);
+        if (await input.isVisible()) {
+          const val = await input.inputValue().catch(() => '');
+          if (!val || !val.trim()) {
+            await input.fill('Tôi đồng ý tuân thủ toàn bộ quy tắc của nhóm.').catch(() => {});
+            console.log(`[Group Join] Đã điền câu trả lời quy tắc (#${t + 1}).`);
+            await delay(500);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Group Join] Lỗi khi điền text câu hỏi:', e.message);
+    }
+
+    // 3. Tự động chọn radio button đầu tiên nếu có câu hỏi trắc nghiệm
+    try {
+      const radios = dialog.locator('[role="radio"], input[type="radio"]');
+      const radioCount = await radios.count();
+      if (radioCount > 0) {
+        const firstRadio = radios.first();
+        if (await firstRadio.isVisible()) {
+          const isChecked = await firstRadio.isChecked().catch(() => false);
+          const ariaChecked = await firstRadio.getAttribute('aria-checked').catch(() => null);
+          if (!isChecked && ariaChecked !== 'true') {
+            await firstRadio.click({ force: true }).catch(() => {});
+            console.log('[Group Join] Đã chọn phương án trắc nghiệm đầu tiên.');
+            await delay(500);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Group Join] Lỗi khi chọn radio:', e.message);
+    }
+
+    // 4. Tìm và bấm nút Gửi / Hoàn tất / Tiếp / Xác nhận / Submit
+    const submitSelectors = [
+      '[role="dialog"] [role="button"]:has-text("Gửi")',
+      '[role="dialog"] [role="button"]:has-text("Hoàn tất")',
+      '[role="dialog"] [role="button"]:has-text("Xác nhận")',
+      '[role="dialog"] [role="button"]:has-text("Tiếp tục")',
+      '[role="dialog"] [role="button"]:has-text("Tiếp")',
+      '[role="dialog"] [role="button"]:has-text("Submit")',
+      '[role="dialog"] [role="button"]:has-text("Done")',
+      '[role="dialog"] [role="button"]:has-text("Confirm")',
+      '[role="dialog"] [role="button"]:has-text("Next")',
+      '[role="dialog"] [role="button"]:has-text("Send")',
+      '[role="dialog"] [aria-label*="Gửi" i]',
+      '[role="dialog"] [aria-label*="Submit" i]',
+      '[role="dialog"] [aria-label*="Hoàn tất" i]',
+    ];
+
+    let clicked = false;
+    for (const s of submitSelectors) {
+      const btn = page.locator(s).last();
+      if (await btn.count() && await btn.isVisible()) {
+        await btn.click({ force: true }).catch(() => {});
+        console.log(`[Group Join] Đã bấm nút gửi popup quy tắc / câu hỏi: ${s}`);
+        clicked = true;
+        await delay(2500);
+        break;
+      }
+    }
+
+    if (!clicked) {
+      const rBtn = dialog.getByRole('button', { name: /^(Gửi|Gửi câu trả lời|Hoàn tất|Xác nhận|Tiếp tục|Tiếp|Submit|Done|Confirm|Send|Next)$/i }).last();
+      if (await rBtn.count() && await rBtn.isVisible()) {
+        await rBtn.click({ force: true }).catch(() => {});
+        console.log('[Group Join] Đã bấm nút submit popup qua getByRole.');
+        clicked = true;
+        await delay(2500);
+      }
+    }
+
+    if (!clicked || !(await dialog.isVisible())) {
+      break;
+    }
+  }
+}
+
+/**
+ * Kiểm tra trạng thái tham gia nhóm và tự động tham gia nếu chưa tham gia
+ */
+async function ensureJoinedGroup(page, groupUrl) {
+  // 1. Kiểm tra xem đã tham gia nhóm chưa
+  const alreadyJoined = page.locator('[role="button"]:has-text("Đã tham gia"), [role="button"]:has-text("Joined"), [role="button"]:has-text("Quản lý"), [role="button"]:has-text("Manage"), [aria-label*="Đã tham gia" i], [aria-label*="Joined" i]').first();
+  if (await alreadyJoined.count() && await alreadyJoined.isVisible()) {
+    console.log(`[Group Join] Tài khoản ĐÃ THAM GIA nhóm: ${groupUrl}`);
+    return { joined: true, pending: false, status: 'already_joined' };
+  }
+
+  // 2. Kiểm tra xem có đang ở trạng thái chờ duyệt không
+  const pendingBtn = page.locator('[role="button"]:has-text("Hủy yêu cầu"), [role="button"]:has-text("Cancel request"), [role="button"]:has-text("Đã gửi yêu cầu"), [role="button"]:has-text("Yêu cầu đang chờ"), [role="button"]:has-text("Pending")').first();
+  if (await pendingBtn.count() && await pendingBtn.isVisible()) {
+    console.log(`[Group Join] Yêu cầu tham gia nhóm ĐANG CHỜ PHÊ DUYỆT từ Quản trị viên.`);
+    return { joined: false, pending: true, status: 'pending_approval' };
+  }
+
+  // 3. Tìm nút "Tham gia nhóm"
+  const joinButtonSelectors = [
+    'div[role="main"] [role="button"]:has-text("Tham gia nhóm")',
+    'div[role="main"] [role="button"]:has-text("Join group")',
+    'div[role="main"] [role="button"]:has-text("+ Tham gia nhóm")',
+    'div[role="main"] [role="button"]:has-text("+ Join group")',
+    '[role="button"][aria-label*="Tham gia nhóm" i]',
+    '[role="button"][aria-label*="Join group" i]',
+    '[role="button"]:has-text("Tham gia nhóm")',
+    '[role="button"]:has-text("Join group")',
+    '[role="button"]:has-text("+ Tham gia nhóm")',
+    '[role="button"]:has-text("+ Join group")',
+    '[aria-label*="Tham gia nhóm" i]',
+    '[aria-label*="Join group" i]',
+  ];
+
+  let joinBtn = null;
+  for (const sel of joinButtonSelectors) {
+    const loc = page.locator(sel).first();
+    if (await loc.count()) {
+      try {
+        if (await loc.isVisible()) {
+          const text = (await loc.innerText()).trim();
+          if (!text.includes('Đã tham gia') && !text.includes('Joined') && !text.includes('Hủy') && !text.includes('Cancel')) {
+            joinBtn = loc;
+            break;
+          }
+        }
+      } catch {}
+    }
+  }
+
+  if (!joinBtn) {
+    const roleBtn = page.getByRole('button', { name: /^(Tham gia nhóm|\+ Tham gia nhóm|Tham gia|Join group|\+ Join group|Join)$/i }).first();
+    if (await roleBtn.count() && await roleBtn.isVisible()) {
+      const text = (await roleBtn.innerText().catch(() => '')).trim();
+      if (!text.includes('Đã tham gia') && !text.includes('Joined') && !text.includes('Hủy') && !text.includes('Cancel')) {
+        joinBtn = roleBtn;
+      }
+    }
+  }
+
+  if (joinBtn) {
+    console.log(`[Group Join] Nhóm chưa tham gia! Đang bấm "Tham gia nhóm"...`);
+    await joinBtn.click();
+    await delay(3000);
+
+    // Xử lý popup câu hỏi / quy tắc nhóm nếu có
+    await handleMembershipQuestionsPopup(page);
+
+    await delay(3000);
+
+    // Kiểm tra lại sau khi tham gia
+    const nowPending = page.locator('[role="button"]:has-text("Hủy yêu cầu"), [role="button"]:has-text("Cancel request"), [role="button"]:has-text("Đã gửi yêu cầu"), [role="button"]:has-text("Pending")').first();
+    if (await nowPending.count() && await nowPending.isVisible()) {
+      console.log(`[Group Join] Đã gửi yêu cầu tham gia thành công (Chờ admin duyệt).`);
+      return { joined: false, pending: true, status: 'just_requested_pending' };
+    }
+
+    console.log(`[Group Join] Đã tham gia nhóm thành công!`);
+    return { joined: true, pending: false, status: 'just_joined' };
+  }
+
+  // Không tìm thấy nút tham gia nhóm (có thể đã là thành viên hoặc giao diện khác)
+  return { joined: true, pending: false, status: 'assumed_joined' };
+}
+
+/**
+ * Đăng bài vào 1 Facebook Group (Tự động kiểm tra & tham gia nhóm trước khi đăng)
  */
 async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType = 'image/png', fileName = 'image.png') {
   console.log(`[Group Post] Đang truy cập nhóm: ${groupUrl}...`);
@@ -208,30 +410,48 @@ async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType 
     throw new Error('Tài khoản Facebook chưa đăng nhập trong profile này. Hãy chạy open-setup-chrome.ps1 để đăng nhập.');
   }
 
+  // BƯỚC 1: KIỂM TRA VÀ TỰ ĐỘNG THAM GIA NHÓM NẾU CHƯA THAM GIA
+  const joinResult = await ensureJoinedGroup(page, groupUrl);
+  await delay(2000);
+
   const postCaption = cleanCaption(caption);
 
-  // 1. Mở popup Tạo bài viết nếu chưa mở
+  // BƯỚC 2: MỞ POPUP TẠO BÀI VIẾT NẾU CHƯA MỞ
+  const createPostSelectors = [
+    '[role="button"][aria-label*="Bạn viết gì đi" i]',
+    '[role="button"][aria-label*="Viết gì đó" i]',
+    '[role="button"][aria-label*="Tạo bài viết công khai" i]',
+    '[role="button"][aria-label*="Tạo bài viết" i]',
+    '[role="button"][aria-label*="Write something" i]',
+    '[role="button"][aria-label*="Create a public post" i]',
+    '[role="button"]:has-text("Bạn viết gì đi")',
+    '[role="button"]:has-text("Viết gì đó")',
+    '[role="button"]:has-text("Tạo bài viết công khai")',
+    '[role="button"]:has-text("Tạo bài viết")',
+    '[role="button"]:has-text("Write something")',
+    '[role="button"]:has-text("Create a public post")',
+    'div[role="main"] span:has-text("Bạn viết gì đi")',
+    'div[role="main"] span:has-text("Viết gì đó")',
+    'div[role="main"] span:has-text("Write something")',
+    'div[role="main"] span:has-text("Tạo bài viết")',
+  ];
+
   let dialog = page.locator('[role="dialog"]').filter({ has: page.locator('[contenteditable="true"]') }).last();
   if (!(await dialog.count()) || !(await dialog.isVisible())) {
-    const createPost = await firstVisible(page, [
-      '[role="button"][aria-label*="Bạn viết gì đi"]',
-      '[role="button"][aria-label*="Viết gì đó"]',
-      '[role="button"][aria-label*="Tạo bài viết công khai"]',
-      '[role="button"][aria-label*="Tạo bài viết"]',
-      '[role="button"][aria-label*="Write something"]',
-      '[role="button"][aria-label*="Create a public post"]',
-      '[role="button"]:has-text("Bạn viết gì đi")',
-      '[role="button"]:has-text("Viết gì đó")',
-      '[role="button"]:has-text("Tạo bài viết công khai")',
-      '[role="button"]:has-text("Tạo bài viết")',
-      '[role="button"]:has-text("Write something")',
-      '[role="button"]:has-text("Create a public post")',
-      'div[role="main"] span:has-text("Bạn viết gì đi")',
-      'div[role="main"] span:has-text("Viết gì đó")',
-    ]);
+    let createPost = await firstVisible(page, createPostSelectors, 10000);
 
     if (!createPost) {
-      throw new Error(`Không tìm thấy ô đăng bài trong nhóm ${groupUrl}. Có thể tài khoản chưa tham gia nhóm.`);
+      // Thử cuộn nhẹ trang xuống để nạp DOM
+      await page.evaluate(() => window.scrollBy(0, 300)).catch(() => {});
+      await delay(2000);
+      createPost = await firstVisible(page, createPostSelectors, 8000);
+    }
+
+    if (!createPost) {
+      if (joinResult.pending) {
+        throw new Error(`Đã gửi yêu cầu tham gia nhóm thành công nhưng nhóm yêu cầu Quản trị viên phê duyệt thành viên trước khi có thể đăng bài.`);
+      }
+      throw new Error(`Không tìm thấy ô đăng bài trong nhóm ${groupUrl}. Có thể nhóm tắt quyền đăng bài hoặc đang chờ phê duyệt thành viên.`);
     }
 
     await createPost.click();
@@ -243,7 +463,7 @@ async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType 
     dialog = page.locator('[role="dialog"]').last();
   }
 
-  // 2. Tìm ô soạn thảo trong dialog
+  // BƯỚC 3: TÌM Ô SOẠN THẢO TRONG DIALOG VÀ ĐIỀN NỘI DUNG
   const composerSelectors = [
     '[role="dialog"] div[role="textbox"]',
     '[role="dialog"] div[contenteditable="true"]',
@@ -253,6 +473,8 @@ async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType 
     '[role="dialog"] [aria-label*="nghĩ gì" i]',
     '[role="dialog"] [aria-label*="tạo bài viết" i]',
     '[role="dialog"] [contenteditable="true"]',
+    'div[role="textbox"]',
+    'div[contenteditable="true"]',
   ];
 
   let composer = null;
@@ -288,7 +510,7 @@ async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType 
   console.log('[Group Post] Đã điền nội dung vào bài viết.');
   await delay(1000);
 
-  // 3. Tải ảnh vào cùng bài viết này
+  // BƯỚC 4: TẢI ẢNH VÀO CÙNG BÀI VIẾT NÀY
   if (imageBase64 && imageBase64.length > 100) {
     let uploads = dialog.locator('input[type="file"][accept*="image"]');
     if (!(await uploads.count())) {
@@ -312,16 +534,37 @@ async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType 
     }
   }
 
-  const next = dialog.getByRole('button', { name: /^(Tiếp|Next)$/ });
+  // BƯỚC 5: BẤM NÚT TIẾP NẾU CÓ
+  const next = dialog.getByRole('button', { name: /^(Tiếp|Next)$/i });
   if (await next.count() && await next.first().isVisible()) {
     await next.first().click();
     await delay(2500);
   }
 
-  const publish = page.getByRole('button', { name: /^(Post|Đăng)$/ });
-  await publish.first().waitFor({ state: 'visible', timeout: 30000 });
+  // BƯỚC 6: BẤM NÚT ĐĂNG BÀI (POST / ĐĂNG / GỬI / SUBMIT)
+  const publishSelectors = [
+    '[role="dialog"] [role="button"]:has-text("Đăng")',
+    '[role="dialog"] [role="button"]:has-text("Post")',
+    '[role="dialog"] [role="button"]:has-text("Gửi")',
+    '[role="dialog"] [role="button"]:has-text("Submit")',
+    '[role="button"][aria-label*="Đăng" i]',
+    '[role="button"][aria-label*="Post" i]',
+  ];
+
+  let publishBtn = dialog.getByRole('button', { name: /^(Post|Đăng|Gửi|Submit)$/i }).first();
+  if (!(await publishBtn.count()) || !(await publishBtn.isVisible())) {
+    for (const pSel of publishSelectors) {
+      const btn = page.locator(pSel).last();
+      if (await btn.count() && await btn.isVisible()) {
+        publishBtn = btn;
+        break;
+      }
+    }
+  }
+
+  await publishBtn.waitFor({ state: 'visible', timeout: 30000 });
   console.log('[Group Post] Bấm nút Đăng bài...');
-  await publish.first().click();
+  await publishBtn.click();
   console.log('[Group Post] Đã bấm nút Đăng. Đang chờ xuất bản...');
 
   try {
@@ -333,6 +576,7 @@ async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType 
 
   await delay(8000);
   console.log(`[Group Post] Hoàn thành đăng nhóm: ${groupUrl}`);
+  return { success: true, joinStatus: joinResult.status };
 }
 
 /**
@@ -756,6 +1000,93 @@ async function waitForGeneratedImageGpt(page, initialSrcs = new Set()) {
   throw new Error('Hết thời gian 6 phút chờ ChatGPT tạo ảnh.');
 }
 
+// 20 BACKGROUND NỔI BẬT ĐA DẠNG MÀU SẮC (Tím, Xanh nước biển, Lục bảo, Đỏ, Cyberpunk, 3D Luxury)
+const VIBRANT_BACKGROUNDS = [
+  'futuristic cyberpunk stage bathed in intense neon violet and electric purple lighting, glowing purple holographic geometry, dark glossy floor with vivid reflections, cinematic atmospheric purple fog',
+  'stunning deep ocean sapphire showroom with glowing electric blue and cyan light ribbons, sleek dark glass pedestal, immersive aquatic blue ambient glow, high-contrast cool atmosphere',
+  'luxurious 3D digital gallery with deep emerald green and glowing mint neon accents, dark obsidian marble reflective floor, floating jade light crystals, premium modern aesthetic',
+  'high-impact futuristic showroom bathed in dramatic crimson red and glowing ruby neon lighting, dark carbon-fiber textured panels, striking red rim lighting and sharp reflections',
+  'luxurious midnight indigo studio with vibrant magenta and purple neon light tubes, floating frosted glass geometric prisms, deep amethyst backdrop, futuristic soft glow',
+  'cutting-edge futuristic stage with glowing ice blue neon pillars, sleek frosted glass architectural elements, clean minimalist deep cobalt and arctic cyan lighting',
+  'breathtaking futuristic indoor bio-tech garden with glowing teal and emerald flora, sleek architectural glass arches, soft cyan and mint lighting, modern tech vibe',
+  'dramatic dark obsidian stage with glowing scarlet red neon light rings, floating red holographic geometric shapes, bold and energetic high-tech atmosphere',
+  'abstract 3D luxury stage with curved glossy purple panels, floating glowing violet rings, deep galaxy purple backdrop with shimmering starlight ambient glow',
+  'sleek dark cobalt blue virtual space with floating glowing neon cyan data nodes, interconnected digital light lines, futuristic technology showroom aesthetic',
+  'futuristic high-tech lab with glowing neon emerald and bright mint green light strips, holographic matrix projections, dark charcoal metallic surfaces, vibrant green ambient glow',
+  'cutting-edge technology studio with glowing ruby red laser grid lines, floating glass panels, dark matte background with vivid crimson backlight and sleek reflections',
+  'dramatic high-tech penthouse terrace overlooking a glowing neon cyberpunk city at dusk, rich purple and neon violet glow, soft city bokeh lights, reflective glass railings',
+  'futuristic high-tech digital studio bathed in electric royal blue and glowing cyan neon lighting, transparent holographic interfaces, sleek reflective floor, cool blue atmosphere',
+  'modern digital showroom with deep teal and dark aqua tones, glowing mint neon light tubes, floating 3D geometric glass prisms, crisp emerald reflections',
+  'energetic futuristic presentation stage with warm crimson red and glowing neon scarlet arches, sleek polished dark podium, dynamic cinematic lighting',
+  'sleek futuristic exhibition stage with glowing violet laser light grids, floating holographic data crystals, deep dark purple backdrop with neon purple accents',
+  'sleek panoramic lounge overlooking a neon-lit futuristic city with glowing blue and cyan skyscrapers at night, polished dark marble surfaces, rich cool blue tones',
+  'abstract 3D stage featuring floating glowing emerald crystals, neon mint ambient lighting, dark glossy floor reflecting vibrant green light',
+  'futuristic urban terrace overlooking a neon red cyberpunk cityscape at night, glowing ruby billboards in background, sleek dark metal architecture, high-contrast glow',
+];
+
+let currentBgIndex = Math.floor(Math.random() * VIBRANT_BACKGROUNDS.length);
+let currentLayoutIndex = Math.floor(Math.random() * 5);
+let currentPoseIndex = Math.floor(Math.random() * 7);
+
+function getNextBackground() {
+  const bg = VIBRANT_BACKGROUNDS[currentBgIndex % VIBRANT_BACKGROUNDS.length];
+  const bgNumber = (currentBgIndex % VIBRANT_BACKGROUNDS.length) + 1;
+  currentBgIndex = (currentBgIndex + 1) % VIBRANT_BACKGROUNDS.length;
+  return { bg, bgNumber };
+}
+
+function getNextLayout(layouts) {
+  const layout = layouts[currentLayoutIndex % layouts.length];
+  const layoutNumber = (currentLayoutIndex % layouts.length) + 1;
+  currentLayoutIndex = (currentLayoutIndex + 1) % layouts.length;
+  return { layout, layoutNumber };
+}
+
+function getNextPose(poses) {
+  const pose = poses[currentPoseIndex % poses.length];
+  const poseNumber = (currentPoseIndex % poses.length) + 1;
+  currentPoseIndex = (currentPoseIndex + 1) % poses.length;
+  return { pose, poseNumber };
+}
+
+function pickVariation(promptText = '', hasDu = true) {
+  const { bg, bgNumber } = getNextBackground();
+
+  const duLayouts = [
+    'FULL-BLEED SCENE WITH SOFT CURVED OVERLAY CARD (Right): Environmental background spans 100% full-bleed. A sleek semi-transparent white frosted glass panel with smooth curved edges rests on the RIGHT side containing all headline text. Du mascot stands neatly on the LEFT side.',
+    'FULL-BLEED SCENE WITH FROSTED GLASS PANEL (Left): Environmental background spans 100% full-bleed. A sleek semi-transparent frosted glass panel rests on the LEFT side containing all text. Du mascot stands cleanly on the RIGHT side.',
+    'FULL-BLEED SCENE WITH FLOATING TEXT CARD (Top-Right): Environmental background spans 100% full-bleed. Headline text is placed on a clean translucent floating card in the TOP-RIGHT area. Du mascot stands in the BOTTOM-LEFT corner.',
+    'FULL-BLEED SCENE WITH FLOATING TEXT CARD (Top-Left): Environmental background spans 100% full-bleed. Headline text is placed on a clean translucent floating card in the TOP-LEFT area. Du mascot stands in the BOTTOM-RIGHT corner.',
+    'FULL-BLEED SCENE WITH BOTTOM TEXT BAR: Environmental background spans 100% full-bleed. Translucent frosted glass bar across the BOTTOM 35% contains all text. Du mascot stands in the UPPER-LEFT area.',
+  ];
+  const duPoses = [
+    'standing upright with RIGHT arm extended, index finger confidently pointing toward the text area',
+    'sitting casually on the edge of a stylized floating geometric platform, one leg dangling, relaxed and approachable pose',
+    'walking forward dynamically with a confident energetic stride, arms swinging naturally',
+    'arms crossed over chest in a cool confident stance, head tilted slightly',
+    'holding a glowing holographic tablet or phone in both hands, screen emitting soft blue light',
+    'both arms raised upward in a celebratory V-shape victory pose',
+    'leaning forward slightly with one hand raised in a friendly wave gesture',
+  ];
+  const { layout, layoutNumber } = getNextLayout(duLayouts);
+  const { pose, poseNumber } = getNextPose(duPoses);
+  console.log(`[Variation] Du Layout: ${layoutNumber}/${duLayouts.length} | Pose: ${poseNumber}/${duPoses.length} | BG: #${bgNumber}/20 (Xoay vòng xen kẽ)`);
+
+  return [
+    '⚠️ MANDATORY COMPOSITION OVERRIDE — YOU MUST FOLLOW THIS EXACTLY:',
+    '1. BACKGROUND: The environmental background scene MUST be FULL-BLEED, spanning 100% of the entire image canvas corner-to-corner (no solid split color blocks).',
+    '2. BRANDING / LOGO: Include a clean brand logo badge in the TOP corner (top-left or top-right) displaying bold white text "DUDI" with "software" underneath on a vibrant red background.',
+    '3. DU CHARACTER: Du mascot is medium-to-small size (20-40% of frame height), fully opaque and solid.',
+    '4. TEXT ZONE: All text MUST be placed inside a clean semi-transparent frosted glass panel or translucent overlay card resting over the full-bleed background.',
+    '5. ZONE SEPARATION: Text and Du character occupy separate non-overlapping spatial zones — zero text printed on top of Du.',
+    `LAYOUT: ${layout}`,
+    `BACKGROUND SCENE: ${bg}`,
+    `DU POSE: ${pose}`,
+    'The layout, background, and pose above are ABSOLUTE REQUIREMENTS and OVERRIDE any other instruction.',
+    '---',
+  ].join('\n');
+}
+
 async function executeGenerateOnAccount(account, { prompt, aspectRatio, newConversation = false }) {
   const { browser, page } = await openChatGptPage(account, { newConversation });
   try {
@@ -770,8 +1101,10 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, newConve
       let fullPrompt;
 
       if (attempt === 1) {
+        const variation = pickVariation(prompt, true);
         fullPrompt = [
           'Generate one high-quality, professional image matching the following description:',
+          variation,
           prompt.trim(),
           aspectRatio ? 'Preferred aspect ratio: ' + aspectRatio + '.' : '',
           'Do not explain the prompt. Generate the image now.',
@@ -876,16 +1209,43 @@ app.get('/config', (_req, res) => {
 
 app.post('/generate', async (req, res) => {
   const startTime = Date.now();
+  const body = req.body || {};
+  const action = body.action;
+
+  // Nếu payload là đăng bài nhóm Facebook
+  if (
+    action === 'publish_facebook_group' ||
+    action === 'publish_facebook_groups' ||
+    action === 'post_groups' ||
+    action === 'publish_facebook_post' ||
+    (!action && body.caption && !body.prompt)
+  ) {
+    if (activeGroupJob) {
+      return res.status(429).json({ error: 'Đang có một tiến trình đăng bài nhóm đang chạy. Vui lòng thử lại sau.' });
+    }
+    try {
+      activeGroupJob = true;
+      const report = await executeGroupPosting(body);
+      return res.json(report);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      return res.status(500).json({ error: errorMsg });
+    } finally {
+      activeGroupJob = false;
+    }
+  }
+
+  // Mặc định tạo ảnh qua ChatGPT
   try {
-    const result = await generateGroupImage(req.body);
+    const result = await generateGroupImage(body);
     logPostActivity({
       type: 'image_generate',
       channel: 'chatgpt',
       channelName: 'ChatGPT Image AI (Nhóm)',
       status: 'success',
-      prompt: req.body.prompt,
+      prompt: body.prompt,
       chatgptAccount: result.account,
-      aspectRatio: req.body.aspectRatio,
+      aspectRatio: body.aspectRatio,
       durationMs: Date.now() - startTime,
     });
     res.json(result);
@@ -896,7 +1256,7 @@ app.post('/generate', async (req, res) => {
       channel: 'chatgpt',
       channelName: 'ChatGPT Image AI (Nhóm)',
       status: 'failed',
-      prompt: req.body?.prompt,
+      prompt: body?.prompt,
       error: errorMsg,
       errorDetails: error.stack,
       durationMs: Date.now() - startTime,

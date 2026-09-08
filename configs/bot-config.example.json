@@ -1,0 +1,12 @@
+{
+  "botToken": "",
+  "chatId": "",
+  "allowedChatIds": [],
+  "enableAlerts": true,
+  "enableDailyDigest": true,
+  "dailyDigestTime": "22:00",
+  "alertOnServerDown": true,
+  "alertOnCheckpoint": true,
+  "alertOnJobError": true,
+  "checkIntervalSeconds": 30
+}
