@@ -8,5 +8,6 @@
   "alertOnServerDown": true,
   "alertOnCheckpoint": true,
   "alertOnJobError": true,
+  "alertOnNewMessages": true,
   "checkIntervalSeconds": 30
 }

@@ -224,6 +224,7 @@ export default function DashboardPage() {
     alertOnServerDown: true,
     alertOnCheckpoint: true,
     alertOnJobError: true,
+    alertOnNewMessages: true,
     checkIntervalSeconds: 30,
   });
   const [isBotRunning, setIsBotRunning] = useState<boolean>(false);
@@ -3434,6 +3435,22 @@ export default function DashboardPage() {
                     </div>
                   </label>
 
+                  {/* Alert on New Messages */}
+                  <label className="flex items-start gap-3 p-3 rounded-xl border border-emerald-200 bg-emerald-50/50 cursor-pointer hover:bg-emerald-50 transition-all">
+                    <input
+                      type="checkbox"
+                      checked={botConfig.alertOnNewMessages !== false}
+                      onChange={(e) => setBotConfig({ ...botConfig, alertOnNewMessages: e.target.checked })}
+                      className="w-4 h-4 mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-emerald-950 block">🔔 Cảnh báo khi có tin nhắn mới từ khách hàng (Messenger / Fanpage)</span>
+                      <span className="text-[11px] text-emerald-800">
+                        Tự động theo dõi các nick Facebook & Fanpage. Khi khách nhắn tin đến, Bot sẽ lập tức bắn thông báo kèm ảnh chụp màn hình về Telegram.
+                      </span>
+                    </div>
+                  </label>
+
                   {/* Daily Digest Setting */}
                   <div className="p-3.5 rounded-2xl border border-indigo-200 bg-indigo-50/40 space-y-3">
                     <label className="flex items-start gap-3 cursor-pointer">
@@ -3495,7 +3512,7 @@ export default function DashboardPage() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 
                 <div className="p-4 rounded-2xl bg-white/70 border border-slate-200/80 space-y-1.5">
                   <div className="flex items-center justify-between">
@@ -3507,6 +3524,19 @@ export default function DashboardPage() {
                   <p className="text-xs font-bold text-slate-800">Trạng thái hệ thống</p>
                   <p className="text-[11px] text-slate-500 leading-relaxed">
                     Xem tình trạng 4 server bridge, n8n, 5 chrome profile và số bài đăng thành công trong ngày.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-white/70 border border-slate-200/80 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <code className="text-xs font-black text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200">
+                      /check_tin
+                    </code>
+                    <span className="text-[10px] font-bold text-emerald-600">Tin nhắn</span>
+                  </div>
+                  <p className="text-xs font-bold text-slate-800">Quét tin nhắn các nick</p>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Quét nhanh tất cả tài khoản Facebook & Fanpage, báo số tin chưa đọc và gửi ảnh hộp thư khách.
                   </p>
                 </div>
 
@@ -3532,20 +3562,20 @@ export default function DashboardPage() {
                   </div>
                   <p className="text-xs font-bold text-slate-800">Khởi động lại Servers</p>
                   <p className="text-[11px] text-slate-500 leading-relaxed">
-                    Tự động chạy script <code>kill-and-restart.ps1</code> và báo lại khi toàn bộ hệ thống đã online trở lại.
+                    Tự động chạy script <code>kill-and-restart.ps1</code> và báo lại khi toàn bộ hệ thống đã online.
                   </p>
                 </div>
 
                 <div className="p-4 rounded-2xl bg-white/70 border border-slate-200/80 space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <code className="text-xs font-black text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200">
+                    <code className="text-xs font-black text-amber-700 bg-amber-50 px-2 py-1 rounded-md border border-amber-200">
                       /post_now
                     </code>
                     <span className="text-[10px] font-bold text-slate-400">Đăng ngay</span>
                   </div>
                   <p className="text-xs font-bold text-slate-800">Đăng bài khẩn cấp</p>
                   <p className="text-[11px] text-slate-500 leading-relaxed">
-                    Kích hoạt duyệt và xuất bản ngay lập tức một bài viết vào nhóm đang chờ mà không cần chờ lịch hẹn.
+                    Kích hoạt duyệt và xuất bản ngay lập tức một bài viết vào nhóm đang chờ mà không cần chờ lịch.
                   </p>
                 </div>
 

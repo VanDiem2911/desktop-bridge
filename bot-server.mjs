@@ -24,6 +24,7 @@ let pollOffset = 0;
 let lastDigestDate = '';
 let serverDownState = {}; // { '3001': true/false }
 let checkpointAlertState = {}; // { 'acc_id': true }
+let lastUnreadMessageCount = {}; // { 'acc_id': number }
 
 function loadBotConfig() {
   try {
@@ -43,6 +44,7 @@ function loadBotConfig() {
     alertOnServerDown: true,
     alertOnCheckpoint: true,
     alertOnJobError: true,
+    alertOnNewMessages: true,
     checkIntervalSeconds: 30,
   };
 }
@@ -79,8 +81,9 @@ function fetchJson(url, timeoutMs = 1500) {
 // -------------------------------------------------------------
 const REPLY_KEYBOARD = {
   keyboard: [
-    [{ text: '/status' }, { text: '/screenshot' }],
-    [{ text: '/post_now' }, { text: '/restart' }],
+    [{ text: '/status' }, { text: '/check_tin' }],
+    [{ text: '/screenshot' }, { text: '/restart' }],
+    [{ text: '/post_now' }],
   ],
   resize_keyboard: true,
   persistent: true,
@@ -186,6 +189,262 @@ async function captureAnyScreenshot() {
 }
 
 // -------------------------------------------------------------
+// GIÁM SÁT TIN NHẮN TẤT CẢ TÀI KHOẢN (MESSENGER / FANPAGE / GROUPS)
+// -------------------------------------------------------------
+function getAllMonitoredAccounts() {
+  const accounts = [];
+  const addedPorts = new Set();
+
+  // 1. Fanpage accounts (configs/fanpage-config.json)
+  try {
+    const fanpagePath = path.join(__dirname, 'configs', 'fanpage-config.json');
+    if (fs.existsSync(fanpagePath)) {
+      const data = JSON.parse(fs.readFileSync(fanpagePath, 'utf-8'));
+      if (Array.isArray(data.accounts)) {
+        for (const a of data.accounts) {
+          if (a.enabled !== false && a.port) {
+            const p = Number(a.port);
+            accounts.push({
+              id: `fp_${a.id || p}`,
+              name: a.name || 'Facebook Fanpage',
+              type: 'Fanpage',
+              port: p,
+              profileDir: a.profileDir,
+              pageUrl: a.pageUrl,
+            });
+            addedPorts.add(p);
+          }
+        }
+      }
+    }
+  } catch (e) {}
+
+  // 2. Personal accounts (configs/personal-config.json)
+  try {
+    const personalPath = path.join(__dirname, 'configs', 'personal-config.json');
+    if (fs.existsSync(personalPath)) {
+      const data = JSON.parse(fs.readFileSync(personalPath, 'utf-8'));
+      if (Array.isArray(data.accounts)) {
+        for (const a of data.accounts) {
+          if (a.enabled !== false && a.port) {
+            const p = Number(a.port);
+            accounts.push({
+              id: `personal_${a.id || p}`,
+              name: a.name || 'Facebook Cá Nhân',
+              type: 'Cá nhân',
+              port: p,
+              profileDir: a.profileDir,
+              profileUrl: a.profileUrl,
+            });
+            addedPorts.add(p);
+          }
+        }
+      }
+    }
+  } catch (e) {}
+
+  // 3. Group accounts (configs/groups-config.json)
+  try {
+    const groupsPath = path.join(__dirname, 'configs', 'groups-config.json');
+    if (fs.existsSync(groupsPath)) {
+      const data = JSON.parse(fs.readFileSync(groupsPath, 'utf-8'));
+      if (Array.isArray(data.accounts)) {
+        data.accounts.forEach((a, idx) => {
+          if (a.enabled !== false) {
+            const p = a.port ? Number(a.port) : (9223 + idx);
+            accounts.push({
+              id: `group_${a.id || p}`,
+              name: `Nhóm ${a.name || (idx + 1)}`,
+              type: 'Nhóm',
+              port: p,
+              profileDir: a.profileDir,
+            });
+            addedPorts.add(p);
+          }
+        });
+      }
+    }
+  } catch (e) {}
+
+  if (accounts.length === 0) {
+    accounts.push(
+      { id: 'fp_9222', name: 'Facebook Fanpage Chính', type: 'Fanpage', port: 9222 },
+      { id: 'group_9223', name: 'Facebook Group 1', type: 'Nhóm', port: 9223 },
+    );
+  }
+
+  return accounts;
+}
+
+async function checkAccountMessages(account) {
+  const port = account.port;
+  if (!port) return null;
+
+  // 1. Kiểm tra nhanh qua HTTP endpoint /json/list của CDP (timeout 600ms)
+  const tabs = await fetchJson(`http://127.0.0.1:${port}/json/list`, 600);
+  if (!Array.isArray(tabs) || tabs.length === 0) {
+    return {
+      account,
+      online: false,
+      hasUnread: false,
+      unreadCount: 0,
+      sender: '',
+      snippet: '',
+      screenshot: null,
+    };
+  }
+
+  // Tìm các tab liên quan đến Facebook hoặc Messenger
+  const fbTab = tabs.find((t) => t.url && (t.url.includes('facebook.com') || t.url.includes('messenger.com')));
+
+  let titleUnread = 0;
+  if (fbTab && fbTab.title) {
+    const match = fbTab.title.match(/^\((\d+)\)/);
+    if (match) titleUnread = parseInt(match[1], 10);
+  }
+
+  // 2. Kết nối CDP với timeout ngắn để đánh giá DOM trong trang
+  let browser = null;
+  try {
+    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: 3500 });
+    const context = browser.contexts()[0];
+    if (!context) {
+      await browser.close();
+      return {
+        account,
+        online: true,
+        hasUnread: titleUnread > 0,
+        unreadCount: titleUnread,
+        sender: '',
+        snippet: '',
+        screenshot: null,
+      };
+    }
+
+    let page = context.pages().find((p) => p.url().includes('facebook.com') || p.url().includes('messenger.com'));
+    if (!page && context.pages().length > 0) {
+      page = context.pages()[0];
+    }
+
+    if (!page) {
+      await browser.close();
+      return {
+        account,
+        online: true,
+        hasUnread: titleUnread > 0,
+        unreadCount: titleUnread,
+        sender: '',
+        snippet: '',
+        screenshot: null,
+      };
+    }
+
+    const evalResult = await page.evaluate(() => {
+      let unread = 0;
+      let sender = '';
+      let snippet = '';
+
+      // A. Kiểm tra tiêu đề trang
+      const titleMatch = document.title.match(/^\((\d+)\)/);
+      if (titleMatch) {
+        unread = Math.max(unread, parseInt(titleMatch[1], 10));
+      }
+
+      // B. Kiểm tra badge số trên nút Messenger ở thanh navbar trên cùng
+      const messengerBtns = document.querySelectorAll('[aria-label*="Messenger" i], [aria-label*="Tin nhắn" i]');
+      for (const btn of messengerBtns) {
+        const spans = btn.querySelectorAll('span');
+        for (const sp of spans) {
+          const txt = (sp.textContent || '').trim();
+          if (/^\d+$/.test(txt)) {
+            unread = Math.max(unread, parseInt(txt, 10));
+          }
+        }
+        const label = btn.getAttribute('aria-label') || '';
+        const match = label.match(/(\d+)\s*(tin nhắn chưa đọc|tin nhắn mới|unread)/i);
+        if (match) {
+          unread = Math.max(unread, parseInt(match[1], 10));
+        }
+      }
+
+      // C. Kiểm tra các cuộc trò chuyện chưa đọc trong popup Messenger hoặc trang Messages
+      const unreadThreads = document.querySelectorAll('[aria-label*="chưa đọc" i], [aria-label*="unread" i]');
+      if (unreadThreads.length > 0) {
+        const firstUnread = unreadThreads[0];
+        const lines = (firstUnread.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean);
+        if (lines.length > 0) sender = lines[0];
+        if (lines.length > 1) snippet = lines[1];
+        unread = Math.max(unread, unreadThreads.length);
+      }
+
+      return {
+        unreadCount: unread,
+        title: document.title,
+        sender,
+        snippet,
+      };
+    }).catch(() => ({ unreadCount: titleUnread, title: '', sender: '', snippet: '' }));
+
+    const finalUnread = Math.max(titleUnread, evalResult.unreadCount || 0);
+
+    let screenshotBuffer = null;
+    if (finalUnread > 0) {
+      try {
+        screenshotBuffer = await page.screenshot({ type: 'png', timeout: 4000 });
+      } catch {}
+    }
+
+    await browser.close();
+    return {
+      account,
+      online: true,
+      hasUnread: finalUnread > 0,
+      unreadCount: finalUnread,
+      sender: evalResult.sender,
+      snippet: evalResult.snippet,
+      screenshot: screenshotBuffer,
+    };
+  } catch (err) {
+    if (browser) {
+      try { await browser.close(); } catch {}
+    }
+    return {
+      account,
+      online: true,
+      hasUnread: titleUnread > 0,
+      unreadCount: titleUnread,
+      sender: '',
+      snippet: '',
+      screenshot: null,
+    };
+  }
+}
+
+async function checkAllAccountsMessages() {
+  const accounts = getAllMonitoredAccounts();
+  const reports = [];
+
+  for (const acc of accounts) {
+    try {
+      const res = await checkAccountMessages(acc);
+      if (res) reports.push(res);
+    } catch (e) {
+      reports.push({
+        account: acc,
+        online: false,
+        hasUnread: false,
+        unreadCount: 0,
+        sender: '',
+        snippet: '',
+        screenshot: null,
+      });
+    }
+  }
+
+  return reports;
+}
+
+// -------------------------------------------------------------
 // KIỂM TRA BẢO MẬT & XỬ LÝ LỆNH TELEGRAM
 // -------------------------------------------------------------
 function isAuthorizedChat(chatId) {
@@ -220,11 +479,12 @@ async function handleTelegramMessage(message) {
         '',
         '⚡ <b>Các lệnh điều khiển nhanh:</b>',
         '• <code>/status</code>: Kiểm tra trạng thái toàn bộ máy chủ & tài khoản',
+        '• <code>/check_tin</code>: Quét & kiểm tra tin nhắn mới tất cả các tài khoản',
         '• <code>/screenshot</code>: Chụp màn hình tab Chrome đang hoạt động',
         '• <code>/post_now</code>: Kích hoạt đăng bài khẩn cấp ngay lập tức',
         '• <code>/restart</code>: Khởi động lại toàn bộ hệ thống (Port 3000-3004)',
         '',
-        '🔔 <i>Hệ thống sẽ tự động gửi ảnh chụp lỗi ngay khi phát hiện sự cố và gửi Báo cáo tổng kết lúc 22h tối.</i>',
+        '🔔 <i>Hệ thống tự động báo tin nhắn mới từ khách hàng, gửi ảnh lỗi tức thì và Báo cáo tổng kết lúc 22h tối.</i>',
       ].join('\n');
       await sendTelegramMessage(helpText, chatId);
       break;
@@ -234,6 +494,58 @@ async function handleTelegramMessage(message) {
       await sendTelegramMessage('🔍 <i>Đang kiểm tra toàn bộ hệ thống, vui lòng chờ 1-2 giây...</i>', chatId);
       const statusText = await getSystemStatusText();
       await sendTelegramMessage(statusText, chatId);
+      break;
+    }
+
+    case '/check_tin':
+    case '/tinnhan':
+    case '/messages': {
+      await sendTelegramMessage('🔍 <i>Đang quét tin nhắn trên tất cả tài khoản Facebook & Fanpage, vui lòng chờ...</i>', chatId);
+      const reports = await checkAllAccountsMessages();
+
+      const unreadList = reports.filter((r) => r.hasUnread && r.unreadCount > 0);
+
+      const msgLines = [
+        '📬 <b>BÁO CÁO TIN NHẮN TẤT CẢ TÀI KHOẢN</b>',
+        '━━━━━━━━━━━━━━━━━━━━',
+      ];
+
+      if (reports.length === 0) {
+        msgLines.push('⚠️ <i>Chưa cấu hình tài khoản nào trên hệ thống.</i>');
+      } else {
+        reports.forEach((r, idx) => {
+          const acc = r.account;
+          if (!r.online) {
+            msgLines.push(`${idx + 1}. <b>${acc.name}</b> (${acc.type} - Port ${acc.port}):\n   ⚪ <i>Chrome chưa bật</i>`);
+          } else if (r.hasUnread && r.unreadCount > 0) {
+            msgLines.push(
+              `${idx + 1}. <b>${acc.name}</b> (${acc.type} - Port ${acc.port}):\n   🔴 <b>Có ${r.unreadCount} tin nhắn mới!</b>${r.sender ? ` (Khách: ${r.sender})` : ''}`,
+            );
+          } else {
+            msgLines.push(`${idx + 1}. <b>${acc.name}</b> (${acc.type} - Port ${acc.port}):\n   🟢 <i>Không có tin nhắn mới</i>`);
+          }
+        });
+      }
+
+      msgLines.push('━━━━━━━━━━━━━━━━━━━━');
+      if (unreadList.length > 0) {
+        msgLines.push(`🚨 <i>Phát hiện <b>${unreadList.length}</b> tài khoản có tin nhắn mới chờ phản hồi!</i>`);
+      } else {
+        msgLines.push('✨ <i>Tất cả tài khoản đang bật đều đã được phản hồi đầy đủ!</i>');
+      }
+
+      await sendTelegramMessage(msgLines.join('\n'), chatId);
+
+      // Gửi ảnh chụp màn hình của các tài khoản có tin nhắn chưa đọc
+      for (const unreadAcc of unreadList) {
+        if (unreadAcc.screenshot) {
+          await sendTelegramPhoto(
+            unreadAcc.screenshot,
+            `📸 <b>Hộp thư của ${unreadAcc.account.name} (Port ${unreadAcc.account.port})</b>\n📩 <b>${unreadAcc.unreadCount} tin nhắn mới</b>`,
+            chatId,
+          );
+        }
+      }
       break;
     }
 
@@ -439,7 +751,8 @@ async function runWatchdogCheck() {
 
   // 2. Kiểm tra Checkpoint trên các tab Chrome
   if (botConfig.alertOnCheckpoint) {
-    const cdpPorts = [9222, 9223, 9224, 9225];
+    const monitoredAccs = getAllMonitoredAccounts();
+    const cdpPorts = Array.from(new Set([9222, 9242, ...monitoredAccs.map((a) => a.port)]));
     for (const cdpPort of cdpPorts) {
       try {
         const tabs = await fetchJson(`http://127.0.0.1:${cdpPort}/json/list`, 800);
@@ -477,6 +790,53 @@ async function runWatchdogCheck() {
           }
         }
       } catch {}
+    }
+  }
+
+  // 3. Kiểm tra Tin Nhắn Mới trên tất cả các tài khoản Facebook & Fanpage
+  if (botConfig.alertOnNewMessages !== false) {
+    try {
+      const accounts = getAllMonitoredAccounts();
+      for (const acc of accounts) {
+        const res = await checkAccountMessages(acc);
+        if (!res) continue;
+
+        const accKey = acc.id || `acc_${acc.port}`;
+        const prevCount = lastUnreadMessageCount[accKey] || 0;
+
+        if (res.hasUnread && res.unreadCount > 0) {
+          // Chỉ gửi tin nhắn cảnh báo khi số tin nhắn mới TĂNG LÊN so với lần kiểm tra trước (tránh gửi lặp lại)
+          if (res.unreadCount > prevCount) {
+            lastUnreadMessageCount[accKey] = res.unreadCount;
+            console.log(`[Watchdog] 🔔 Phát hiện tin nhắn mới trên ${acc.name} (${acc.type} - Port ${acc.port}): ${res.unreadCount} tin`);
+
+            const timeNow = new Date().toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+            const alertMsg = [
+              '🔔 <b>CÓ TIN NHẮN MỚI TỪ KHÁCH HÀNG!</b>',
+              '━━━━━━━━━━━━━━━━━━━━',
+              `👤 <b>Tài khoản:</b> <b>${acc.name}</b> (${acc.type})`,
+              `📱 <b>Cổng Chrome:</b> <code>Port ${acc.port}</code>`,
+              `📩 <b>Số tin chưa đọc:</b> <b>${res.unreadCount}</b> tin nhắn mới`,
+              res.sender ? `💬 <b>Khách gửi:</b> <b>${res.sender}</b>` : '',
+              res.snippet ? `📝 <b>Nội dung:</b> <i>"${res.snippet.slice(0, 150)}"</i>` : '',
+              `⏰ <b>Thời gian:</b> <code>${timeNow}</code>`,
+              '━━━━━━━━━━━━━━━━━━━━',
+              '👉 <i>Vui lòng mở Facebook hoặc Messenger để phản hồi khách hàng kịp thời!</i>',
+            ].filter(Boolean).join('\n');
+
+            if (res.screenshot) {
+              await sendTelegramPhoto(res.screenshot, alertMsg);
+            } else {
+              await sendTelegramMessage(alertMsg);
+            }
+          }
+        } else if (res.online && res.unreadCount === 0 && prevCount > 0) {
+          // Người dùng đã đọc hoặc trả lời tin nhắn -> reset bộ đếm về 0
+          lastUnreadMessageCount[accKey] = 0;
+        }
+      }
+    } catch (msgErr) {
+      console.error('[Watchdog Message Check Error]', msgErr.message);
     }
   }
 }
@@ -659,6 +1019,28 @@ app.post('/notify', async (req, res) => {
 app.post('/trigger-digest', async (req, res) => {
   const result = await triggerDailyDigest();
   res.json(result);
+});
+
+// Endpoint quét tin nhắn tất cả tài khoản
+app.get('/check-messages', async (req, res) => {
+  try {
+    const reports = await checkAllAccountsMessages();
+    const formatted = reports.map((r) => ({
+      accountId: r.account.id,
+      name: r.account.name,
+      type: r.account.type,
+      port: r.account.port,
+      online: r.online,
+      hasUnread: r.hasUnread,
+      unreadCount: r.unreadCount,
+      sender: r.sender || '',
+      snippet: r.snippet || '',
+      hasScreenshot: Boolean(r.screenshot),
+    }));
+    res.json({ ok: true, reports: formatted });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // -------------------------------------------------------------
