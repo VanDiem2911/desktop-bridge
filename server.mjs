@@ -1,7 +1,7 @@
 import express from 'express';
 import { chromium } from 'playwright-core';
 import { setTimeout as delay } from 'node:timers/promises';
-import { spawn } from 'node:child_process';
+import { spawn, exec } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -209,6 +209,50 @@ async function isPortReady(targetPort) {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Đóng hoàn toàn trình duyệt Chrome sau khi hoàn tất tác vụ:
+ * 1. Gửi lệnh CDP Browser.close để Chrome lưu phiên làm việc và đóng sạch sẽ.
+ * 2. Nếu sau 2.5s tiến trình vẫn chạy trên cổng CDP, dùng lệnh PowerShell để tắt triệt để.
+ */
+async function closeChromeGracefully(browser, targetPort) {
+  if (browser) {
+    try {
+      console.log(`[Chrome] Gửi lệnh Browser.close qua CDP để tắt Chrome (Cổng ${targetPort || 'n/a'})...`);
+      const session = await browser.newBrowserCDPSession();
+      await session.send('Browser.close');
+      await delay(2500);
+    } catch (err) {
+      console.warn(`[Chrome] Gửi lệnh Browser.close chưa được (${err.message}), đóng các tab...`);
+      try {
+        for (const ctx of browser.contexts()) {
+          for (const p of ctx.pages()) {
+            await p.close().catch(() => {});
+          }
+        }
+      } catch {}
+    }
+    try {
+      await browser.close();
+    } catch {}
+  }
+
+  if (targetPort) {
+    await delay(1500);
+    if (await isPortReady(targetPort)) {
+      console.log(`[Chrome] Cổng ${targetPort} vẫn mở, tiến hành giải phóng tiến trình Chrome...`);
+      try {
+        const killCmd = `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${targetPort} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }"`;
+        exec(killCmd);
+        console.log(`[Chrome] Đã dọn dẹp tiến trình Chrome trên cổng ${targetPort}.`);
+      } catch (err) {
+        console.warn(`[Chrome] Lỗi khi dừng tiến trình cổng ${targetPort}:`, err.message);
+      }
+    } else {
+      console.log(`[Chrome] Cửa sổ Chrome trên cổng ${targetPort} đã tắt hoàn toàn.`);
+    }
   }
 }
 
@@ -524,6 +568,9 @@ async function publishSingleFacebookPage(account, { caption, imageBase64, mimeTy
 
     await delay(5000);
 
+    let isPublishConfirmed = false;
+    let isDialogClosed = false;
+
     // Tiến hành bấm Tiếp -> (Thêm nút nếu có) -> Đăng
     console.log(`[Fanpage Server 3001] [${account.name}] Bắt đầu quy trình bấm Tiếp và Đăng bài viết...`);
     const publishDeadline = Date.now() + 60000;
@@ -534,23 +581,43 @@ async function publishSingleFacebookPage(account, { caption, imageBase64, mimeTy
       const activeDialog = page.locator('[role="dialog"]').last();
       if (!(await activeDialog.count()) || !(await activeDialog.isVisible())) {
         console.log(`[Fanpage Server 3001] [${account.name}] Hộp thoại Đăng bài đã đóng hoàn toàn (Facebook xuất bản thành công).`);
+        isDialogClosed = true;
         break;
+      }
+
+      // Kiểm tra nếu Facebook hiện thông báo lỗi trong dialog
+      const errorBanner = page.locator('[role="dialog"] [role="alert"], [role="dialog"] [data-testid*="error"]').first();
+      if (await errorBanner.count() && await errorBanner.isVisible()) {
+        const errText = await errorBanner.innerText().catch(() => '');
+        if (errText && (errText.includes('lỗi') || errText.includes('error') || errText.includes('không thể') || errText.includes('failed'))) {
+          throw new Error(`Facebook báo lỗi khi đăng bài: ${errText.trim()}`);
+        }
       }
 
       // Bấm nút hành động phù hợp (Tiếp / Thêm nút / Đăng)
       await clickDialogActionButton(page);
     }
 
-    // Chờ thêm buffer an toàn để Facebook hoàn tất ghi dữ liệu
-    console.log(`[Fanpage Server 3001] [${account.name}] Chờ thêm 8 giây để đảm bảo bài viết đã lên sóng 100%...`);
-    await delay(8000);
+    if (!isDialogClosed) {
+      throw new Error(`Hết thời gian 60s nhưng hộp thoại đăng bài Fanpage "${account.name}" chưa đóng. Không tắt Chrome vì chưa xác nhận đăng thành công.`);
+    }
 
-    console.log(`[Fanpage Server 3001] [${account.name}] Đăng bài Fanpage hoàn tất!`);
+    // Chờ thêm buffer an toàn để Facebook hoàn tất ghi dữ liệu
+    console.log(`[Fanpage Server 3001] [${account.name}] Hộp thoại đã đóng. Chờ thêm 8 giây để Facebook hoàn tất ghi dữ liệu...`);
+    await delay(8000);
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+
+    isPublishConfirmed = true;
+    console.log(`[Fanpage Server 3001] [${account.name}] ✅ ĐÃ XÁC NHẬN BÀI VIẾT ĐĂNG THÀNH CÔNG 100% LÊN FANPAGE!`);
     return { ok: true, source: 'facebook-web', account: account.name, pageUrl: targetPageUrl, publishedAt: new Date().toISOString() };
   } finally {
-    try {
-      await browser.close(); // Ngắt kết nối CDP, giữ nguyên tab Facebook và Chrome vẫn mở
-    } catch {}
+    if (isPublishConfirmed) {
+      console.log(`[Fanpage Server 3001] [${account.name}] Đã chắc chắn đăng bài xong 100%. Tiến hành tự động tắt trình duyệt Chrome...`);
+      await closeChromeGracefully(browser, account.port || 9222);
+    } else {
+      console.warn(`[Fanpage Server 3001] [${account.name}] Chưa xác nhận đăng bài thành công hoặc gặp lỗi. Giữ nguyên Chrome để bạn kiểm tra.`);
+      try { await browser.close(); } catch {}
+    }
   }
 }
 
@@ -782,6 +849,10 @@ async function checkChatGptGenerationError(page) {
         /i'm\s+unable\s+to/i,
         /không\s+thể\s+tạo\s+ảnh/i,
         /lỗi\s+khi\s+tạo\s+ảnh/i,
+        /upload\s+(the\s+)?.*reference\s+image/i,
+        /please\s+upload\s+(a\s+photo|the\s+.*image|a\s+reference)/i,
+        /vui\s+lòng\s+tải\s+(lên\s+)?ảnh/i,
+        /tải\s+ảnh\s+tham\s+chiếu/i,
       ];
       for (const pattern of errorPatterns) {
         if (pattern.test(lastMsgText)) {
@@ -921,58 +992,153 @@ function fetchImageBuffer(url) {
 }
 
 /**
- * Đính kèm ảnh tham chiếu vào ChatGPT bằng cách upload file qua nút đính kèm.
- * Trả về true nếu upload thành công, false nếu không tìm thấy nút upload.
+ * Đính kèm ảnh tham chiếu vào ChatGPT bằng cách upload file qua nút đính kèm hoặc input file.
+ * Trả về true nếu upload thành công và đã xuất hiện preview trên giao diện.
  */
 async function attachReferenceImage(page, referenceImageUrl) {
+  let tempFilePath = null;
   try {
-    console.log('Đang tải ảnh tham chiếu từ URL...');
+    console.log('Đang tải ảnh tham chiếu từ URL:', referenceImageUrl);
     const { buffer, mimeType } = await fetchImageBuffer(referenceImageUrl);
     const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
-    const fileName = `du-reference.${ext}`;
+    const fileName = `du-reference-${Date.now()}.${ext}`;
+    tempFilePath = path.join(os.tmpdir(), fileName);
+    await fs.promises.writeFile(tempFilePath, buffer);
+    console.log(`Đã lưu ảnh tạm thời tại: ${tempFilePath} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
 
-    // Tìm nút đính kèm file (nút clip/paperclip) trên ChatGPT
-    const attachSelectors = [
-      'input[type="file"]',
-      'button[aria-label*="Attach"]',
-      'button[aria-label*="attach"]',
-      'button[aria-label*="Upload"]',
-      'button[aria-label*="upload"]',
+    // Danh sách selector nút đính kèm / thêm nội dung trên ChatGPT Web
+    const plusSelectors = [
+      '#composer-plus-btn',
+      'button[data-testid="composer-plus-btn"]',
+      'button[aria-label*="Add content" i]',
+      'button[aria-label*="Thêm nội dung" i]',
+      'button[aria-label*="Attach" i]',
+      'button[aria-label*="Đính kèm" i]',
+      'button[aria-label*="Upload" i]',
+      'button[aria-label*="Tải tệp" i]',
+      'button[aria-label*="Tải lên" i]',
       '[data-testid="composer-footer-attachment-button"]',
     ];
 
-    // Thử tìm input file ẩn trực tiếp để inject file (cách đáng tin cậy nhất)
-    const fileInput = page.locator('input[type="file"]').first();
-    if (await fileInput.count()) {
-      await fileInput.setInputFiles({ name: fileName, mimeType, buffer });
-      console.log(`Đã đính kèm ảnh tham chiếu: ${fileName}`);
-      await delay(3000); // Chờ preview ảnh hiển thị
-      return true;
+    // Selector kiểm tra xem ảnh đã được nạp vào giao diện composer chưa
+    const attachmentPreviewSelectors = [
+      'button[aria-label*="Remove" i]',
+      'button[aria-label*="Xóa" i]',
+      'button[aria-label*="Delete" i]',
+      '[data-testid*="attachment"]',
+      'div[class*="attachment"]',
+      'form img[alt*="reference" i]',
+      'form img[src*="blob:"]',
+    ];
+
+    async function checkIsAttached() {
+      for (const sel of attachmentPreviewSelectors) {
+        const loc = page.locator(sel).first();
+        if ((await loc.count()) > 0) {
+          try {
+            if (await loc.isVisible()) return true;
+          } catch {}
+        }
+      }
+      return false;
     }
 
-    // Fallback: click nút đính kèm rồi chờ input file xuất hiện
-    for (const selector of attachSelectors.slice(1)) {
-      const btn = page.locator(selector).first();
-      if (await btn.count() && await btn.isVisible()) {
+    // Cách 1: Nạp file trực tiếp vào input file của composer nếu có
+    const composerFileInput = page.locator('form input[type="file"], input[type="file"][multiple], input[type="file"]').first();
+    if ((await composerFileInput.count()) > 0) {
+      try {
+        await composerFileInput.setInputFiles(tempFilePath);
+        console.log('Đã nạp file vào input file. Đang chờ ChatGPT tải ảnh lên...');
+        const startWait = Date.now();
+        while (Date.now() - startWait < 8000) {
+          if (await checkIsAttached()) {
+            console.log('✅ Đã đính kèm ảnh con DU thành công (xác nhận qua preview)!');
+            await delay(2000);
+            return true;
+          }
+          await delay(800);
+        }
+      } catch (err) {
+        console.warn('Thử setInputFiles trực tiếp chưa được:', err.message);
+      }
+    }
+
+    // Cách 2: Bấm nút (+) đính kèm và đón sự kiện filechooser
+    for (const btnSel of plusSelectors) {
+      const btn = page.locator(btnSel).first();
+      if ((await btn.count()) > 0 && (await btn.isVisible())) {
+        console.log(`Tìm thấy nút đính kèm (${btnSel}), đang mở để tải ảnh...`);
+        const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 3500 }).catch(() => null);
         await btn.click();
-        await delay(1000);
-        const input = page.locator('input[type="file"]').first();
-        if (await input.count()) {
-          await input.setInputFiles({ name: fileName, mimeType, buffer });
-          console.log(`Đã đính kèm ảnh tham chiếu: ${fileName}`);
-          await delay(3000);
-          return true;
+        await delay(800);
+
+        let fileChooser = await fileChooserPromise;
+        if (fileChooser) {
+          console.log('Bắt được filechooser từ nút đính kèm, đang nạp ảnh...');
+          await fileChooser.setFiles(tempFilePath);
+        } else {
+          // Menu popup có thể xuất hiện: tìm mục Upload
+          const menuItems = [
+            'button[role="menuitem"]:has-text("Upload")',
+            'button[role="menuitem"]:has-text("Tải lên")',
+            'div[role="menuitem"]:has-text("Upload")',
+            'div[role="menuitem"]:has-text("Tải lên")',
+            '[role="menuitem"]',
+          ];
+
+          for (const itemSel of menuItems) {
+            const item = page.locator(itemSel).first();
+            if ((await item.count()) > 0 && (await item.isVisible())) {
+              const menuChooserPromise = page.waitForEvent('filechooser', { timeout: 3500 }).catch(() => null);
+              await item.click();
+              fileChooser = await menuChooserPromise;
+              if (fileChooser) {
+                console.log('Bắt được filechooser từ menu, đang nạp ảnh...');
+                await fileChooser.setFiles(tempFilePath);
+                break;
+              }
+            }
+          }
+        }
+
+        if (!fileChooser) {
+          const freshFileInput = page.locator('input[type="file"]').last();
+          if ((await freshFileInput.count()) > 0) {
+            await freshFileInput.setInputFiles(tempFilePath);
+            console.log('Đã nạp file vào input xuất hiện sau khi mở menu.');
+          }
+        }
+
+        // Chờ ChatGPT upload xong và hiển thị preview
+        const waitUploadStart = Date.now();
+        while (Date.now() - waitUploadStart < 12000) {
+          if (await checkIsAttached()) {
+            console.log('✅ Đã đính kèm ảnh con DU thành công (xác nhận qua preview)!');
+            await delay(2000);
+            return true;
+          }
+          await delay(1000);
         }
         break;
       }
     }
 
-    console.warn('Không tìm thấy nút upload ảnh — bỏ qua đính kèm ảnh tham chiếu.');
+    if (await checkIsAttached()) {
+      console.log('✅ Đã đính kèm ảnh tham chiếu thành công!');
+      return true;
+    }
+
+    console.warn('⚠️ Không thể xác nhận ảnh tham chiếu con DU đã được đính kèm vào ChatGPT.');
     return false;
   } catch (error) {
-    // Không để lỗi upload ảnh chặn quá trình tạo ảnh
     console.error('Lỗi khi đính kèm ảnh tham chiếu:', error.message);
     return false;
+  } finally {
+    if (tempFilePath) {
+      setTimeout(() => {
+        fs.promises.unlink(tempFilePath).catch(() => {});
+      }, 30000);
+    }
   }
 }
 
@@ -1199,19 +1365,32 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
       // Ghi nhận các ảnh đã có trước khi bắt đầu gửi prompt / đính kèm ảnh
       const initialSrcs = new Set(await imageSources(page));
 
-      // Upload ảnh tham chiếu Du (chỉ khi Workflow 1 — hasDu = true và ở attempt 1)
-      if (attempt === 1 && targetReferenceUrl) {
-        await attachReferenceImage(page, targetReferenceUrl);
+      // Upload ảnh tham chiếu Du (khi Workflow 1 — hasDu = true)
+      let attachSuccess = false;
+      if (hasDu && targetReferenceUrl) {
+        attachSuccess = await attachReferenceImage(page, targetReferenceUrl);
+        if (!attachSuccess && attempt === 1) {
+          console.warn(`[${account.name}] Đính kèm ảnh lần đầu chưa nhận, chờ 2s và thử lại...`);
+          await delay(2000);
+          attachSuccess = await attachReferenceImage(page, targetReferenceUrl);
+        }
         // Cập nhật lại initialSrcs sau khi đính kèm để loại trừ ảnh tham chiếu
         const afterAttachSrcs = await imageSources(page);
         for (const s of afterAttachSrcs) initialSrcs.add(s);
+
+        if (!attachSuccess) {
+          console.warn(`[${account.name}] Cảnh báo: Không thể xác thực ảnh con DU được đính kèm. Sẽ tự động dùng prompt chuẩn để tránh lỗi.`);
+        }
       }
 
       const input = await promptBox(page);
       let promptToSend;
 
       if (attempt === 1) {
-        const variation = pickVariation(prompt, hasDu);
+        // Chỉ yêu cầu ChatGPT vẽ con DU khi đã đính kèm thành công ảnh tham chiếu
+        // Nếu ảnh chưa đính kèm mà ép vẽ Du mascot, ChatGPT sẽ dừng lại và hỏi ảnh
+        const effectiveHasDu = hasDu && attachSuccess;
+        const variation = pickVariation(prompt, effectiveHasDu);
         promptToSend = [
           'Generate one high-quality image using this exact art direction:',
           variation,

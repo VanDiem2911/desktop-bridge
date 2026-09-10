@@ -1,7 +1,7 @@
 import express from 'express';
 import { chromium } from 'playwright-core';
 import { setTimeout as delay } from 'node:timers/promises';
-import { spawn } from 'node:child_process';
+import { spawn, exec } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -96,6 +96,50 @@ async function isPortReady(targetPort) {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Đóng hoàn toàn trình duyệt Chrome sau khi hoàn tất tác vụ:
+ * 1. Gửi lệnh CDP Browser.close để Chrome lưu phiên làm việc và đóng sạch sẽ.
+ * 2. Nếu sau 2.5s tiến trình vẫn chạy trên cổng CDP, dùng lệnh PowerShell để tắt triệt để.
+ */
+async function closeChromeGracefully(browser, targetPort) {
+  if (browser) {
+    try {
+      console.log(`[Chrome] Gửi lệnh Browser.close qua CDP để tắt Chrome (Cổng ${targetPort || 'n/a'})...`);
+      const session = await browser.newBrowserCDPSession();
+      await session.send('Browser.close');
+      await delay(2500);
+    } catch (err) {
+      console.warn(`[Chrome] Gửi lệnh Browser.close chưa được (${err.message}), đóng các tab...`);
+      try {
+        for (const ctx of browser.contexts()) {
+          for (const p of ctx.pages()) {
+            await p.close().catch(() => {});
+          }
+        }
+      } catch {}
+    }
+    try {
+      await browser.close();
+    } catch {}
+  }
+
+  if (targetPort) {
+    await delay(1500);
+    if (await isPortReady(targetPort)) {
+      console.log(`[Chrome] Cổng ${targetPort} vẫn mở, tiến hành giải phóng tiến trình Chrome...`);
+      try {
+        const killCmd = `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${targetPort} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }"`;
+        exec(killCmd);
+        console.log(`[Chrome] Đã dọn dẹp tiến trình Chrome trên cổng ${targetPort}.`);
+      } catch (err) {
+        console.warn(`[Chrome] Lỗi khi dừng tiến trình cổng ${targetPort}:`, err.message);
+      }
+    } else {
+      console.log(`[Chrome] Cửa sổ Chrome trên cổng ${targetPort} đã tắt hoàn toàn.`);
+    }
   }
 }
 
@@ -710,10 +754,16 @@ async function executeGroupPosting(body) {
       console.error(`[Group Server Error] Lỗi xử lý tài khoản ${account.name}:`, accError.message);
       accResult.accountError = accError.message;
     } finally {
-      if (browser) {
-        try { await browser.close(); } catch {}
+      const hasSuccess = accResult.groups.some(g => g.status === 'success');
+      if (hasSuccess) {
+        console.log(`[Group Server] Đã chắc chắn đăng bài nhóm thành công cho ${account.name}. Tiến hành tắt trình duyệt Chrome...`);
+        await closeChromeGracefully(browser, accPort);
+      } else {
+        console.warn(`[Group Server] Tài khoản ${account.name} chưa đăng thành công nhóm nào hoặc gặp lỗi. Giữ nguyên Chrome để kiểm tra.`);
+        if (browser) {
+          try { await browser.close(); } catch {}
+        }
       }
-      console.log(`[Group Server] Giữ nguyên cửa sổ Chrome của ${account.name} (không tắt).`);
       await delay(2000);
     }
 
