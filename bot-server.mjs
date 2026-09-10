@@ -297,8 +297,10 @@ async function checkAccountMessages(account) {
   // Tìm các tab liên quan đến Facebook hoặc Messenger
   const fbTab = tabs.find((t) => t.url && (t.url.includes('facebook.com') || t.url.includes('messenger.com')));
 
+  // CHỈ lấy số từ Title nếu đang mở đúng trang Messenger riêng biệt (/messages hoặc messenger.com)
+  // TUYỆT ĐỐI KHÔNG đọc title của facebook.com vì "(1) Facebook" là thông báo like/comment chứ KHÔNG PHẢI tin nhắn
   let titleUnread = 0;
-  if (fbTab && fbTab.title) {
+  if (fbTab && fbTab.url && (fbTab.url.includes('/messages') || fbTab.url.includes('messenger.com')) && fbTab.title) {
     const match = fbTab.title.match(/^\((\d+)\)/);
     if (match) titleUnread = parseInt(match[1], 10);
   }
@@ -344,48 +346,86 @@ async function checkAccountMessages(account) {
       let sender = '';
       let snippet = '';
 
-      // A. Kiểm tra tiêu đề trang
-      const titleMatch = document.title.match(/^\((\d+)\)/);
-      if (titleMatch) {
-        unread = Math.max(unread, parseInt(titleMatch[1], 10));
+      const currentUrl = window.location.href;
+      const isMessagesPage = currentUrl.includes('/messages') || window.location.hostname.includes('messenger.com');
+
+      // TRƯỜNG HỢP 1: ĐANG Ở TRANG MESSENGER RIÊNG BIỆT (/messages/ hoặc messenger.com)
+      if (isMessagesPage) {
+        const titleMatch = document.title.match(/^\((\d+)\)/);
+        if (titleMatch) {
+          unread = Math.max(unread, parseInt(titleMatch[1], 10));
+        }
+
+        const unreadRows = document.querySelectorAll('[aria-label*="chưa đọc" i], [aria-label*="unread" i]');
+        if (unreadRows.length > 0) {
+          unread = Math.max(unread, unreadRows.length);
+          const firstRow = unreadRows[0];
+          const lines = (firstRow.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean);
+          if (lines.length > 0) sender = lines[0];
+          if (lines.length > 1) snippet = lines[1];
+        }
+        return { unreadCount: unread, sender, snippet };
       }
 
-      // B. Kiểm tra badge số trên nút Messenger ở thanh navbar trên cùng
-      const messengerBtns = document.querySelectorAll('[aria-label*="Messenger" i], [aria-label*="Tin nhắn" i]');
-      for (const btn of messengerBtns) {
-        const spans = btn.querySelectorAll('span');
-        for (const sp of spans) {
-          const txt = (sp.textContent || '').trim();
-          if (/^\d+$/.test(txt)) {
-            unread = Math.max(unread, parseInt(txt, 10));
+      // TRƯỜNG HỢP 2: ĐANG Ở TRANG FACEBOOK CHUNG (facebook.com)
+      // TUYỆT ĐỐI KHÔNG DÙNG document.title VÌ "(1) Facebook" LÀ THÔNG BÁO CHUNG (like, comment, tag, group...) KHÔNG PHẢI TIN NHẮN!
+      
+      // Quét duy nhất icon/nút Messenger trên thanh điều hướng đầu trang
+      const allButtons = document.querySelectorAll('div[role="button"], a, div[aria-label]');
+      for (const btn of allButtons) {
+        const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+        
+        // BỎ QUA HOÀN TOÀN ICON QUẢ CHUÔNG THÔNG BÁO (Notification Bell)
+        if (label.includes('thông báo') || label.includes('notification')) {
+          continue;
+        }
+
+        // Chỉ xét đúng nút Messenger
+        const isMessenger = label.includes('messenger') || (label.includes('tin nhắn') && !label.includes('thông báo'));
+        const isMessagesLink = btn.getAttribute('href')?.includes('/messages');
+
+        if (isMessenger || isMessagesLink) {
+          // A. Kiểm tra chữ trong aria-label: ví dụ "Messenger, 2 tin nhắn chưa đọc"
+          const match = label.match(/(\d+)\s*(tin nhắn chưa đọc|tin nhắn mới|unread)/i);
+          if (match) {
+            unread = Math.max(unread, parseInt(match[1], 10));
+          }
+
+          // B. Kiểm tra badge số màu đỏ hiển thị trên icon Messenger
+          const badgeSpans = btn.querySelectorAll('span');
+          for (const sp of badgeSpans) {
+            const txt = (sp.textContent || '').trim();
+            if (/^\d+$/.test(txt)) {
+              const num = parseInt(txt, 10);
+              if (num > 0 && num < 1000) {
+                unread = Math.max(unread, num);
+              }
+            }
           }
         }
-        const label = btn.getAttribute('aria-label') || '';
-        const match = label.match(/(\d+)\s*(tin nhắn chưa đọc|tin nhắn mới|unread)/i);
-        if (match) {
-          unread = Math.max(unread, parseInt(match[1], 10));
-        }
       }
 
-      // C. Kiểm tra các cuộc trò chuyện chưa đọc trong popup Messenger hoặc trang Messages
-      const unreadThreads = document.querySelectorAll('[aria-label*="chưa đọc" i], [aria-label*="unread" i]');
-      if (unreadThreads.length > 0) {
-        const firstUnread = unreadThreads[0];
-        const lines = (firstUnread.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean);
-        if (lines.length > 0) sender = lines[0];
-        if (lines.length > 1) snippet = lines[1];
-        unread = Math.max(unread, unreadThreads.length);
+      // Kiểm tra thêm các popup chat tab đang mở dưới góc phải
+      const chatTabs = document.querySelectorAll('div[data-pagelet*="ChatTab"], div[role="dialog"][aria-label*="Chat với" i], div[role="dialog"][aria-label*="Cuộc trò chuyện" i]');
+      for (const tab of chatTabs) {
+        const badge = tab.querySelector('span[data-visualcompletion="ignore"], span[dir="auto"]');
+        if (badge && /^\d+$/.test(badge.textContent.trim())) {
+          unread = Math.max(unread, parseInt(badge.textContent.trim(), 10));
+        }
+        const titleEl = tab.querySelector('h2, [role="heading"], strong');
+        if (titleEl && !sender) {
+          sender = titleEl.textContent?.trim() || '';
+        }
       }
 
       return {
         unreadCount: unread,
-        title: document.title,
         sender,
         snippet,
       };
-    }).catch(() => ({ unreadCount: titleUnread, title: '', sender: '', snippet: '' }));
+    }).catch(() => ({ unreadCount: 0, sender: '', snippet: '' }));
 
-    const finalUnread = Math.max(titleUnread, evalResult.unreadCount || 0);
+    const finalUnread = evalResult.unreadCount || titleUnread || 0;
 
     let screenshotBuffer = null;
     if (finalUnread > 0) {
