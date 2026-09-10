@@ -1124,7 +1124,22 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
         lastError = err;
         console.error(`[${account.name}] Lần thử ${attempt} gặp lỗi:`, err.message);
 
-        if (err.message.includes('Quota Exceeded') || err.message.includes('Rate limit') || err.message.includes('đã hết token')) {
+        // Nếu là lỗi fatal không thể thử lại trên cùng tài khoản (hết token, limit, mất kết nối Chrome, không tìm thấy ô chat...) thì thoát ngay để chuyển sang tài khoản khác
+        const isFatalError =
+          err.message.includes('Quota Exceeded') ||
+          err.message.includes('Rate limit') ||
+          err.message.includes('đã hết token') ||
+          err.message.includes('limit') ||
+          err.message.includes('prompt box was not found') ||
+          err.message.includes('Không tìm thấy ô chat prompt') ||
+          err.message.includes('signed in') ||
+          err.message.includes('Target closed') ||
+          err.message.includes('has been closed') ||
+          err.message.includes('Session closed') ||
+          err.message.includes('browser has disconnected') ||
+          err.message.includes('ECONNREFUSED');
+
+        if (isFatalError) {
           throw err;
         }
 
@@ -1161,21 +1176,31 @@ async function generateImage(params) {
     currentGptAccountIndex = (currentGptAccountIndex + 1) % enabledAccounts.length;
   }
 
-  console.log(`[Personal Server 3003] Đang tạo ảnh xen kẽ bằng: ${primaryAccount.name} (Port ${primaryAccount.port})...`);
+  // Danh sách các tài khoản sẽ thử: ưu tiên primaryAccount, sau đó lần lượt là các tài khoản còn lại
+  const accountsToTry = [
+    primaryAccount,
+    ...enabledAccounts.filter((a) => String(a.id) !== String(primaryAccount.id)),
+  ];
 
-  try {
-    return await executeGenerateOnAccount(primaryAccount, { prompt, aspectRatio, referenceImageUrl, checkText, newConversation });
-  } catch (err) {
-    if (err.message.includes('Quota Exceeded') || err.message.includes('limit') || err.message.includes('Rate limit')) {
-      const allAccounts = loadChatGptAccounts();
-      const fallbackAccount = allAccounts.find((a) => a.id !== primaryAccount.id && a.enabled !== false);
-      if (fallbackAccount) {
-        console.warn(`[Personal Server 3003] ${primaryAccount.name} bị giới hạn token/quota. Tự động chuyển sang ${fallbackAccount.name} (Port ${fallbackAccount.port})...`);
-        return await executeGenerateOnAccount(fallbackAccount, { prompt, aspectRatio, referenceImageUrl, checkText, newConversation });
-      }
+  let lastError = null;
+  for (let i = 0; i < accountsToTry.length; i++) {
+    const acc = accountsToTry[i];
+    if (i > 0) {
+      console.warn(`[Personal Server 3003] Tài khoản trước đó gặp lỗi (${lastError?.message || 'Không xác định'}). Tự động chuyển sang tài khoản: ${acc.name} (Port ${acc.port})...`);
+    } else {
+      console.log(`[Personal Server 3003] Đang tạo ảnh bằng: ${acc.name} (Port ${acc.port})...`);
     }
-    throw err;
+
+    try {
+      return await executeGenerateOnAccount(acc, { prompt, aspectRatio, referenceImageUrl, checkText, newConversation });
+    } catch (err) {
+      lastError = err;
+      console.error(`[Personal Server 3003] Tài khoản ${acc.name} (Port ${acc.port}) gặp lỗi:`, err.message);
+      // Bất kể lỗi gì (limit, kết nối, lỗi mạng, lỗi giao diện,...) đều chuyển sang tài khoản tiếp theo
+    }
   }
+
+  throw new Error(`Tất cả ${accountsToTry.length} tài khoản ChatGPT đều thất bại. Chi tiết lỗi cuối cùng: ${lastError?.message || 'Không tạo được ảnh'}`);
 }
 
 async function captureLatestPersonalImage(reqAccountId) {
