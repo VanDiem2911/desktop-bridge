@@ -611,13 +611,15 @@ async function publishSingleFacebookPage(account, { caption, imageBase64, mimeTy
     console.log(`[Fanpage Server 3001] [${account.name}] ✅ ĐÃ XÁC NHẬN BÀI VIẾT ĐĂNG THÀNH CÔNG 100% LÊN FANPAGE!`);
     return { ok: true, source: 'facebook-web', account: account.name, pageUrl: targetPageUrl, publishedAt: new Date().toISOString() };
   } finally {
-    if (isPublishConfirmed) {
-      console.log(`[Fanpage Server 3001] [${account.name}] Đã chắc chắn đăng bài xong 100%. Tiến hành tự động tắt trình duyệt Chrome...`);
-      await closeChromeGracefully(browser, account.port || 9222);
-    } else {
-      console.warn(`[Fanpage Server 3001] [${account.name}] Chưa xác nhận đăng bài thành công hoặc gặp lỗi. Giữ nguyên Chrome để bạn kiểm tra.`);
-      try { await browser.close(); } catch {}
-    }
+    console.log(`[Fanpage Server 3001] [${account.name}] Tác vụ đăng bài hoàn tất. Tự động đóng tab và tắt Chrome cổng ${account.port || 9222}...`);
+    try {
+      for (const ctx of browser.contexts()) {
+        for (const p of ctx.pages()) {
+          await p.close().catch(() => {});
+        }
+      }
+    } catch {}
+    await closeChromeGracefully(browser, account.port || 9222);
   }
 }
 
@@ -1478,11 +1480,11 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
 
     throw new Error(`ChatGPT tạo ảnh thất bại sau ${MAX_RETRIES} lần thử lại. Chi tiết lỗi: ${lastError?.message || 'Không tạo được ảnh hợp lệ'}`);
   } finally {
+    console.log(`[ChatGPT] Hoàn tất tác vụ ảnh cho ${account.name}. Đang đóng tab và tắt Chrome hoàn toàn (Port ${account.port})...`);
     try {
-      await page.close(); // Đóng tab ChatGPT sau khi tạo ảnh xong
-      console.log('Đã đóng tab ChatGPT.');
+      await page.close();
     } catch {}
-    await browser.close(); // Ngắt kết nối CDP, giữ Chrome vẫn chạy
+    await closeChromeGracefully(browser, account.port);
   }
 }
 

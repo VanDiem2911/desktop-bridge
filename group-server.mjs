@@ -754,17 +754,9 @@ async function executeGroupPosting(body) {
       console.error(`[Group Server Error] Lỗi xử lý tài khoản ${account.name}:`, accError.message);
       accResult.accountError = accError.message;
     } finally {
-      const hasSuccess = accResult.groups.some(g => g.status === 'success');
-      if (hasSuccess) {
-        console.log(`[Group Server] Đã chắc chắn đăng bài nhóm thành công cho ${account.name}. Tiến hành tắt trình duyệt Chrome...`);
-        await closeChromeGracefully(browser, accPort);
-      } else {
-        console.warn(`[Group Server] Tài khoản ${account.name} chưa đăng thành công nhóm nào hoặc gặp lỗi. Giữ nguyên Chrome để kiểm tra.`);
-        if (browser) {
-          try { await browser.close(); } catch {}
-        }
-      }
-      await delay(2000);
+      console.log(`[Group Server] Tác vụ tài khoản ${account.name} hoàn tất. Tiến hành tắt trình duyệt Chrome (Port ${accPort})...`);
+      await closeChromeGracefully(browser, accPort);
+      await delay(1500);
     }
 
     results.push(accResult);
@@ -1216,8 +1208,9 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, newConve
 
     throw new Error(`ChatGPT tạo ảnh thất bại sau ${MAX_RETRIES} lần thử lại. Chi tiết lỗi: ${lastError?.message || 'Không tạo được ảnh hợp lệ'}`);
   } finally {
+    console.log(`[Group Server] Hoàn tất tác vụ ảnh cho ${account.name}. Đang đóng tab và tắt Chrome hoàn toàn (Port ${account.port})...`);
     try { await page.close(); } catch {}
-    await browser.close();
+    await closeChromeGracefully(browser, account.port);
   }
 }
 

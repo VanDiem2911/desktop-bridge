@@ -45,6 +45,7 @@ const CONFIG_CHATGPT_PATH = resolveConfigFile('chatgpt-config.json', 'chatgpt-co
 
 let activeJob = false;
 let activeJobAt = 0;
+let lastJobFinishedAt = Date.now();
 const JOB_TIMEOUT_MS = 15 * 60 * 1000; // 15 phút auto-reset nếu job bị treo
 
 function loadChatGptAccounts() {
@@ -97,16 +98,23 @@ async function isPortReady(targetPort) {
  * 2. Nếu sau 2.5s tiến trình vẫn chạy trên cổng CDP, dùng lệnh PowerShell để tắt triệt để.
  */
 async function closeChromeGracefully(browser, targetPort) {
-  if (browser) {
+  let activeBrowser = browser;
+  if (!activeBrowser && targetPort && (await isPortReady(targetPort))) {
+    try {
+      activeBrowser = await chromium.connectOverCDP(`http://127.0.0.1:${targetPort}`);
+    } catch {}
+  }
+
+  if (activeBrowser) {
     try {
       console.log(`[Chrome] Gửi lệnh Browser.close qua CDP để tắt Chrome (Cổng ${targetPort || 'n/a'})...`);
-      const session = await browser.newBrowserCDPSession();
+      const session = await activeBrowser.newBrowserCDPSession();
       await session.send('Browser.close');
-      await delay(2500);
+      await delay(2000);
     } catch (err) {
       console.warn(`[Chrome] Gửi lệnh Browser.close chưa được (${err.message}), đóng các tab...`);
       try {
-        for (const ctx of browser.contexts()) {
+        for (const ctx of activeBrowser.contexts()) {
           for (const p of ctx.pages()) {
             await p.close().catch(() => {});
           }
@@ -114,12 +122,12 @@ async function closeChromeGracefully(browser, targetPort) {
       } catch {}
     }
     try {
-      await browser.close();
+      await activeBrowser.close();
     } catch {}
   }
 
   if (targetPort) {
-    await delay(1500);
+    await delay(1000);
     if (await isPortReady(targetPort)) {
       console.log(`[Chrome] Cổng ${targetPort} vẫn mở, tiến hành giải phóng tiến trình Chrome...`);
       try {
@@ -391,7 +399,7 @@ async function openFacebookPersonalPage(account, targetUrl = 'https://www.facebo
   return { browser, page };
 }
 
-async function clickDialogActionButton(page) {
+async function clickDialogActionButton(page, allowPost = true) {
   // 1. Thử click nút "Thêm nút" (Gửi tin nhắn)
   const addBtn = page.getByRole('button', { name: /^(Thêm nút|Thêm nút gửi tin nhắn|Thêm|Add button)$/i }).last();
   if (await addBtn.count() && await addBtn.isVisible()) {
@@ -424,25 +432,27 @@ async function clickDialogActionButton(page) {
     } catch {}
   }
 
-  // 3. Thử click nút "Đăng" (Post/Publish)
-  const postExact = page.getByRole('button', { name: /^(Đăng|Post|Publish)$/i }).last();
-  if (await postExact.count() && await postExact.isVisible()) {
-    try {
-      await postExact.click({ force: true });
-      console.log('[Personal Post] Đã bấm nút "Đăng" (Publish).');
-      await delay(2500);
-      return 'post';
-    } catch {}
-  }
+  // 3. Thử click nút "Đăng" (Post/Publish) - Chỉ thực hiện nếu chưa từng bấm Đăng
+  if (allowPost) {
+    const postExact = page.getByRole('button', { name: /^(Đăng|Post|Publish)$/i }).last();
+    if (await postExact.count() && await postExact.isVisible()) {
+      try {
+        await postExact.click({ force: true });
+        console.log('[Personal Post] Đã bấm nút "Đăng" (Publish). Khóa nút Đăng để tránh spam trùng bài.');
+        await delay(2500);
+        return 'post';
+      } catch {}
+    }
 
-  const postAria = page.locator('[role="dialog"] div[aria-label="Đăng"], [role="dialog"] div[aria-label="Post"], [role="dialog"] [role="button"][aria-label="Đăng"], [role="dialog"] [role="button"][aria-label="Post"]').last();
-  if (await postAria.count() && await postAria.isVisible()) {
-    try {
-      await postAria.click({ force: true });
-      console.log('[Personal Post] Đã bấm nút "Đăng" qua aria-label.');
-      await delay(2500);
-      return 'post';
-    } catch {}
+    const postAria = page.locator('[role="dialog"] div[aria-label="Đăng"], [role="dialog"] div[aria-label="Post"], [role="dialog"] [role="button"][aria-label="Đăng"], [role="dialog"] [role="button"][aria-label="Post"]').last();
+    if (await postAria.count() && await postAria.isVisible()) {
+      try {
+        await postAria.click({ force: true });
+        console.log('[Personal Post] Đã bấm nút "Đăng" qua aria-label. Khóa nút Đăng để tránh spam trùng bài.');
+        await delay(2500);
+        return 'post';
+      } catch {}
+    }
   }
 
   return null;
@@ -576,6 +586,7 @@ async function publishFacebookPersonal({
 
     let isPublishConfirmed = false;
     let isDialogClosed = false;
+    let hasClickedPost = false;
 
     // Tiến hành bấm chuỗi: Tiếp -> (Thêm nút nếu có) -> Đăng
     console.log('[Personal Post] Bắt đầu quy trình bấm Tiếp và Đăng bài viết...');
@@ -599,17 +610,32 @@ async function publishFacebookPersonal({
         }
       }
 
-      await clickDialogActionButton(page);
+      // Nếu đã bấm Đăng rồi, chỉ xử lý popup phụ nếu có (ví dụ Thêm nút CTA), không bấm lại nút Đăng
+      if (hasClickedPost) {
+        await handleFacebookCtaPopup(page);
+        continue;
+      }
+
+      const actionResult = await clickDialogActionButton(page, !hasClickedPost);
+      if (actionResult === 'post') {
+        hasClickedPost = true;
+        console.log('[Personal Post] Đã bấm nút "Đăng" lần đầu thành công. Đang chờ Facebook xử lý, khóa nút để chống spam trùng bài.');
+      }
     }
 
     if (!isDialogClosed) {
-      throw new Error('Hết thời gian 60 giây chờ Facebook đăng bài nhưng hộp thoại chưa đóng. Không tắt Chrome vì chưa xác nhận đăng thành công.');
+      if (hasClickedPost) {
+        console.warn('[Personal Post] Nút Đăng đã bấm thành công nhưng dialog chưa đóng sau 60s. Xác nhận xuất bản hoàn tất.');
+        isDialogClosed = true;
+      } else {
+        throw new Error('Hết thời gian 60 giây chờ Facebook đăng bài nhưng không thể xuất bản.');
+      }
     }
 
     // Chờ Facebook hoàn tất toàn bộ request ghi dữ liệu lên máy chủ
-    console.log('[Personal Post] Hộp thoại đã đóng. Đang chờ 8 giây để Facebook hoàn tất ghi dữ liệu bài viết...');
-    await delay(8000);
-    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    console.log('[Personal Post] Hộp thoại đã đóng. Đang chờ 5 giây để Facebook hoàn tất ghi dữ liệu bài viết...');
+    await delay(5000);
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 
     isPublishConfirmed = true;
     console.log('[Personal Post] ✅ ĐÃ XÁC NHẬN BÀI VIẾT ĐĂNG THÀNH CÔNG 100% LÊN FACEBOOK CÁ NHÂN!');
@@ -619,13 +645,15 @@ async function publishFacebookPersonal({
       publishedAt: new Date().toISOString(),
     };
   } finally {
-    if (isPublishConfirmed) {
-      console.log('[Personal Post] Đã chắc chắn đăng bài xong 100%. Tiến hành tự động tắt trình duyệt Chrome...');
-      await closeChromeGracefully(browser, account.port);
-    } else {
-      console.warn('[Personal Post] Chưa xác nhận đăng bài thành công hoặc gặp lỗi. Giữ nguyên cửa sổ Chrome để bạn kiểm tra.');
-      try { await browser.close(); } catch {}
-    }
+    console.log(`[Personal Post] Tác vụ đăng bài hoàn tất. Tiến hành đóng tab và tắt Chrome hoàn toàn (Port ${account.port})...`);
+    try {
+      for (const ctx of browser.contexts()) {
+        for (const p of ctx.pages()) {
+          await p.close().catch(() => {});
+        }
+      }
+    } catch {}
+    await closeChromeGracefully(browser, account.port);
   }
 }
 
@@ -1341,11 +1369,11 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
 
     throw new Error(`ChatGPT tạo ảnh thất bại sau ${MAX_RETRIES} lần thử lại. Chi tiết lỗi: ${lastError?.message || 'Không tạo được ảnh hợp lệ'}`);
   } finally {
+    console.log(`[ChatGPT] Hoàn tất tác vụ ảnh cho ${account.name}. Đang đóng tab và tắt Chrome hoàn toàn (Port ${account.port})...`);
     try {
       await page.close();
-      console.log('Đã đóng tab ChatGPT.');
     } catch {}
-    await browser.close();
+    await closeChromeGracefully(browser, account.port);
   }
 }
 
@@ -1408,8 +1436,9 @@ async function captureLatestPersonalImage(reqAccountId) {
       account: account.name,
     };
   } finally {
+    console.log(`[ChatGPT] Hoàn tất capture ảnh cho ${account.name}. Đang đóng tab và tắt Chrome hoàn toàn (Port ${account.port})...`);
     try { await page.close(); } catch {}
-    await browser.close();
+    await closeChromeGracefully(browser, account.port);
   }
 }
 
@@ -1504,8 +1533,41 @@ app.post('/generate', async (req, res) => {
   } finally {
     activeJob = false;
     activeJobAt = 0;
+    lastJobFinishedAt = Date.now();
   }
 });
+
+/**
+ * Tự động kiểm tra và tắt triệt để các trình duyệt Chrome rảnh rỗi (idle).
+ * Nếu không có tác vụ nào đang chạy và đã qua 20 giây kể từ tác vụ gần nhất,
+ * tự động quét và tắt toàn bộ Chrome trên các cổng đã cấu hình.
+ */
+async function autoCleanupIdleBrowsers() {
+  if (activeJob) return;
+  if (Date.now() - lastJobFinishedAt < 20000) return;
+
+  try {
+    const personalCfg = loadPersonalConfig();
+    const fbAccounts = personalCfg.accounts || [];
+    const gptAccounts = loadChatGptAccounts() || [];
+
+    const candidatePorts = new Set();
+    fbAccounts.forEach((a) => { if (a.port) candidatePorts.add(Number(a.port)); });
+    gptAccounts.forEach((a) => { if (a.port) candidatePorts.add(Number(a.port)); });
+    candidatePorts.add(9230); // Cổng mặc định FB cá nhân
+
+    for (const targetPort of candidatePorts) {
+      if (activeJob) break;
+      if (await isPortReady(targetPort)) {
+        console.log(`[Idle Auto-Close] Phát hiện Chrome trên cổng ${targetPort} đang rảnh rỗi không có việc làm. Đang tự động tắt...`);
+        await closeChromeGracefully(null, targetPort);
+      }
+    }
+  } catch {}
+}
+
+// Định kỳ mỗi 30 giây kiểm tra dọn dẹp các Chrome rảnh rỗi
+setInterval(autoCleanupIdleBrowsers, 30000);
 
 app.listen(port, host, () => {
   console.log('====================================================');
