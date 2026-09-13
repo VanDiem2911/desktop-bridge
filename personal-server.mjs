@@ -45,7 +45,6 @@ const CONFIG_CHATGPT_PATH = resolveConfigFile('chatgpt-config.json', 'chatgpt-co
 
 let activeJob = false;
 let activeJobAt = 0;
-let lastJobFinishedAt = Date.now();
 const JOB_TIMEOUT_MS = 15 * 60 * 1000; // 15 phút auto-reset nếu job bị treo
 
 function loadChatGptAccounts() {
@@ -1533,41 +1532,8 @@ app.post('/generate', async (req, res) => {
   } finally {
     activeJob = false;
     activeJobAt = 0;
-    lastJobFinishedAt = Date.now();
   }
 });
-
-/**
- * Tự động kiểm tra và tắt triệt để các trình duyệt Chrome rảnh rỗi (idle).
- * Nếu không có tác vụ nào đang chạy và đã qua 20 giây kể từ tác vụ gần nhất,
- * tự động quét và tắt toàn bộ Chrome trên các cổng đã cấu hình.
- */
-async function autoCleanupIdleBrowsers() {
-  if (activeJob) return;
-  if (Date.now() - lastJobFinishedAt < 20000) return;
-
-  try {
-    const personalCfg = loadPersonalConfig();
-    const fbAccounts = personalCfg.accounts || [];
-    const gptAccounts = loadChatGptAccounts() || [];
-
-    const candidatePorts = new Set();
-    fbAccounts.forEach((a) => { if (a.port) candidatePorts.add(Number(a.port)); });
-    gptAccounts.forEach((a) => { if (a.port) candidatePorts.add(Number(a.port)); });
-    candidatePorts.add(9230); // Cổng mặc định FB cá nhân
-
-    for (const targetPort of candidatePorts) {
-      if (activeJob) break;
-      if (await isPortReady(targetPort)) {
-        console.log(`[Idle Auto-Close] Phát hiện Chrome trên cổng ${targetPort} đang rảnh rỗi không có việc làm. Đang tự động tắt...`);
-        await closeChromeGracefully(null, targetPort);
-      }
-    }
-  } catch {}
-}
-
-// Định kỳ mỗi 30 giây kiểm tra dọn dẹp các Chrome rảnh rỗi
-setInterval(autoCleanupIdleBrowsers, 30000);
 
 app.listen(port, host, () => {
   console.log('====================================================');
