@@ -281,6 +281,13 @@ export default function DashboardPage() {
   const [revokeLoading, setRevokeLoading] = useState(false);
   const [viewingGroupError, setViewingGroupError] = useState<{ url: string; error: string } | null>(null);
 
+  // Modal Xuất toàn bộ link Facebook state
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportFilterAcc, setExportFilterAcc] = useState<string>('all');
+  const [exportFilterPostStatus, setExportFilterPostStatus] = useState<string>('all');
+  const [exportFilterJoinStatus, setExportFilterJoinStatus] = useState<string>('all');
+  const [exportCopied, setExportCopied] = useState(false);
+
   // Analytics & History state
   const [analyticsData, setAnalyticsData] = useState<{
     stats: AnalyticsStats;
@@ -1248,6 +1255,147 @@ export default function DashboardPage() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       showToast(msg, 'error');
+    }
+  };
+
+  // Helper lọc và lấy danh sách link để xuất
+  const getExportablePoolItems = () => {
+    const allItems: CentralPoolItem[] = [...(groupsData.centralPool || [])];
+    const seenUrls = new Set(allItems.map((p) => p.url));
+    for (const acc of groupsData.accounts || []) {
+      for (const u of acc.groupUrls || []) {
+        if (!seenUrls.has(u)) {
+          seenUrls.add(u);
+          allItems.push({
+            id: u,
+            url: u,
+            addedAt: '',
+            assignedAccountId: acc.id,
+            assignedAccountName: acc.name,
+            joinedStatus: 'unknown',
+            lastPostStatus: 'not_posted',
+          });
+        }
+      }
+    }
+
+    return allItems.filter((item) => {
+      if (exportFilterAcc !== 'all') {
+        if (exportFilterAcc === 'unassigned') {
+          if (item.assignedAccountId) return false;
+        } else {
+          if (item.assignedAccountId !== exportFilterAcc) return false;
+        }
+      }
+      if (exportFilterPostStatus !== 'all') {
+        const postStatus = item.lastPostStatus || 'not_posted';
+        if (exportFilterPostStatus !== postStatus) return false;
+      }
+      if (exportFilterJoinStatus !== 'all') {
+        const joinStatus = item.joinedStatus || 'unknown';
+        if (exportFilterJoinStatus !== joinStatus) return false;
+      }
+      return true;
+    });
+  };
+
+  // Xuất file .TXT (Mỗi dòng 1 link)
+  const handleExportTxt = () => {
+    const items = getExportablePoolItems();
+    if (items.length === 0) {
+      return showToast('Không có link nào để xuất!', 'info');
+    }
+    const textContent = items.map((it) => it.url).join('\n');
+    const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `danh_sach_link_fb_${items.length}_${new Date().toISOString().slice(0, 10)}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast(`Đã xuất thành công ${items.length} link ra file .TXT!`, 'success');
+  };
+
+  // Xuất file .CSV (Excel chi tiết đầy đủ cột)
+  const handleExportCsv = () => {
+    const items = getExportablePoolItems();
+    if (items.length === 0) {
+      return showToast('Không có link nào để xuất!', 'info');
+    }
+    const headers = [
+      'STT',
+      'URL Facebook',
+      'Tên nhóm',
+      'Nick phụ trách',
+      'Trạng thái nhóm',
+      'Trạng thái đăng bài',
+      'Thời gian đăng gần nhất',
+      'Lỗi đăng bài',
+    ];
+
+    const escapeCsv = (val: string | number | undefined | null) => {
+      if (val === undefined || val === null) return '""';
+      const s = String(val).replace(/"/g, '""');
+      return `"${s}"`;
+    };
+
+    const getJoinText = (st?: string) => {
+      if (st === 'joined') return 'Đã tham gia';
+      if (st === 'pending') return 'Đang chờ duyệt';
+      if (st === 'not_joined') return 'Chưa tham gia';
+      return 'Chưa xác định';
+    };
+
+    const getPostText = (st?: string) => {
+      if (st === 'success') return 'Đã đăng thành công';
+      if (st === 'failed') return 'Gặp lỗi đăng bài';
+      return 'Chưa đăng';
+    };
+
+    const rows = items.map((item, idx) => {
+      const acc = groupsData.accounts?.find((a) => a.id === item.assignedAccountId);
+      const accName = acc?.name || item.assignedAccountName || (item.assignedAccountId ? item.assignedAccountId : 'Chưa gán');
+      return [
+        escapeCsv(idx + 1),
+        escapeCsv(item.url),
+        escapeCsv(item.name || ''),
+        escapeCsv(accName),
+        escapeCsv(getJoinText(item.joinedStatus)),
+        escapeCsv(getPostText(item.lastPostStatus)),
+        escapeCsv(item.lastPostedAt ? new Date(item.lastPostedAt).toLocaleString('vi-VN') : ''),
+        escapeCsv(item.lastPostError || ''),
+      ].join(',');
+    });
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `danh_sach_link_fb_chi_tiet_${items.length}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast(`Đã xuất thành công ${items.length} link ra file .CSV (Excel)!`, 'success');
+  };
+
+  // Sao chép toàn bộ link vào Clipboard
+  const handleCopyExportLinks = async () => {
+    const items = getExportablePoolItems();
+    if (items.length === 0) {
+      return showToast('Không có link nào để sao chép!', 'info');
+    }
+    const text = items.map((it) => it.url).join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setExportCopied(true);
+      setTimeout(() => setExportCopied(false), 2000);
+      showToast(`Đã sao chép ${items.length} link vào Clipboard!`, 'success');
+    } catch {
+      showToast('Không thể sao chép vào Clipboard, vui lòng thử lại', 'error');
     }
   };
 
@@ -2548,6 +2696,18 @@ export default function DashboardPage() {
                   <Database className="w-4 h-4" /> Import vào Kho chung
                 </button>
                 <button
+                  onClick={() => {
+                    setExportFilterAcc('all');
+                    setExportFilterPostStatus('all');
+                    setExportFilterJoinStatus('all');
+                    setIsExportModalOpen(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl shadow-md shadow-emerald-600/25 transition-all"
+                  title="Xuất toàn bộ link nhóm Facebook ra file TXT, CSV hoặc sao chép"
+                >
+                  <Download className="w-4 h-4" /> Xuất toàn bộ link
+                </button>
+                <button
                   onClick={openDistributeModal}
                   className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl shadow-md shadow-violet-600/25 transition-all"
                 >
@@ -2885,18 +3045,34 @@ export default function DashboardPage() {
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="block text-xs font-bold text-slate-700">Chọn tài khoản xem nhóm:</label>
-                      {activeGroupAccount && (
-                        <button
-                          onClick={() => handleToggleAccount('groups', activeGroupAccount.id, activeGroupAccount.enabled !== false)}
-                          className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
-                            activeGroupAccount.enabled !== false
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : 'bg-slate-100 text-slate-500 border-slate-200'
-                          }`}
-                        >
-                          {activeGroupAccount.enabled !== false ? '🟢 Tài khoản đang Bật' : '⚪ Tài khoản đang Tắt'}
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {activeGroupAccount && (
+                          <button
+                            onClick={() => {
+                              setExportFilterAcc(activeGroupAccount.id);
+                              setExportFilterPostStatus('all');
+                              setExportFilterJoinStatus('all');
+                              setIsExportModalOpen(true);
+                            }}
+                            className="text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 flex items-center gap-1 transition-all"
+                            title="Xuất riêng danh sách link của nick này"
+                          >
+                            <Download className="w-3 h-3 text-emerald-600" /> Xuất link nick này
+                          </button>
+                        )}
+                        {activeGroupAccount && (
+                          <button
+                            onClick={() => handleToggleAccount('groups', activeGroupAccount.id, activeGroupAccount.enabled !== false)}
+                            className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
+                              activeGroupAccount.enabled !== false
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-slate-100 text-slate-500 border-slate-200'
+                            }`}
+                          >
+                            {activeGroupAccount.enabled !== false ? '🟢 Tài khoản đang Bật' : '⚪ Tài khoản đang Tắt'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <select
                       value={selectedGroupAcc}
@@ -3998,6 +4174,180 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* ==================== MODAL XUẤT LINK FACEBOOK ==================== */}
+      {isExportModalOpen && (() => {
+        const exportItems = getExportablePoolItems();
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="liquid-glass-modal rounded-3xl w-full max-w-xl p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="p-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100">
+                    <Download className="w-5 h-5" />
+                  </span>
+                  <div>
+                    <h3 className="font-extrabold text-base md:text-lg text-slate-900">
+                      Xuất Danh Sách Link Facebook
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium">
+                      Tải file .TXT nạp tool, file .CSV (Excel) chi tiết hoặc sao chép nhanh
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsExportModalOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Filters */}
+              <div className="space-y-3 bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200/70">
+                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  Bộ lọc danh sách xuất
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {/* Account Filter */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Nick phụ trách:</label>
+                    <select
+                      value={exportFilterAcc}
+                      onChange={(e) => setExportFilterAcc(e.target.value)}
+                      className="liquid-input w-full rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-800"
+                    >
+                      <option value="all">Tất cả ({poolStats.total || groupsData.centralPool?.length || 0})</option>
+                      <option value="unassigned">Chưa gán ({poolStats.unassigned || 0})</option>
+                      {groupsData.accounts?.map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.name} ({acc.groupUrls?.length || 0} link)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Post Status Filter */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Trạng thái đăng:</label>
+                    <select
+                      value={exportFilterPostStatus}
+                      onChange={(e) => setExportFilterPostStatus(e.target.value)}
+                      className="liquid-input w-full rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-800"
+                    >
+                      <option value="all">Tất cả trạng thái</option>
+                      <option value="success">🟢 Đã đăng thành công</option>
+                      <option value="failed">🔴 Gặp lỗi đăng bài</option>
+                      <option value="not_posted">⚪ Chưa từng đăng</option>
+                    </select>
+                  </div>
+
+                  {/* Join Status Filter */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Trạng thái nhóm:</label>
+                    <select
+                      value={exportFilterJoinStatus}
+                      onChange={(e) => setExportFilterJoinStatus(e.target.value)}
+                      className="liquid-input w-full rounded-xl px-2.5 py-1.5 text-xs font-semibold text-slate-800"
+                    >
+                      <option value="all">Tất cả nhóm</option>
+                      <option value="joined">🤝 Đã tham gia</option>
+                      <option value="pending">⏳ Đang chờ duyệt</option>
+                      <option value="not_joined">❌ Chưa tham gia</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status & Preview */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <Database className="w-3.5 h-3.5 text-blue-600" />
+                    Đang chọn: <b className="text-blue-600 font-extrabold">{exportItems.length}</b> link Facebook
+                  </span>
+                  <button
+                    onClick={handleCopyExportLinks}
+                    className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-blue-600 transition-colors"
+                  >
+                    {exportCopied ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <span className="text-emerald-600">Đã chép vào bộ nhớ tạm!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Sao chép toàn bộ</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <div className="relative">
+                  <textarea
+                    readOnly
+                    rows={6}
+                    value={exportItems.map((it) => it.url).join('\n')}
+                    placeholder="Không có link nào phù hợp bộ lọc..."
+                    className="liquid-input w-full rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-700 bg-slate-50/70 select-all resize-none"
+                  />
+                  {exportItems.length > 0 && (
+                    <span className="absolute bottom-2.5 right-3 text-[10px] font-medium text-slate-400 bg-white/80 px-2 py-0.5 rounded-md border border-slate-200/60 pointer-events-none">
+                      {exportItems.length} dòng
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-slate-200/80">
+                <button
+                  type="button"
+                  onClick={() => setIsExportModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 transition-all"
+                >
+                  Đóng
+                </button>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyExportLinks}
+                    disabled={exportItems.length === 0}
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-xs font-bold text-slate-700 disabled:opacity-50 transition-all shadow-xs cursor-pointer"
+                  >
+                    {exportCopied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-slate-600" />}
+                    Sao chép Clipboard
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExportCsv}
+                    disabled={exportItems.length === 0}
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 border border-blue-200 text-xs font-bold text-blue-700 disabled:opacity-50 transition-all shadow-xs cursor-pointer"
+                    title="Xuất file CSV mở bằng Microsoft Excel với đầy đủ cột trạng thái, nick phụ trách, lỗi"
+                  >
+                    <Download className="w-4 h-4 text-blue-600" />
+                    Tải file .CSV (Excel)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExportTxt}
+                    disabled={exportItems.length === 0}
+                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white shadow-md shadow-emerald-600/25 disabled:opacity-50 transition-all cursor-pointer"
+                    title="Tải file TXT mỗi link một dòng để nạp vào tool"
+                  >
+                    <FileText className="w-4 h-4" />
+                    Tải file .TXT
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ==================== MODAL IMPORT VÀO KHO CHUNG ==================== */}
       {isPoolImportOpen && (

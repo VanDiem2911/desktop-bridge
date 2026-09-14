@@ -443,6 +443,108 @@ async function ensureJoinedGroup(page, groupUrl) {
 }
 
 /**
+ * Phát hiện tài khoản có đang bị Facebook cảnh báo spam, giới hạn tần suất đăng bài, hoặc dính checkpoint hay không
+ */
+async function detectFacebookWarningOrBlock(page, dialog = null) {
+  try {
+    const currentUrl = page.url();
+    if (currentUrl.includes('/checkpoint/')) {
+      return 'Tài khoản đang bị Facebook chuyển hướng đến trang Checkpoint (xác minh số điện thoại / danh tính)';
+    }
+
+    const warningKeywords = [
+      'để bảo vệ cộng đồng khỏi spam',
+      'giới hạn tần suất bạn đăng bài',
+      'giới hạn tần suất',
+      'khoảng thời gian nhất định',
+      'thử lại sau',
+      'tiêu chuẩn cộng đồng',
+      'đóng góp ý kiến',
+      'tạm thời bị chặn',
+      'bạn tạm thời bị hạn chế',
+      'không thể thực hiện hành động này',
+      'bạn đã thực hiện hành động này quá thường xuyên',
+      'hạn chế tính năng',
+      'tài khoản của bạn đã bị khóa',
+      'tài khoản của bạn tạm thời bị khóa',
+      'nhập số di động',
+      'xác nhận danh tính',
+      'bị vô hiệu hóa',
+      'protect the community from spam',
+      'limit how often',
+      'temporarily blocked',
+      'action blocked',
+      'community standards',
+      'try again later',
+      'your account has been locked',
+      'confirm your identity',
+    ];
+
+    // 1. Quét nội dung text trong dialog (nếu có)
+    if (dialog) {
+      const dialogVisible = await dialog.isVisible().catch(() => false);
+      if (dialogVisible) {
+        const dialogText = (await dialog.innerText().catch(() => '')).toLowerCase();
+        for (const kw of warningKeywords) {
+          if (dialogText.includes(kw)) {
+            const lines = dialogText.split('\n').map(l => l.trim()).filter(Boolean);
+            const found = lines.find(l => l.includes(kw)) || kw;
+            return `Cảnh báo Facebook trong hộp thoại: "${found.substring(0, 150)}"`;
+          }
+        }
+      }
+    }
+
+    // 2. Quét các phần tử role="alert" hoặc có text cảnh báo đặc trưng
+    const alertSelectors = [
+      '[role="alert"]',
+      'div[role="dialog"] [role="alert"]',
+      'div[role="dialog"] div[style*="red"]',
+      'div:has-text("Để bảo vệ cộng đồng")',
+      'div:has-text("giới hạn tần suất")',
+      'div:has-text("Đóng góp ý kiến")',
+      'div:has-text("tạm thời bị chặn")',
+      'div:has-text("Tiêu chuẩn cộng đồng")',
+    ];
+
+    for (const sel of alertSelectors) {
+      const el = page.locator(sel).first();
+      if (await el.count().catch(() => 0) && await el.isVisible().catch(() => false)) {
+        const text = (await el.innerText().catch(() => '')).trim();
+        const lower = text.toLowerCase();
+        for (const kw of warningKeywords) {
+          if (lower.includes(kw)) {
+            return `Cảnh báo Facebook phát hiện: "${text.replace(/\s+/g, ' ').substring(0, 150)}"`;
+          }
+        }
+      }
+    }
+
+    // 3. Quét nhanh text toàn trang
+    const pageSnippet = await page.evaluate(() => {
+      const text = document.body ? document.body.innerText : '';
+      return text.substring(0, 5000).toLowerCase();
+    }).catch(() => '');
+
+    if (
+      pageSnippet.includes('để bảo vệ cộng đồng khỏi spam') ||
+      (pageSnippet.includes('giới hạn tần suất') && pageSnippet.includes('thử lại sau')) ||
+      pageSnippet.includes('tài khoản của bạn đã bị khóa') ||
+      pageSnippet.includes('bạn tạm thời bị chặn')
+    ) {
+      for (const kw of warningKeywords) {
+        if (pageSnippet.includes(kw)) {
+          return `Cảnh báo Facebook trên trang: "${kw}"`;
+        }
+      }
+    }
+  } catch (err) {
+    // Không làm gián đoạn nếu xảy ra lỗi evaluate
+  }
+  return null;
+}
+
+/**
  * Đăng bài vào 1 Facebook Group (Tự động kiểm tra & tham gia nhóm trước khi đăng)
  */
 async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType = 'image/png', fileName = 'image.png') {
@@ -452,6 +554,14 @@ async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType 
 
   if (page.url().includes('/login')) {
     throw new Error('Tài khoản Facebook chưa đăng nhập trong profile này. Hãy chạy open-setup-chrome.ps1 để đăng nhập.');
+  }
+
+  // KIỂM TRA NGAY NẾU TÀI KHOẢN ĐANG Ở TRẠNG THÁI CHECKPOINT / KHÓA TÍNH NĂNG
+  const initialWarning = await detectFacebookWarningOrBlock(page);
+  if (initialWarning) {
+    const warnErr = new Error(`[FACEBOOK_WARNING_BLOCKED] ${initialWarning}`);
+    warnErr.isWarningBlocked = true;
+    throw warnErr;
   }
 
   // BƯỚC 1: KIỂM TRA VÀ TỰ ĐỘNG THAM GIA NHÓM NẾU CHƯA THAM GIA
@@ -609,16 +719,43 @@ async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType 
   await publishBtn.waitFor({ state: 'visible', timeout: 30000 });
   console.log('[Group Post] Bấm nút Đăng bài...');
   await publishBtn.click();
-  console.log('[Group Post] Đã bấm nút Đăng. Đang chờ xuất bản...');
+  console.log('[Group Post] Đã bấm nút Đăng. Đang theo dõi xuất bản & quét cảnh báo Facebook...');
 
-  try {
-    await dialog.waitFor({ state: 'hidden', timeout: 60000 });
-    console.log('[Group Post] Bài viết đã đăng thành công.');
-  } catch {
-    console.warn('[Group Post] Chờ thêm buffer an toàn...');
+  let isPublished = false;
+  const publishDeadline = Date.now() + 45000;
+
+  while (Date.now() < publishDeadline) {
+    await delay(2000);
+
+    // 1. Kiểm tra nếu có cảnh báo spam / giới hạn tần suất xuất hiện ngay trong hoặc sau khi bấm Đăng
+    const warning = await detectFacebookWarningOrBlock(page, dialog);
+    if (warning) {
+      console.error(`\n🚨 [Group Post] PHÁT HIỆN CẢNH BÁO VI PHẠM TỪ FACEBOOK: ${warning}`);
+      const warnErr = new Error(`[FACEBOOK_WARNING_BLOCKED] ${warning}`);
+      warnErr.isWarningBlocked = true;
+      throw warnErr;
+    }
+
+    // 2. Kiểm tra nếu dialog đã đóng hoàn toàn (Facebook xuất bản thành công)
+    const dialogVisible = await dialog.isVisible().catch(() => false);
+    if (!dialogVisible) {
+      isPublished = true;
+      console.log('[Group Post] Hộp thoại đăng bài đã đóng (Facebook đã xuất bản bài viết).');
+      break;
+    }
   }
 
-  await delay(8000);
+  if (!isPublished) {
+    const finalWarning = await detectFacebookWarningOrBlock(page, dialog);
+    if (finalWarning) {
+      const warnErr = new Error(`[FACEBOOK_WARNING_BLOCKED] ${finalWarning}`);
+      warnErr.isWarningBlocked = true;
+      throw warnErr;
+    }
+    throw new Error(`Hết thời gian chờ đăng bài lên nhóm ${groupUrl} (Hộp thoại đăng bài không đóng sau 45s).`);
+  }
+
+  await delay(5000);
   console.log(`[Group Post] Hoàn thành đăng nhóm: ${groupUrl}`);
   return { success: true, joinStatus: joinResult.status };
 }
@@ -641,7 +778,30 @@ async function executeGroupPosting(body) {
   }
 
   const config = loadConfig();
-  let accountsToRun = (config.accounts || []).filter(acc => acc.enabled !== false);
+  const now = Date.now();
+
+  let accountsToRun = (config.accounts || []).filter(acc => {
+    if (acc.enabled === false) return false;
+    if (acc.cooldownUntil) {
+      const cdTime = new Date(acc.cooldownUntil).getTime();
+      if (cdTime > now) {
+        const remainHours = Math.ceil((cdTime - now) / (60 * 60 * 1000));
+        const remainMins = Math.ceil((cdTime - now) / (60 * 1000));
+        const timeText = remainHours > 1 ? `${remainHours} giờ` : `${remainMins} phút`;
+        console.log(`[Group Server] ⏳ Tài khoản "${acc.name}" đang trong thời gian nghỉ ngơi 48h để nhả phạt (còn ~${timeText}, đến ${new Date(acc.cooldownUntil).toLocaleString('vi-VN')}). Tự động bỏ qua.`);
+        return false;
+      } else {
+        // Đã qua 48h nghỉ ngơi an toàn! Tự động xóa cooldown
+        delete acc.cooldownUntil;
+        acc.status = 'active';
+        delete acc.disabledReason;
+        saveConfig(config);
+        console.log(`[Group Server] 🎉 Tài khoản "${acc.name}" đã hoàn thành 48h nghỉ ngơi an toàn! Tự động kích hoạt lại.`);
+        return true;
+      }
+    }
+    return true;
+  });
 
   if (targetAccounts) {
     const targets = Array.isArray(targetAccounts) ? targetAccounts.map(String) : [String(targetAccounts)];
@@ -716,6 +876,47 @@ async function executeGroupPosting(body) {
       }
       await page.bringToFront();
 
+      // KIỂM TRA NGAY NẾU TÀI KHOẢN ĐANG DÍNH CHECKPOINT HOẶC CẢNH BÁO TRƯỚC KHI BẮT ĐẦU
+      const preCheckWarning = await detectFacebookWarningOrBlock(page);
+      if (preCheckWarning) {
+        const cooldownDate = new Date(Date.now() + 48 * 60 * 60 * 1000);
+        const cooldownUntil = cooldownDate.toISOString();
+        const cooldownText = cooldownDate.toLocaleString('vi-VN');
+
+        console.error(`\n🚨🚨🚨 [TỰ ĐỘNG CHO NGHỈ 48H] Tài khoản "${account.name}" đang bị checkpoint/khóa: ${preCheckWarning}`);
+        console.error(`⏳ Tự động cho nghỉ 48 tiếng (đến ${cooldownText}) để Facebook nhả phạt an toàn.`);
+
+        const targetAccInConfig = (config.accounts || []).find(a => String(a.id) === String(account.id));
+        if (targetAccInConfig) {
+          targetAccInConfig.enabled = false;
+          targetAccInConfig.cooldownUntil = cooldownUntil;
+          targetAccInConfig.status = 'cooldown_48h';
+          targetAccInConfig.disabledReason = `${preCheckWarning}. Cho nghỉ 48h đến ${cooldownText}`;
+          targetAccInConfig.disabledAt = new Date().toISOString();
+        }
+        account.enabled = false;
+        account.cooldownUntil = cooldownUntil;
+        account.status = 'cooldown_48h';
+        account.disabledReason = `${preCheckWarning}. Cho nghỉ 48h đến ${cooldownText}`;
+        account.disabledAt = new Date().toISOString();
+        saveConfig(config);
+
+        accResult.accountError = `Đã tự động TẮT và cho nghỉ 48h (đến ${cooldownText}): ${preCheckWarning}`;
+        logPostActivity({
+          type: 'post',
+          channel: 'groups',
+          channelName: 'Facebook Groups',
+          targetName: account.name,
+          targetUrl: 'N/A',
+          status: 'failed',
+          caption: postCaption,
+          error: `[CHO NGHỈ 48H] ${preCheckWarning}`,
+          durationMs: 0,
+        });
+        results.push(accResult);
+        continue; // Chuyển sang tài khoản tiếp theo ngay lập tức
+      }
+
       for (const groupUrl of targetGroupList) {
         const postStartTime = Date.now();
         try {
@@ -732,8 +933,17 @@ async function executeGroupPosting(body) {
             durationMs: Date.now() - postStartTime,
           });
         } catch (groupError) {
+          const isWarningBlocked =
+            groupError.isWarningBlocked ||
+            groupError.message.includes('FACEBOOK_WARNING_BLOCKED') ||
+            groupError.message.includes('bảo vệ cộng đồng') ||
+            groupError.message.includes('giới hạn tần suất') ||
+            groupError.message.includes('checkpoint') ||
+            groupError.message.includes('Checkpoint') ||
+            groupError.message.includes('tạm thời bị chặn');
+
           console.error(`[Group Server Error] Lỗi đăng nhóm ${groupUrl}:`, groupError.message);
-          accResult.groups.push({ groupUrl, status: 'error', error: groupError.message });
+          accResult.groups.push({ groupUrl, status: isWarningBlocked ? 'warning_blocked' : 'error', error: groupError.message });
           logPostActivity({
             type: 'post',
             channel: 'groups',
@@ -746,6 +956,38 @@ async function executeGroupPosting(body) {
             errorDetails: groupError.stack,
             durationMs: Date.now() - postStartTime,
           });
+
+          if (isWarningBlocked) {
+            const cooldownDate = new Date(Date.now() + 48 * 60 * 60 * 1000);
+            const cooldownUntil = cooldownDate.toISOString();
+            const cooldownText = cooldownDate.toLocaleString('vi-VN');
+
+            console.error(`\n======================================================`);
+            console.error(`🚨🚨🚨 PHÁT HIỆN TÀI KHOẢN "${account.name}" BỊ FACEBOOK CẢNH BÁO! 🚨🚨🚨`);
+            console.error(`👉 Chi tiết: ${groupError.message}`);
+            console.error(`👉 Hành động bảo vệ: TỰ ĐỘNG CHO NGHỈ ÍT NHẤT 48 TIẾNG (ĐẾN ${cooldownText})!`);
+            console.error(`👉 Cập nhật enabled = false và cooldownUntil vào groups-config.json`);
+            console.error(`👉 DỪNG NGAY TẤT CẢ CÁC NHÓM CÒN LẠI ĐỂ TRÁNH BAY NICK!`);
+            console.error(`======================================================\n`);
+
+            const targetAccInConfig = (config.accounts || []).find(a => String(a.id) === String(account.id));
+            if (targetAccInConfig) {
+              targetAccInConfig.enabled = false;
+              targetAccInConfig.cooldownUntil = cooldownUntil;
+              targetAccInConfig.status = 'cooldown_48h';
+              targetAccInConfig.disabledReason = `Facebook cảnh báo: ${groupError.message}. Cho nghỉ 48h đến ${cooldownText}`;
+              targetAccInConfig.disabledAt = new Date().toISOString();
+            }
+            account.enabled = false;
+            account.cooldownUntil = cooldownUntil;
+            account.status = 'cooldown_48h';
+            account.disabledReason = `Facebook cảnh báo: ${groupError.message}. Cho nghỉ 48h đến ${cooldownText}`;
+            account.disabledAt = new Date().toISOString();
+            saveConfig(config);
+
+            accResult.accountError = `Tài khoản đã TỰ ĐỘNG TẮT và cho nghỉ 48h để nhả phạt (đến ${cooldownText}): ${groupError.message}`;
+            break; // DỪNG TOÀN BỘ CÁC NHÓM TIẾP THEO CỦA NICK NÀY NGAY!
+          }
         }
         await delay(3000);
       }
