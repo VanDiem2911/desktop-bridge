@@ -1,28 +1,103 @@
+# ========================================================
+# BẢO MẬT & THÔNG TIN NHẠY CẢM (TUYỆT ĐỐI KHÔNG PUSH LÊN GITHUB)
+# ========================================================
+# Google Service Account & Credentials
+google-service-account.json
+configs/google-service-account.json
+**/google-service-account.json
+*credentials*.json
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Các file cấu hình chứa Token, API Key cá nhân (giữ lại các file .example.json mẫu)
+configs/*.json
+!configs/*.example.json
+*-config.json
+!*-config.example.json
+
+# Lịch sử đăng bài, data chạy thực tế
+post-history.json
+configs/post-history.json
+*.sqlite
+*.db
+
+# ========================================================
+# DEPENDENCIES & BUILD ARTIFACTS
+# ========================================================
 node_modules/
-images/
-npm-debug.log*
-pnpm-debug.log*
+**/node_modules/
+.pnpm-store/
 package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Next.js & Web build outputs (Cực kỳ nặng, không push lên git)
+.next/
+**/.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# ========================================================
+# LOGS & TEMPORARY FILES
+# ========================================================
 *.log
 */*.log
 **/*.log
 *-err.log
 **/*-err.log
-*.docx
-__pycache__/
-*.pyc
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# ========================================================
+# MEDIA, IMAGES & CACHE (Tránh đẩy ảnh tạo ngẫu nhiên từ ChatGPT)
+# ========================================================
+images/
 temp_*.png
 test_*.png
 screenshot_*.png
 error_*.png
-.env
-.env.local
+*.png
+*.jpg
+*.jpeg
+*.webp
+!dashboard/public/*.png
+!dashboard/public/*.jpg
+!dashboard/public/*.svg
+!dashboard/public/*.ico
+!public/*.png
+!public/*.svg
+!public/*.ico
 
-# Cấu hình cá nhân & Lịch sử đăng bài (mỗi máy tự lưu riêng biệt, tuyệt đối không đẩy lên Git)
-configs/*.json
-!configs/*.example.json
-*-config.json
-!*-config.example.json
-post-history.json
-configs/post-history.json
+# Tài liệu Word, Powerpoint cá nhân
+*.docx
+*.pptx
+*.pdf
 
+# Python & System cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Browser profiles (Chrome user data, session cookies chứa mật khẩu)
+AppData/
+profiles/
+*Profile*
+*profile*
+
+# ========================================================
+# IDE & OS ARTIFACTS
+# ========================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo

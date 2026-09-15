@@ -6,6 +6,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { runAutoPilotCycle, loadScheduleConfig, executeSingleNode, getAutoPilotProgress } from './lib/auto-pilot.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -644,18 +645,15 @@ async function handleTelegramMessage(message) {
     }
 
     case '/post_now': {
-      await sendTelegramMessage('🚀 <i>Đang kích hoạt quy trình đăng bài ngay lập tức...</i>', chatId);
+      await sendTelegramMessage('🚀 <b>Đang kích hoạt quy trình Auto-Pilot!</b>\n1️⃣ Gemini AI viết bài & sinh prompt ảnh\n2️⃣ ChatGPT Web Bridge tạo ảnh\n3️⃣ Đăng tự động lên các kênh Facebook\n<i>Vui lòng chờ khoảng 1-2 phút...</i>', chatId);
       try {
-        // Thử kích hoạt đăng bài trên server Groups (Port 3002) hoặc Personal (Port 3003)
-        const res = await fetch('http://127.0.0.1:3002/api/trigger-queue', { method: 'POST' }).catch(() => null);
-        if (res && res.ok) {
-          await sendTelegramMessage('✅ Đã kích hoạt lệnh đăng bài trên Facebook Groups thành công!', chatId);
-        } else {
-          // Thử ping qua Dashboard API
-          await sendTelegramMessage('ℹ️ Đã gửi tín hiệu đăng bài. Kiểm tra nhật ký qua <code>/status</code>.', chatId);
-        }
+        runAutoPilotCycle().then((res) => {
+          sendTelegramMessage(`✅ <b>Auto-Pilot đăng bài thành công!</b>\n📌 Tiêu đề: ${res.title}\n⏱️ Thời gian: ${Math.round(res.durationMs / 1000)}s`, chatId);
+        }).catch((err) => {
+          sendTelegramMessage(`❌ <b>Auto-Pilot thất bại:</b> ${err.message}`, chatId);
+        });
       } catch (e) {
-        await sendTelegramMessage(`⚠️ Lỗi khi gửi lệnh đăng bài: ${e.message}`, chatId);
+        await sendTelegramMessage(`⚠️ Lỗi khởi chạy Auto-Pilot: ${e.message}`, chatId);
       }
       break;
     }
@@ -1084,6 +1082,118 @@ app.get('/check-messages', async (req, res) => {
 });
 
 // -------------------------------------------------------------
+// AUTO-PILOT SCHEDULER (Kiểm tra lịch đăng mỗi 30s)
+// -------------------------------------------------------------
+let isAutoPilotRunning = false;
+let lastAutoPilotRunSlot = '';
+
+async function checkAutoPilotSchedule() {
+  try {
+    const scheduleConfig = loadScheduleConfig();
+    if (!scheduleConfig.enabled) {
+      return;
+    }
+
+    const now = new Date();
+    const vnTimeStr = now.toLocaleTimeString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' });
+    const todayDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }); // YYYY-MM-DD
+    const currentSlot = `${todayDateStr}_${vnTimeStr}`;
+
+    // Lấy lịch riêng biệt cho từng kênh (Fanpage, Groups, Personal)
+    const channelSchedules = scheduleConfig.channelSchedules || {
+      fanpage: { enabled: scheduleConfig.channels?.fanpage !== false, times: scheduleConfig.scheduleTimes || ['08:00', '16:00'] },
+      groups: { enabled: scheduleConfig.channels?.groups !== false, times: ['09:30', '14:00', '20:00'] },
+      personal: { enabled: Boolean(scheduleConfig.channels?.personal), times: ['11:30', '19:30'] },
+    };
+
+    const triggeredChannels = {
+      fanpage: Boolean(channelSchedules.fanpage?.enabled && channelSchedules.fanpage?.times?.includes(vnTimeStr)),
+      groups: Boolean(channelSchedules.groups?.enabled && channelSchedules.groups?.times?.includes(vnTimeStr)),
+      personal: Boolean(channelSchedules.personal?.enabled && channelSchedules.personal?.times?.includes(vnTimeStr)),
+    };
+
+    const hasAnyTrigger = triggeredChannels.fanpage || triggeredChannels.groups || triggeredChannels.personal;
+
+    if (hasAnyTrigger && lastAutoPilotRunSlot !== currentSlot) {
+      if (isAutoPilotRunning) {
+        console.warn(`[Scheduler] Bỏ qua lượt ${vnTimeStr} do một tác vụ Auto-Pilot khác đang chạy.`);
+        return;
+      }
+
+      lastAutoPilotRunSlot = currentSlot;
+      isAutoPilotRunning = true;
+      const triggeredNames = [
+        triggeredChannels.fanpage ? 'Fanpage' : null,
+        triggeredChannels.groups ? '151 Groups' : null,
+        triggeredChannels.personal ? 'Cá Nhân' : null,
+      ].filter(Boolean).join(', ');
+
+      console.log(`[Scheduler] ⏰ Đến khung giờ hẹn ${vnTimeStr}! Bắt đầu kích hoạt Auto-Pilot cho: ${triggeredNames}...`);
+
+      try {
+        const runsBySheet = new Map();
+        for (const [channel, triggered] of Object.entries(triggeredChannels)) {
+          if (!triggered) continue;
+          const sheetName = channelSchedules[channel]?.sheetByTime?.[vnTimeStr]
+            || scheduleConfig.googleSheets?.channelSheetMapping?.[channel]
+            || scheduleConfig.googleSheets?.sheetName || 'topics';
+          const channels = runsBySheet.get(sheetName) || { fanpage: false, groups: false, personal: false };
+          channels[channel] = true;
+          runsBySheet.set(sheetName, channels);
+        }
+        for (const [sheetName, channels] of runsBySheet) {
+          try {
+            await runAutoPilotCycle({ channels, sheetName });
+          } catch (err) {
+            console.error(`[Scheduler] Lỗi sheet ${sheetName} lúc ${vnTimeStr}:`, err.message);
+          }
+        }
+      } catch (err) {
+        console.error(`[Scheduler Error] Thất bại khi chạy lượt ${vnTimeStr}:`, err.message);
+      } finally {
+        isAutoPilotRunning = false;
+      }
+    }
+  } catch (err) {
+    console.error('[Scheduler Check Error]', err.message);
+  }
+}
+
+// Endpoint kích hoạt Auto-Pilot thủ công từ Dashboard hoặc script (Hỗ trợ n8n options)
+app.post('/trigger-autopilot', async (req, res) => {
+  if (isAutoPilotRunning) {
+    return res.status(429).json({ ok: false, error: 'Một chu trình Auto-Pilot đang chạy. Vui lòng thử lại sau giây lát.' });
+  }
+  isAutoPilotRunning = true;
+  const options = req.body || {};
+
+  try {
+    const result = await runAutoPilotCycle(options);
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  } finally {
+    isAutoPilotRunning = false;
+  }
+});
+
+// Endpoint theo dõi tiến độ thời gian thực của Auto-Pilot
+app.get('/autopilot-status', (req, res) => {
+  res.json(getAutoPilotProgress());
+});
+
+// Endpoint chạy riêng 1 node (Single Step Execution giống n8n)
+app.post('/execute-node', async (req, res) => {
+  const { nodeType, payload } = req.body || {};
+  try {
+    const result = await executeSingleNode(nodeType, payload);
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
 // KHỞI ĐỘNG SERVER & TIMERS
 // -------------------------------------------------------------
 app.listen(PORT, '127.0.0.1', () => {
@@ -1098,4 +1208,7 @@ app.listen(PORT, '127.0.0.1', () => {
 
   // Kiểm tra Daily Digest mỗi phút
   setInterval(checkDailyDigest, 60000);
+
+  // Kiểm tra Lịch trình Auto-Pilot mỗi 30s
+  setInterval(checkAutoPilotSchedule, 30000);
 });

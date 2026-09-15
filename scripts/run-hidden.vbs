@@ -14,7 +14,7 @@ End If
 sh.CurrentDirectory = bridgeDir
 
 ' Server 0: Next.js Control Center Dashboard (port 3000)
-sh.Run "cmd /c cd /d """ & bridgeDir & "\dashboard"" && node server.mjs >> """ & bridgeDir & "\dashboard\dashboard.log"" 2>&1", 0, False
+sh.Run "cmd /c cd /d """ & bridgeDir & "\dashboard"" && npx next start -p 3000 -H 127.0.0.1 >> """ & bridgeDir & "\dashboard\dashboard.log"" 2>&1", 0, False
 
 ' Server 1: ChatGPT & Fanpage (port 3001)
 sh.Run "cmd /c cd /d """ & bridgeDir & """ && node """ & bridgeDir & "\server.mjs"" >> """ & bridgeDir & "\server.log"" 2>&1", 0, False

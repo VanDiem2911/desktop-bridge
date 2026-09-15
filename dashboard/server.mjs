@@ -33,8 +33,11 @@ app.use((req, res) => {
   return handle(req, res);
 });
 
-app.listen(port, host, () => {
+const server = app.listen(port, host, () => {
   console.log('====================================================');
   console.log(`🚀 Next.js Control Center Dashboard: http://${host}:${port}`);
   console.log('====================================================');
 });
+
+// Giữ Event Loop luôn hoạt động bền bỉ, không bị thoát tự động
+setInterval(() => {}, 60000);

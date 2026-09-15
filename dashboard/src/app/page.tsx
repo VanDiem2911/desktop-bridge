@@ -44,6 +44,14 @@ import {
   Shuffle,
   XCircle,
   RotateCcw,
+  Play,
+  ArrowRight,
+  Zap,
+  Sliders,
+  Cpu,
+  Workflow,
+  ChevronDown,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 interface HistoryEntry {
@@ -210,7 +218,7 @@ function parseErrorMessage(rawError?: string | null): {
 }
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'accounts' | 'groups' | 'quick-post' | 'bot'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'accounts' | 'groups' | 'quick-post' | 'schedule' | 'bot'>('overview');
   const [status, setStatus] = useState<ServerStatus | null>(null);
 
   // Telegram Bot & Watchdog State
@@ -232,6 +240,115 @@ export default function DashboardPage() {
   const [botTesting, setBotTesting] = useState<boolean>(false);
   const [showTokenSecret, setShowTokenSecret] = useState<boolean>(false);
   const [botInfo, setBotInfo] = useState<{ username?: string; firstName?: string } | null>(null);
+
+  // Schedule & Auto-Pilot State
+  const [scheduleConfig, setScheduleConfig] = useState({
+    enabled: true,
+    geminiApiKey: '',
+    geminiApiKeys: [] as string[],
+    model: 'gemini-2.5-flash',
+    scheduleTimes: ['08:00', '16:00'],
+    channelSchedules: {
+      fanpage: { enabled: true, times: ['08:00', '16:00'], sheetByTime: Object.fromEntries<string>([]) },
+      groups: { enabled: true, times: ['09:30', '14:00', '20:00'], sheetByTime: Object.fromEntries<string>([]) },
+      personal: { enabled: false, times: ['11:30', '19:30'], sheetByTime: Object.fromEntries<string>([]) },
+    },
+    channels: { fanpage: true, groups: true, personal: false },
+    aspectRatio: '4:5',
+    hasMascotDu: true,
+    googleSheets: {
+      enabled: true,
+      topicSource: 'google_sheet' as 'google_sheet' | 'manual_list',
+      sheetUrl: 'https://docs.google.com/spreadsheets/d/1tx_RHyRfBgGuYTvO3Tr_08Hrp6SelIsfN9hTQaT3jUY/edit',
+      spreadsheetId: '1tx_RHyRfBgGuYTvO3Tr_08Hrp6SelIsfN9hTQaT3jUY',
+      sheetName: 'topics',
+      autoUpdateStatus: true,
+      channelSheetMapping: {
+        fanpage: 'topics',
+        groups: 'content_calendar',
+        personal: 'topics',
+      } as { fanpage?: string; groups?: string; personal?: string },
+    },
+    topics: [] as string[],
+    companyInfo: {
+      name: 'DUDI SOFTWARE TECHNOLOGY CO., LTD',
+      hotline: '0909 163 821',
+      address1: '232 Nguyễn Thị Minh Khai, Phường Xuân Hòa, TP.HCM',
+      address2: '49/2 Đường 14, Phường Thủ Đức, TP.HCM',
+      mst: '0318776997',
+      website: 'https://dudisoftware.com',
+      email: 'contact@dudisoftware.com',
+      hashtags: '#website #seo #landingpage #marketing #dudisoftware',
+    },
+    lastRunAt: null as string | null,
+    lastTopic: null as string | null,
+    lastRunStatus: null as string | null,
+  });
+  const [scheduleNextRun, setScheduleNextRun] = useState<{ time: string | null; label: string; diffMinutes: number | null }>({
+    time: null,
+    label: '',
+    diffMinutes: null,
+  });
+  const [isSchedulerRunning, setIsSchedulerRunning] = useState<boolean>(false);
+  const [scheduleLoading, setScheduleLoading] = useState<boolean>(false);
+  const [scheduleTriggering, setScheduleTriggering] = useState<boolean>(false);
+
+  // n8n Visual Workflow Engine State
+  const [channelNextRuns, setChannelNextRuns] = useState<Record<string, { time: string | null; label: string; diffMinutes: number | null }>>({});
+  const [newFanpageTime, setNewFanpageTime] = useState<string>('08:00');
+  const [newGroupsTime, setNewGroupsTime] = useState<string>('09:30');
+  const [newPersonalTime, setNewPersonalTime] = useState<string>('11:30');
+
+  const [workflowAccounts, setWorkflowAccounts] = useState({
+    chatgpt: 'acc_1',
+    groups: 'all',
+    fanpage: 'fanpage_1',
+    personal: 'personal_acc_1',
+  });
+  const [workflowPreset, setWorkflowPreset] = useState<string>('groups_fanpage');
+  const [isWorkflowExecuting, setIsWorkflowExecuting] = useState<boolean>(false);
+  const [activeWorkflowNode, setActiveWorkflowNode] = useState<string | null>(null);
+  const [nodeExecutionStates, setNodeExecutionStates] = useState<Record<string, {
+    status: 'idle' | 'running' | 'success' | 'failed' | 'skipped';
+    durationMs?: number;
+    error?: string | null;
+    output?: any;
+  }>>({});
+  const [inspectingNodeData, setInspectingNodeData] = useState<{ id: string; name: string; data: any } | null>(null);
+  const [workflowActiveTab, setWorkflowActiveTab] = useState<'canvas' | 'times' | 'sheets' | 'ai_config'>('canvas');
+  const [newScheduleTime, setNewScheduleTime] = useState<string>('09:00');
+  const [newTopicInput, setNewTopicInput] = useState<string>('');
+  const [showGeminiKeySecret, setShowGeminiKeySecret] = useState<boolean>(false);
+  const [newGeminiApiKey, setNewGeminiApiKey] = useState<string>('');
+  const [customRunTopic, setCustomRunTopic] = useState<string>('');
+  const [autoPilotStep, setAutoPilotStep] = useState<number>(0);
+  const [triggerResult, setTriggerResult] = useState<any>(null);
+  const [liveProgress, setLiveProgress] = useState<{
+    active: boolean;
+    step: number;
+    stepName: string;
+    detail: string;
+    progress: number;
+    lastResult?: any;
+  } | null>(null);
+  const [sheetsOverview, setSheetsOverview] = useState<{
+    total: number;
+    done: number;
+    inProgress: number;
+    pending: number;
+    nextTopic: {
+      rowIndex: number;
+      id: string;
+      topic: string;
+      category: string;
+      keywords: string;
+      status: string;
+      publishedAt?: string;
+    } | null;
+  } | null>(null);
+  const [sheetsSyncing, setSheetsSyncing] = useState<boolean>(false);
+  const [availableSheets, setAvailableSheets] = useState<string[]>(['topics', 'content_calendar']);
+  const [activeSheetTab, setActiveSheetTab] = useState<string>('topics');
   const [accounts, setAccounts] = useState<AccountCategory[]>([]);
   const [groupsData, setGroupsData] = useState<{ accounts: GroupAccount[]; centralPool?: CentralPoolItem[] }>({ accounts: [], centralPool: [] });
   const [poolStats, setPoolStats] = useState<{
@@ -598,12 +715,555 @@ export default function DashboardPage() {
     }
   };
 
+  // Schedule & Auto-Pilot Functions
+  const fetchScheduleConfig = async () => {
+    try {
+      setScheduleLoading(true);
+      const res = await fetch('/api/schedule');
+      const data = await res.json();
+      if (data.ok) {
+        setScheduleConfig(data.config);
+        setScheduleNextRun(data.nextRun);
+        if (data.channelNextRuns) setChannelNextRuns(data.channelNextRuns);
+        setIsSchedulerRunning(data.isSchedulerRunning);
+        if (data.sheetsOverview) setSheetsOverview(data.sheetsOverview);
+        if (data.availableSheets) setAvailableSheets(data.availableSheets);
+        if (data.config?.googleSheets?.sheetName) setActiveSheetTab(data.config.googleSheets.sheetName);
+      }
+    } catch (err: unknown) {
+      console.error('Lỗi tải cấu hình lịch đăng:', err);
+    } finally {
+      setScheduleLoading(false);
+    }
+  };
+
+  const handleSaveScheduleConfig = async (newCfg: typeof scheduleConfig) => {
+    try {
+      setScheduleLoading(true);
+      const res = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCfg),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setScheduleConfig(data.config);
+        setScheduleNextRun(data.nextRun);
+        if (data.channelNextRuns) setChannelNextRuns(data.channelNextRuns);
+        showToast('Đã lưu cấu hình Lịch Đăng Tự Động thành công!', 'success');
+      } else {
+        showToast(data.error || 'Lỗi lưu cấu hình', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast('Lỗi: ' + msg, 'error');
+    } finally {
+      setScheduleLoading(false);
+    }
+  };
+
+  const handleSyncGoogleSheets = async (targetName?: string) => {
+    try {
+      setSheetsSyncing(true);
+      const sid = scheduleConfig.googleSheets?.spreadsheetId || '1tx_RHyRfBgGuYTvO3Tr_08Hrp6SelIsfN9hTQaT3jUY';
+      const sname = targetName || activeSheetTab || scheduleConfig.googleSheets?.sheetName || 'topics';
+      const res = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sheets-info', spreadsheetId: sid, sheetName: sname }),
+      });
+      const data = await res.json();
+      if (data.ok && data.sheetsInfo) {
+        setSheetsOverview(data.sheetsInfo);
+        if (data.availableSheets) setAvailableSheets(data.availableSheets);
+        showToast(`Đã đồng bộ Sheet [${sname}]! Còn ${data.sheetsInfo.pending} chủ đề đang chờ đăng.`, 'success');
+      } else {
+        showToast(data.error || 'Lỗi đồng bộ Google Sheets', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast('Lỗi: ' + msg, 'error');
+    } finally {
+      setSheetsSyncing(false);
+    }
+  };
+
+  const handleSwitchSheetTab = async (sheetName: string) => {
+    setActiveSheetTab(sheetName);
+    try {
+      setSheetsSyncing(true);
+      const sid = scheduleConfig.googleSheets?.spreadsheetId || '1tx_RHyRfBgGuYTvO3Tr_08Hrp6SelIsfN9hTQaT3jUY';
+      const res = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sheets-info', spreadsheetId: sid, sheetName }),
+      });
+      const data = await res.json();
+      if (data.ok && data.sheetsInfo) {
+        setSheetsOverview(data.sheetsInfo);
+        if (data.availableSheets) setAvailableSheets(data.availableSheets);
+      }
+      const updatedConfig = {
+        ...scheduleConfig,
+        googleSheets: {
+          ...scheduleConfig.googleSheets,
+          sheetName,
+        }
+      };
+      setScheduleConfig(updatedConfig as any);
+      await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          googleSheets: { sheetName }
+        }),
+      });
+      showToast(`Đã chuyển sang xem Sheet [${sheetName}]!`, 'success');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast('Lỗi: ' + msg, 'error');
+    } finally {
+      setSheetsSyncing(false);
+    }
+  };
+
+  const handleUpdateChannelSheetMapping = async (channel: 'fanpage' | 'groups' | 'personal', sheetName: string) => {
+    const currentMapping = scheduleConfig.googleSheets?.channelSheetMapping || {
+      fanpage: scheduleConfig.googleSheets?.sheetName || 'topics',
+      groups: scheduleConfig.googleSheets?.sheetName || 'topics',
+      personal: scheduleConfig.googleSheets?.sheetName || 'topics',
+    };
+    const updatedMapping = { ...currentMapping, [channel]: sheetName };
+    const updatedCfg = {
+      ...scheduleConfig,
+      googleSheets: {
+        ...scheduleConfig.googleSheets,
+        channelSheetMapping: updatedMapping,
+      }
+    };
+    setScheduleConfig(updatedCfg as any);
+    try {
+      await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          googleSheets: { channelSheetMapping: updatedMapping }
+        }),
+      });
+      const chTitle = channel === 'fanpage' ? 'Fanpage' : channel === 'groups' ? '151 Nhóm FB' : 'Trang Cá Nhân';
+      showToast(`Đã gán kênh ${chTitle} lấy bài từ Sheet [${sheetName}]!`, 'success');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast('Lỗi lưu cấu hình nguồn sheet: ' + msg, 'error');
+    }
+  };
+
+  const handleTriggerAutoPilot = async (customTopic?: string, channelKey?: 'fanpage' | 'groups' | 'personal' | 'all') => {
+    if (scheduleTriggering) return;
+    try {
+      setScheduleTriggering(true);
+      setTriggerResult(null);
+      setLiveProgress({
+        active: true,
+        step: 1,
+        stepName: 'Đọc chủ đề',
+        detail: 'Hệ thống đang chuẩn bị và lấy chủ đề...',
+        progress: 15,
+      });
+
+      let effectiveChannels = { ...scheduleConfig.channels };
+      let label = 'tất cả kênh kích hoạt';
+      if (channelKey === 'fanpage') {
+        effectiveChannels = { fanpage: true, groups: false, personal: false };
+        label = 'Fanpage';
+      } else if (channelKey === 'groups') {
+        effectiveChannels = { fanpage: false, groups: true, personal: false };
+        label = '151 Nhóm FB';
+      } else if (channelKey === 'personal') {
+        effectiveChannels = { fanpage: false, groups: false, personal: true };
+        label = 'Trang Cá Nhân';
+      }
+
+      const mappingKey = (channelKey === 'fanpage' || channelKey === 'groups' || channelKey === 'personal') ? channelKey : undefined;
+      const assignedSheet = (mappingKey && scheduleConfig.googleSheets?.channelSheetMapping?.[mappingKey])
+        || scheduleConfig.googleSheets?.sheetName
+        || activeSheetTab
+        || 'topics';
+
+      showToast(`🚀 Bắt đầu ĐĂNG NGAY lên ${label}! Nguồn: Sheet [${assignedSheet}]. Nút đăng đã khóa để chống trùng lặp.`, 'info');
+
+      // Polling tiến độ thời gian thực mỗi 1s từ backend
+      const pollTimer = setInterval(async () => {
+        try {
+          const pRes = await fetch('/api/schedule?action=progress');
+          const pData = await pRes.json();
+          if (pData.ok && pData.progress) {
+            setLiveProgress(pData.progress);
+          }
+        } catch {}
+      }, 1000);
+
+      const res = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'trigger',
+          topic: customTopic || undefined,
+          sheetName: assignedSheet,
+          channels: effectiveChannels,
+          accounts: {
+            chatgpt: workflowAccounts.chatgpt,
+            groups: workflowAccounts.groups === 'all' ? undefined : workflowAccounts.groups,
+            fanpage: workflowAccounts.fanpage,
+            personal: workflowAccounts.personal,
+          },
+        }),
+      });
+
+      clearInterval(pollTimer);
+
+      const data = await res.json();
+      if (data.ok && data.result) {
+        setTriggerResult(data.result);
+        setLiveProgress({
+          active: false,
+          step: 6,
+          stepName: 'Hoàn tất xuất sắc',
+          detail: 'Đã hoàn tất đăng bài thành công lên Facebook!',
+          progress: 100,
+          lastResult: data.result,
+        });
+        showToast(`🎉 Đã đăng bài thành công lên ${label}!`, 'success');
+        fetchScheduleConfig();
+      } else {
+        throw new Error(data.error || 'Lỗi khi thực hiện đăng ngay');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setLiveProgress({
+        active: false,
+        step: -1,
+        stepName: 'Gặp sự cố',
+        detail: msg,
+        progress: 0,
+      });
+      showToast(`❌ Lỗi đăng bài: ${msg}`, 'error');
+    } finally {
+      setScheduleTriggering(false);
+    }
+  };
+
+  // Channel-Specific Schedule Handlers
+  const handleSlotSheetChange = (channelKey: 'fanpage' | 'groups' | 'personal', time: string, sheetName: string) => {
+    const channel = scheduleConfig.channelSchedules[channelKey];
+    const newCfg = {
+      ...scheduleConfig,
+      channelSchedules: {
+        ...scheduleConfig.channelSchedules,
+        [channelKey]: { ...channel, sheetByTime: { ...channel.sheetByTime, [time]: sheetName } },
+      },
+    };
+    setScheduleConfig(newCfg);
+    handleSaveScheduleConfig(newCfg);
+  };
+
+  const renderSlotSheetSelect = (channelKey: 'fanpage' | 'groups' | 'personal', time: string) => {
+    const selected = scheduleConfig.channelSchedules?.[channelKey]?.sheetByTime?.[time]
+      || scheduleConfig.googleSheets?.channelSheetMapping?.[channelKey]
+      || scheduleConfig.googleSheets?.sheetName || 'topics';
+    return (
+      <select
+        aria-label={`Sheet cho ${channelKey} lúc ${time}`}
+        value={selected}
+        onChange={(event) => handleSlotSheetChange(channelKey, time, event.target.value)}
+        className="min-w-0 rounded-lg border border-current bg-white px-2 py-1 text-xs font-bold"
+      >
+        {Array.from(new Set([...availableSheets, selected])).map((sheet) => (
+          <option key={sheet} value={sheet}>{sheet}</option>
+        ))}
+      </select>
+    );
+  };
+
+  const handleAddChannelTime = (channelKey: 'fanpage' | 'groups' | 'personal', timeStr: string) => {
+    if (!timeStr) return;
+    const currentChannel = scheduleConfig.channelSchedules?.[channelKey] || { enabled: true, times: [] };
+    if (currentChannel.times.includes(timeStr)) {
+      return showToast('Mốc giờ này đã có trong danh sách kênh!', 'info');
+    }
+    const updatedTimes = [...currentChannel.times, timeStr].sort();
+    const updatedChannelSchedules = {
+      ...scheduleConfig.channelSchedules,
+      [channelKey]: {
+        ...currentChannel,
+        times: updatedTimes,
+        sheetByTime: {
+          ...currentChannel.sheetByTime,
+          [timeStr]: scheduleConfig.googleSheets?.channelSheetMapping?.[channelKey]
+            || scheduleConfig.googleSheets?.sheetName || 'topics',
+        },
+      },
+    };
+    const newCfg = { ...scheduleConfig, channelSchedules: updatedChannelSchedules };
+    setScheduleConfig(newCfg);
+    handleSaveScheduleConfig(newCfg);
+    showToast(`Đã thêm mốc giờ ${timeStr} cho kênh ${channelKey.toUpperCase()}!`, 'success');
+  };
+
+  const handleToggleChannel = (channelKey: 'fanpage' | 'groups' | 'personal') => {
+    const currentVal = Boolean(scheduleConfig.channels?.[channelKey]);
+    const newVal = !currentVal;
+
+    const currentChannel = scheduleConfig.channelSchedules?.[channelKey] || { enabled: true, times: [] };
+    const updatedChannelSchedules = {
+      ...scheduleConfig.channelSchedules,
+      [channelKey]: { ...currentChannel, enabled: newVal },
+    };
+
+    const newCfg = {
+      ...scheduleConfig,
+      channels: {
+        ...scheduleConfig.channels,
+        [channelKey]: newVal,
+      },
+      channelSchedules: updatedChannelSchedules,
+    };
+
+    setScheduleConfig(newCfg);
+    handleSaveScheduleConfig(newCfg);
+    const channelName = channelKey === 'fanpage' ? 'Facebook Fanpage' : channelKey === 'groups' ? '151 Nhóm Facebook' : 'Facebook Cá Nhân';
+    showToast(`Đã ${newVal ? 'BẬT' : 'TẮT'} đăng lên ${channelName}!`, 'success');
+  };
+
+  const handleRemoveChannelTime = (channelKey: 'fanpage' | 'groups' | 'personal', timeStr: string) => {
+    const currentChannel = scheduleConfig.channelSchedules?.[channelKey] || { enabled: true, times: [] };
+    const updatedTimes = currentChannel.times.filter((t: string) => t !== timeStr);
+    const sheetByTime = { ...currentChannel.sheetByTime };
+    delete sheetByTime[timeStr];
+    const updatedChannelSchedules = {
+      ...scheduleConfig.channelSchedules,
+      [channelKey]: { ...currentChannel, times: updatedTimes, sheetByTime },
+    };
+    const newCfg = { ...scheduleConfig, channelSchedules: updatedChannelSchedules };
+    setScheduleConfig(newCfg);
+    handleSaveScheduleConfig(newCfg);
+  };
+
+  // n8n Workflow Preset Handler
+  const handleApplyWorkflowPreset = (preset: string) => {
+    setWorkflowPreset(preset);
+    let updatedChannels = { ...scheduleConfig.channels };
+
+    if (preset === 'groups_fanpage') {
+      updatedChannels = { groups: true, fanpage: true, personal: false };
+      showToast('Đã áp dụng mẫu: Đăng Nhóm FB rồi lên Fanpage!', 'info');
+    } else if (preset === 'all') {
+      updatedChannels = { groups: true, fanpage: true, personal: true };
+      showToast('Đã áp dụng mẫu: Đăng Toàn Diện (Nhóm + Fanpage + Cá Nhân)!', 'info');
+    } else if (preset === 'groups_only') {
+      updatedChannels = { groups: true, fanpage: false, personal: false };
+      showToast('Đã áp dụng mẫu: Chỉ đăng vào 151 Nhóm FB!', 'info');
+    } else if (preset === 'fanpage_only') {
+      updatedChannels = { groups: false, fanpage: true, personal: false };
+      showToast('Đã áp dụng mẫu: Chỉ đăng lên Facebook Fanpage!', 'info');
+    } else if (preset === 'personal_only') {
+      updatedChannels = { groups: false, fanpage: false, personal: true };
+      showToast('Đã áp dụng mẫu: Chỉ đăng lên Trang Cá Nhân!', 'info');
+    }
+
+    const newCfg = { ...scheduleConfig, channels: updatedChannels };
+    setScheduleConfig(newCfg);
+    handleSaveScheduleConfig(newCfg);
+  };
+
+  // Test single node (giống "Test step" trong n8n)
+  const handleTestSingleNode = async (nodeType: string) => {
+    try {
+      setNodeExecutionStates((prev) => ({
+        ...prev,
+        [nodeType]: { status: 'running' },
+      }));
+      showToast(`⚡ Đang test riêng Node [${nodeType.toUpperCase()}]...`, 'info');
+
+      let payload: any = {};
+      if (nodeType === 'sheets') {
+        payload = {};
+      } else if (nodeType === 'gemini') {
+        payload = { topic: customRunTopic || sheetsOverview?.nextTopic?.topic || 'Tối ưu hóa phễu bán hàng và chuyển đổi số' };
+      } else if (nodeType === 'chatgpt') {
+        payload = {
+          prompt: '3D vinyl Mascot Du bear in modern software high-tech workspace, cinematic lighting, realistic render',
+          aspectRatio: scheduleConfig.aspectRatio || '4:5',
+          hasMascotDu: scheduleConfig.hasMascotDu,
+          chatgptAccount: workflowAccounts.chatgpt,
+        };
+      } else if (nodeType === 'groups') {
+        payload = {
+          caption: '🚀 [TEST NODE] Bài viết thử nghiệm tính năng đăng nhóm từ n8n Workflow Engine!',
+          targetAccounts: workflowAccounts.groups === 'all' ? undefined : workflowAccounts.groups,
+        };
+      } else if (nodeType === 'fanpage') {
+        payload = {
+          caption: '📢 [TEST NODE] Bài viết thử nghiệm tính năng đăng Fanpage từ n8n Workflow Engine!',
+        };
+      } else if (nodeType === 'personal') {
+        payload = {
+          caption: '👤 [TEST NODE] Bài viết thử nghiệm đăng Profile Cá Nhân từ n8n Workflow Engine!',
+        };
+      } else if (nodeType === 'update_sheet') {
+        payload = {
+          rowIndex: sheetsOverview?.nextTopic?.rowIndex || 2,
+          status: 'done',
+        };
+      }
+
+      const res = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'execute_node', nodeType, payload }),
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        const outData = data.result?.data || data.result;
+        setNodeExecutionStates((prev) => ({
+          ...prev,
+          [nodeType]: {
+            status: 'success',
+            durationMs: data.result?.durationMs || 1200,
+            output: outData,
+          },
+        }));
+        showToast(`✅ Node [${nodeType.toUpperCase()}] chạy thành công!`, 'success');
+      } else {
+        throw new Error(data.error || 'Lỗi thực thi node');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setNodeExecutionStates((prev) => ({
+        ...prev,
+        [nodeType]: { status: 'failed', error: msg },
+      }));
+      showToast(`❌ Lỗi test node [${nodeType}]: ${msg}`, 'error');
+    }
+  };
+
+  // Execute full workflow (giống "Execute workflow" trong n8n)
+  const handleExecuteFullWorkflow = async () => {
+    try {
+      setIsWorkflowExecuting(true);
+      setTriggerResult(null);
+
+      // Reset states
+      const initialStates: Record<string, any> = {
+        sheets: { status: scheduleConfig.googleSheets?.enabled ? 'running' : 'skipped' },
+        gemini: { status: 'idle' },
+        chatgpt: { status: 'idle' },
+        groups: { status: scheduleConfig.channels?.groups ? 'idle' : 'skipped' },
+        fanpage: { status: scheduleConfig.channels?.fanpage ? 'idle' : 'skipped' },
+        personal: { status: scheduleConfig.channels?.personal ? 'idle' : 'skipped' },
+        finalize: { status: 'idle' },
+      };
+      setNodeExecutionStates(initialStates);
+      setActiveWorkflowNode('sheets');
+      showToast('🚀 Khởi động n8n Workflow: Đang đọc chủ đề...', 'info');
+
+      // Visual stepper
+      const timer1 = setTimeout(() => {
+        setActiveWorkflowNode('gemini');
+        setNodeExecutionStates((prev) => ({
+          ...prev,
+          sheets: { status: 'success', durationMs: 420 },
+          gemini: { status: 'running' },
+        }));
+      }, 1500);
+
+      const timer2 = setTimeout(() => {
+        setActiveWorkflowNode('chatgpt');
+        setNodeExecutionStates((prev) => ({
+          ...prev,
+          gemini: { status: 'success', durationMs: 3800 },
+          chatgpt: { status: 'running' },
+        }));
+      }, 7000);
+
+      const timer3 = setTimeout(() => {
+        setActiveWorkflowNode('publishers');
+        setNodeExecutionStates((prev) => ({
+          ...prev,
+          chatgpt: { status: 'success', durationMs: 42000 },
+          groups: scheduleConfig.channels?.groups ? { status: 'running' } : { status: 'skipped' },
+          fanpage: scheduleConfig.channels?.fanpage ? { status: 'running' } : { status: 'skipped' },
+          personal: scheduleConfig.channels?.personal ? { status: 'running' } : { status: 'skipped' },
+        }));
+      }, 48000);
+
+      const res = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'execute_workflow',
+          topic: customRunTopic || undefined,
+          channels: scheduleConfig.channels,
+          accounts: {
+            chatgpt: workflowAccounts.chatgpt,
+            groups: workflowAccounts.groups === 'all' ? undefined : workflowAccounts.groups,
+            fanpage: workflowAccounts.fanpage,
+            personal: workflowAccounts.personal,
+          },
+        }),
+      });
+
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      clearTimeout(timer3);
+
+      const data = await res.json();
+      if (data.ok && data.result) {
+        setTriggerResult(data.result);
+        const resList = data.result.publishResults || [];
+        const groupsRes = resList.find((r: any) => r.channel === 'groups');
+        const fanpageRes = resList.find((r: any) => r.channel === 'fanpage');
+        const personalRes = resList.find((r: any) => r.channel === 'personal');
+
+        setNodeExecutionStates({
+          sheets: { status: 'success', durationMs: 350, output: data.result.topic },
+          gemini: { status: 'success', durationMs: 3500, output: { title: data.result.title, caption: data.result.caption } },
+          chatgpt: { status: 'success', durationMs: 38000, output: { imagePrompt: data.result.imagePrompt, imageBase64: data.result.imageBase64 } },
+          groups: scheduleConfig.channels?.groups
+            ? { status: groupsRes?.success ? 'success' : 'failed', durationMs: 4500, output: groupsRes }
+            : { status: 'skipped' },
+          fanpage: scheduleConfig.channels?.fanpage
+            ? { status: fanpageRes?.success ? 'success' : 'failed', durationMs: 3200, output: fanpageRes }
+            : { status: 'skipped' },
+          personal: scheduleConfig.channels?.personal
+            ? { status: personalRes?.success ? 'success' : 'failed', durationMs: 2900, output: personalRes }
+            : { status: 'skipped' },
+          finalize: { status: 'success', durationMs: 800, output: 'Hoàn tất cập nhật Google Sheet & Telegram' },
+        });
+
+        setActiveWorkflowNode(null);
+        showToast('🎉 Toàn bộ quy trình n8n đã hoàn tất xuất bản thành công!', 'success');
+        fetchScheduleConfig();
+      } else {
+        throw new Error(data.error || 'Lỗi khi thực thi workflow');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(`❌ Lỗi thực thi quy trình: ${msg}`, 'error');
+      setActiveWorkflowNode(null);
+    } finally {
+      setIsWorkflowExecuting(false);
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
     fetchAccounts();
     fetchGroups();
     fetchAnalytics(1);
     fetchBotConfig();
+    fetchScheduleConfig();
     const interval = setInterval(() => {
       fetchStatus();
       fetchAccounts();
@@ -1536,7 +2196,7 @@ export default function DashboardPage() {
           action: 'generate_chatgpt_image',
           prompt: qpPrompt || 'Professional marketing image for Vietnamese software enterprise',
           aspectRatio: qpAspect,
-          referenceImageUrl: qpHasDu ? 'https://res.cloudinary.com/dbwahdjzg/image/upload/v1786351452/4022ffed-ef18-4faf-bf7e-156716aa5d4e.png' : null,
+          referenceImageUrl: qpHasDu ? 'https://res.cloudinary.com/dbwahdjzg/image/upload/v1789449519/nail_DU_hjqnmq.png' : null,
         }),
       });
 
@@ -1749,6 +2409,19 @@ export default function DashboardPage() {
               }`}
             >
               <Send className="w-4 h-4" /> Đăng bài Nhanh
+            </button>
+            <button
+              onClick={() => { setActiveTab('schedule'); fetchScheduleConfig(); }}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
+                activeTab === 'schedule'
+                  ? 'bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 text-white shadow-md shadow-violet-600/25 font-bold'
+                  : 'text-slate-600 hover:text-violet-700 hover:bg-white/60'
+              }`}
+            >
+              <Workflow className="w-4 h-4 text-amber-300" /> Quy Trình AI (n8n Engine)
+              {scheduleConfig.enabled && (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              )}
             </button>
             <button
               onClick={() => { setActiveTab('bot'); fetchBotConfig(); }}
@@ -3341,6 +4014,1129 @@ export default function DashboardPage() {
                 )}
               </div>
             )}
+
+          </div>
+        )}
+
+        {/* ==================== TAB: LỊCH ĐĂNG TỰ ĐỘNG & GEMINI AUTO-PILOT ==================== */}
+        {activeTab === 'schedule' && (
+          <div className="space-y-8 max-w-6xl mx-auto">
+            
+            {/* Header Banner */}
+            <div className="rounded-3xl p-6 md:p-8 relative overflow-hidden bg-white border border-slate-200 shadow-sm text-slate-900">
+              <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <span className="p-3 rounded-2xl bg-indigo-50 text-indigo-600 shrink-0">
+                      <Workflow className="w-6 h-6 text-indigo-600" />
+                    </span>
+                    <div>
+                      <h2 className="text-xl md:text-2xl font-bold tracking-tight flex flex-wrap items-center gap-2.5 text-slate-900">
+                        Thiết Lập Quy Trình Chạy (n8n Workflow Engine)
+                        <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 whitespace-nowrap">
+                          Khép Kín 100%
+                        </span>
+                      </h2>
+                      <p className="text-sm text-slate-600 font-medium leading-relaxed mt-2 max-w-2xl">
+                        Tùy chọn linh hoạt các bước: Đọc Google Sheet &rarr; Gemini viết bài &rarr; ChatGPT tạo ảnh &rarr; Đăng Nhóm FB &rarr; Đăng Fanpage theo tài khoản cấu hình
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Master Switch & Status */}
+                <div className="flex items-center justify-between gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200 shrink-0">
+                  <div className="text-right">
+                    <div className="text-xs font-semibold text-slate-600 whitespace-nowrap">Lịch Trình Tự Động</div>
+                    <div className={`text-sm font-black ${scheduleConfig.enabled ? 'text-emerald-700' : 'text-slate-600'}`}>
+                      {scheduleConfig.enabled ? 'ĐANG BẬT' : 'ĐANG TẮT'}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveScheduleConfig({ ...scheduleConfig, enabled: !scheduleConfig.enabled })}
+                    className={`w-14 h-8 shrink-0 rounded-full transition-colors relative p-1 cursor-pointer ${
+                      scheduleConfig.enabled ? 'bg-gradient-to-r from-emerald-500 to-teal-500' : 'bg-slate-600'
+                    }`}
+                  >
+                    <div
+                      className={`w-6 h-6 rounded-full bg-white shadow-md transform transition-transform ${
+                        scheduleConfig.enabled ? 'translate-x-6' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {/* Next Run Info Strip */}
+              <div className="mt-6 pt-5 border-t border-slate-100 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-600" /> Lần đăng bài tiếp theo
+                  </div>
+                  <div className="text-sm font-semibold text-slate-900 mt-2">
+                    {scheduleNextRun.label || 'Chưa xác định'}
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 text-emerald-600" /> Scheduler Daemon (Port 3004)
+                  </div>
+                  <div className="text-sm font-semibold text-slate-900 mt-2 flex items-center gap-2">
+                    {isSchedulerRunning ? (
+                      <>
+                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        <span className="text-emerald-700">Đang chạy ngầm ổn định</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                        <span className="text-amber-700">Chưa bật Bot Server (Port 3004)</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-indigo-600" /> Lần chạy gần nhất
+                  </div>
+                  <div className="text-sm font-semibold text-slate-900 mt-2">
+                    {scheduleConfig.lastRunAt
+                      ? new Date(scheduleConfig.lastRunAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })
+                      : 'Chưa có lượt chạy nào'}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+                
+            {/* ==================== QUY TRÌNH ĐĂNG TỰ ĐỘNG ĐƠN GIẢN & TIẾN ĐỘ ==================== */}
+            <div className="liquid-glass rounded-3xl p-6 md:p-8 space-y-6 border border-slate-200/80 shadow-lg relative overflow-hidden">
+              {/* Header: Giải thích cách hoạt động đơn giản */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-200">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-md shadow-indigo-500/20">
+                      <Zap className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-extrabold text-lg text-slate-900 flex items-center gap-2">
+                        Quy Trình Đăng Bài Tự Động
+                        {scheduleTriggering && (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
+                            <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                            Đang Đăng Bài...
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Hệ thống hoạt động tuần tự qua 5 bước tự động: Lấy chủ đề → AI viết bài → Tạo ảnh poster → Đăng Facebook → Cập nhật Google Sheet.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Nút Điều Khiển & Ô Nhập Chủ Đề */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                  <div className="relative flex-1 sm:w-80">
+                    <input
+                      type="text"
+                      disabled={scheduleTriggering}
+                      value={customRunTopic}
+                      onChange={(e) => setCustomRunTopic(e.target.value)}
+                      placeholder={sheetsOverview?.nextTopic ? `Mặc định: "${sheetsOverview.nextTopic.topic.substring(0, 30)}..."` : "Nhập chủ đề tùy chọn (để trống: tự lấy từ Sheet)..."}
+                      className={`w-full bg-white border text-xs text-slate-800 placeholder:text-slate-400 rounded-xl px-3.5 py-2.5 shadow-xs transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                        scheduleTriggering ? 'bg-slate-100 border-slate-200 cursor-not-allowed opacity-75' : 'border-slate-300 hover:border-slate-400'
+                      }`}
+                    />
+                    {customRunTopic && !scheduleTriggering && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomRunTopic('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* NÚT HOẠT ĐỘNG / ĐĂNG NGAY - BỊ KHÓA CHẶT KHI ĐANG ĐĂNG */}
+                  <button
+                    type="button"
+                    disabled={scheduleTriggering}
+                    onClick={() => handleTriggerAutoPilot(customRunTopic)}
+                    className={`px-6 py-2.5 rounded-xl font-extrabold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md ${
+                      scheduleTriggering
+                        ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none border border-slate-300 select-none pointer-events-none'
+                        : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/30 hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]'
+                    }`}
+                    title={scheduleTriggering ? "Đang trong tiến trình đăng bài, nút đã bị khóa để tránh trùng lặp" : "Bấm để kích hoạt đăng bài ngay lập tức"}
+                  >
+                    {scheduleTriggering ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin text-slate-600" />
+                        <span>🔒 ĐANG ĐĂNG BÀI (ĐÃ KHÓA)...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4 text-emerald-100" />
+                        <span>🚀 ĐĂNG BÀI NGAY</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Sơ đồ 5 bước trực quan, dễ hiểu cách hoạt động */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+                {/* Bước 1: Google Sheets */}
+                <div className={`p-4 rounded-2xl border transition-all relative ${
+                  scheduleTriggering && liveProgress?.step === 1
+                    ? 'bg-indigo-50/80 border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                    : liveProgress?.step && liveProgress.step > 1
+                    ? 'bg-emerald-50/60 border-emerald-300'
+                    : 'bg-slate-50/70 border-slate-200'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="w-7 h-7 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-black">
+                      {liveProgress?.step && liveProgress.step > 1 ? '✓' : '1'}
+                    </span>
+                    <div className="flex items-center justify-between flex-1 ml-2">
+                      <h4 className="text-xs font-extrabold text-slate-800">1. Google Sheets</h4>
+                      <span className="text-[10px] font-black text-emerald-700 bg-emerald-100/70 px-1.5 py-0.5 rounded-md">
+                        {sheetsOverview?.pending ?? 0} chờ
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Pills chọn Tab Sheet */}
+                  <div className="mt-2 flex items-center gap-1 bg-slate-200/80 p-0.5 rounded-xl">
+                    {availableSheets.map((s) => {
+                      const isSelected = (activeSheetTab || scheduleConfig.googleSheets?.sheetName || 'topics') === s;
+                      return (
+                        <button
+                          key={s}
+                          type="button"
+                          disabled={sheetsSyncing || scheduleTriggering}
+                          onClick={() => handleSwitchSheetTab(s)}
+                          className={`flex-1 py-1 px-1.5 rounded-lg text-[10px] font-black tracking-tight transition-all cursor-pointer truncate ${
+                            isSelected
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                          }`}
+                          title={`Chuyển sang Sheet [${s}]`}
+                        >
+                          {s === 'topics' ? '📁 topics' : '📅 calendar'}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <p className="text-[10px] text-slate-500 mt-1.5 leading-snug">
+                    Đang chọn: <b className="text-emerald-700 font-mono">[{activeSheetTab || scheduleConfig.googleSheets?.sheetName || 'topics'}]</b>.
+                  </p>
+                  {scheduleTriggering && liveProgress?.step === 1 && (
+                    <div className="mt-2.5 flex items-center gap-1.5 text-[10px] font-bold text-indigo-700">
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      <span>Đang đọc chủ đề...</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bước 2: Gemini AI */}
+                <div className={`p-4 rounded-2xl border transition-all relative ${
+                  scheduleTriggering && liveProgress?.step === 2
+                    ? 'bg-indigo-50/80 border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                    : liveProgress?.step && liveProgress.step > 2
+                    ? 'bg-emerald-50/60 border-emerald-300'
+                    : 'bg-slate-50/70 border-slate-200'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="w-7 h-7 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-xs font-black">
+                      {liveProgress?.step && liveProgress.step > 2 ? '✓' : '2'}
+                    </span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Viết Bài</span>
+                  </div>
+                  <h4 className="text-xs font-extrabold text-slate-800">2. Gemini 2.5 Flash</h4>
+                  <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+                    Viết bài chuẩn SEO Facebook, tạo caption hấp dẫn và lên prompt vẽ ảnh.
+                  </p>
+                  {scheduleTriggering && liveProgress?.step === 2 && (
+                    <div className="mt-2.5 flex items-center gap-1.5 text-[10px] font-bold text-indigo-700">
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      <span>Gemini đang viết bài...</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bước 3: ChatGPT Web Robot */}
+                <div className={`p-4 rounded-2xl border transition-all relative ${
+                  scheduleTriggering && liveProgress?.step === 3
+                    ? 'bg-indigo-50/80 border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                    : liveProgress?.step && liveProgress.step > 3
+                    ? 'bg-emerald-50/60 border-emerald-300'
+                    : 'bg-slate-50/70 border-slate-200'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="w-7 h-7 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center text-xs font-black">
+                      {liveProgress?.step && liveProgress.step > 3 ? '✓' : '3'}
+                    </span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Tạo Ảnh</span>
+                  </div>
+                  <h4 className="text-xs font-extrabold text-slate-800">3. ChatGPT Robot</h4>
+                  <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+                    Tự động mở trình duyệt vẽ ảnh poster 3D, tỉ lệ 4:5 kèm linh vật Gấu Đỏ.
+                  </p>
+                  {scheduleTriggering && liveProgress?.step === 3 && (
+                    <div className="mt-2.5 flex items-center gap-1.5 text-[10px] font-bold text-indigo-700">
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      <span>ChatGPT đang vẽ ảnh...</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bước 4: Đăng Facebook */}
+                <div className={`p-4 rounded-2xl border transition-all relative ${
+                  scheduleTriggering && liveProgress?.step === 4
+                    ? 'bg-indigo-50/80 border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                    : liveProgress?.step && liveProgress.step > 4
+                    ? 'bg-emerald-50/60 border-emerald-300'
+                    : 'bg-slate-50/70 border-slate-200'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="w-7 h-7 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-black">
+                      {liveProgress?.step && liveProgress.step > 4 ? '✓' : '4'}
+                    </span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Xuất Bản</span>
+                  </div>
+                  <h4 className="text-xs font-extrabold text-slate-800">4. Đăng Facebook</h4>
+                  <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+                    Đăng đồng thời lên các kênh đang bật:
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleChannel('fanpage')}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
+                        scheduleConfig.channels?.fanpage
+                          ? 'bg-blue-600 text-white shadow-xs hover:bg-blue-700'
+                          : 'bg-slate-200 text-slate-400 hover:bg-slate-300'
+                      }`}
+                      title="Bấm để Bật/Tắt Fanpage"
+                    >
+                      {scheduleConfig.channels?.fanpage ? '✓ Fanpage' : '✕ Fanpage'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleChannel('groups')}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
+                        scheduleConfig.channels?.groups
+                          ? 'bg-indigo-600 text-white shadow-xs hover:bg-indigo-700'
+                          : 'bg-slate-200 text-slate-400 hover:bg-slate-300'
+                      }`}
+                      title="Bấm để Bật/Tắt 151 Nhóm"
+                    >
+                      {scheduleConfig.channels?.groups ? '✓ 151 Nhóm' : '✕ 151 Nhóm'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleChannel('personal')}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
+                        scheduleConfig.channels?.personal
+                          ? 'bg-purple-600 text-white shadow-xs hover:bg-purple-700'
+                          : 'bg-slate-200 text-slate-400 hover:bg-slate-300'
+                      }`}
+                      title="Bấm để Bật/Tắt Cá Nhân"
+                    >
+                      {scheduleConfig.channels?.personal ? '✓ Cá Nhân' : '✕ Cá Nhân'}
+                    </button>
+                  </div>
+                  {scheduleTriggering && liveProgress?.step === 4 && (
+                    <div className="mt-2.5 flex items-center gap-1.5 text-[10px] font-bold text-indigo-700">
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      <span>Đang xuất bản Facebook...</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bước 5: Cập nhật Sheet & Telegram */}
+                <div className={`p-4 rounded-2xl border transition-all relative ${
+                  scheduleTriggering && liveProgress?.step === 5
+                    ? 'bg-indigo-50/80 border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                    : liveProgress?.step && liveProgress.step >= 5 && liveProgress.step !== -1
+                    ? 'bg-emerald-50/60 border-emerald-300'
+                    : 'bg-slate-50/70 border-slate-200'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="w-7 h-7 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-xs font-black">
+                      {liveProgress?.step && liveProgress.step >= 6 ? '✓' : '5'}
+                    </span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Hoàn Tất</span>
+                  </div>
+                  <h4 className="text-xs font-extrabold text-slate-800">5. Sheet & Telegram</h4>
+                  <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+                    Đánh dấu 'done', lưu link bài viết, ngày giờ vào Google Sheet và báo qua Telegram.
+                  </p>
+                  {scheduleTriggering && liveProgress?.step === 5 && (
+                    <div className="mt-2.5 flex items-center gap-1.5 text-[10px] font-bold text-indigo-700">
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      <span>Lưu link vào Sheet...</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* TIẾN ĐỘ THỜI GIAN THỰC (HIỂN THỊ TIẾN ĐỘ ĐĂNG BÀI TỚI BƯỚC NÀO) */}
+              {(scheduleTriggering || (liveProgress && liveProgress.active)) && (
+                <div className="p-5 rounded-2xl bg-indigo-50/90 border-2 border-indigo-500/40 space-y-3 animate-in fade-in duration-300">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-3 w-3 relative">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-600"></span>
+                      </span>
+                      <span className="text-xs font-extrabold text-indigo-950 uppercase tracking-wider">
+                        Tiến Độ Đăng Bài: {liveProgress?.stepName || 'Đang chuẩn bị...'} ({liveProgress?.progress || 10}%)
+                      </span>
+                    </div>
+                    <span className="text-xs font-bold text-indigo-700">
+                      {liveProgress?.detail || 'Hệ thống đang tiến hành chu trình tự động...'}
+                    </span>
+                  </div>
+
+                  {/* Thanh Progress Bar Gradient Animated */}
+                  <div className="w-full h-3 bg-indigo-200/80 rounded-full overflow-hidden p-0.5 border border-indigo-300">
+                    <div
+                      className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 rounded-full transition-all duration-700 ease-out"
+                      style={{ width: `${Math.min(100, Math.max(8, liveProgress?.progress || 10))}%` }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-500">
+                    <span>Bước {liveProgress?.step ?? 1}/5</span>
+                    <span>Nút đăng đang khóa an toàn để tránh đăng trùng lặp</span>
+                  </div>
+                </div>
+              )}
+
+              {/* KẾT QUẢ ĐĂNG BÀI & LINK BÀI VIẾT (HIỂN THỊ KHI ĐĂNG XONG) */}
+              {triggerResult && (
+                <div className="p-5 rounded-2xl bg-emerald-50/90 border-2 border-emerald-400 shadow-md space-y-4 animate-in fade-in duration-300">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/20">
+                        <CheckCircle2 className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-extrabold text-emerald-950">
+                          Đã Đăng Bài Thành Công Lên Facebook!
+                        </h4>
+                        <p className="text-xs text-emerald-700 mt-0.5">
+                          Tiêu đề: <strong className="font-bold text-emerald-900">"{triggerResult.title || 'Bài viết marketing'}"</strong>
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* NÚT MỞ LINK BÀI VIẾT TRỰC TIẾP TRÊN FACEBOOK */}
+                    {triggerResult.postUrl && (
+                      <a
+                        href={triggerResult.postUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-md shadow-emerald-600/20 hover:scale-105 transition-all cursor-pointer"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                        <span>Mở Xem Bài Viết Trên Facebook</span>
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Kênh đã đăng & Trạng thái Google Sheet */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-emerald-200">
+                    <div className="p-2.5 rounded-xl bg-white/80 border border-emerald-200 text-xs">
+                      <span className="text-slate-500">151 Nhóm FB:</span>{' '}
+                      <span className="font-bold text-emerald-700">
+                        {triggerResult.publishResults?.groups?.success ? `✓ Đã đăng (${triggerResult.publishResults.groups.count || 1} nhóm)` : 'Không bật / Đã bỏ qua'}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-white/80 border border-emerald-200 text-xs">
+                      <span className="text-slate-500">Fanpage:</span>{' '}
+                      <span className="font-bold text-emerald-700">
+                        {triggerResult.publishResults?.fanpage?.success ? '✓ Đã đăng Fanpage' : 'Không bật / Đã bỏ qua'}
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-white/80 border border-emerald-200 text-xs">
+                      <span className="text-slate-500">Google Sheet:</span>{' '}
+                      <span className="font-bold text-emerald-700">
+                        {triggerResult.sheetUpdated ? '✓ Đã ghi link & ngày đăng' : 'Đã ghi nhận'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Ảnh poster thu nhỏ */}
+                  {triggerResult.imageBase64 && (
+                    <div className="pt-2 flex items-center gap-3">
+                      <img
+                        src={`data:image/png;base64,${triggerResult.imageBase64}`}
+                        alt="Poster đã tạo"
+                        className="w-16 h-20 object-cover rounded-lg border border-emerald-300 shadow-sm"
+                      />
+                      <div className="text-xs text-emerald-800">
+                        <p className="font-bold">Ảnh Poster 3D Gấu Đỏ đã được đính kèm vào bài viết</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5">Tỉ lệ chuẩn 4:5 hiển thị tối ưu trên Facebook Feed</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+{/* ==================== WORKFLOW SETTINGS TABS ==================== */}
+            <div className="liquid-glass rounded-3xl p-6 md:p-8 space-y-6 border border-slate-200/80 shadow-md">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
+                    <Sliders className="w-5 h-5 text-indigo-600" />
+                    Cấu Hình Chi Tiết Quy Trình &amp; Lịch Hẹn
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Tùy biến khung giờ quét tự động, nguồn Google Sheets và Gemini API</p>
+                </div>
+
+                <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setWorkflowActiveTab('canvas')}
+                    className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      workflowActiveTab === 'canvas' ? 'bg-indigo-600 text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    ⏰ Khung Giờ Hẹn
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWorkflowActiveTab('sheets')}
+                    className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      workflowActiveTab === 'sheets' ? 'bg-indigo-600 text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    📊 Google Sheets
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWorkflowActiveTab('ai_config')}
+                    className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      workflowActiveTab === 'ai_config' ? 'bg-indigo-600 text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    ✨ Gemini &amp; Mascot
+                  </button>
+                </div>
+              </div>
+
+              {/* Sub-tab 1: Khung giờ hẹn riêng biệt cho từng kênh */}
+              {workflowActiveTab === 'canvas' && (
+                <div className="space-y-6">
+                  <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200/80 text-xs text-amber-900 font-medium flex items-center gap-2.5">
+                    <Clock className="w-5 h-5 text-amber-600 shrink-0" />
+                    <span>
+                      <b>Lịch đăng độc lập từng kênh:</b> Bạn có thể đặt giờ đăng Fanpage riêng (vd: 08:00, 16:00), giờ đăng Nhóm riêng (vd: 09:30, 14:00, 20:00) và giờ đăng Cá Nhân riêng mà không bị gộp chung!
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    
+                    {/* CARD 1: FANPAGE SCHEDULE */}
+                    <div className="p-5 rounded-2xl bg-blue-50/60 border border-blue-200/80 shadow-xs space-y-4">
+                      <div className="flex items-center justify-between border-b border-blue-200/80 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="p-2 rounded-xl bg-blue-600 text-white shadow-xs">
+                            <Share2 className="w-4 h-4" />
+                          </span>
+                          <div>
+                            <h4 className="font-extrabold text-sm text-slate-900">Facebook Fanpage</h4>
+                            <span className="text-[10px] font-bold text-blue-700">Port 3001</span>
+                          </div>
+                        </div>
+
+                        {/* Interactive Toggle Switch */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleChannel('fanpage')}
+                          className="flex items-center gap-2 cursor-pointer group select-none p-1 rounded-xl hover:bg-blue-100/50 transition-all"
+                          title={scheduleConfig.channels?.fanpage ? "Bấm để TẮT đăng Fanpage" : "Bấm để BẬT đăng Fanpage"}
+                        >
+                          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full transition-all ${
+                            scheduleConfig.channels?.fanpage ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-500'
+                          }`}>
+                            {scheduleConfig.channels?.fanpage ? 'ĐANG BẬT' : 'ĐÃ TẮT'}
+                          </span>
+                          <div className={`w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${
+                            scheduleConfig.channels?.fanpage ? 'bg-blue-600' : 'bg-slate-300'
+                          }`}>
+                            <div className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform duration-200 ease-in-out ${
+                              scheduleConfig.channels?.fanpage ? 'translate-x-5' : 'translate-x-0'
+                            }`} />
+                          </div>
+                        </button>
+                      </div>
+
+                      {/* Next Run Info */}
+                      <div className="bg-white/80 p-2.5 rounded-xl border border-blue-100 text-[11px]">
+                        <span className="text-slate-500 font-semibold">Lần đăng tiếp theo:</span>
+                        <div className="font-extrabold text-blue-900 mt-0.5">
+                          {channelNextRuns.fanpage?.label || 'Chưa xác định'}
+                        </div>
+                      </div>
+
+                      {/* Sheet Source Selection for Fanpage */}
+                      <div className="bg-white/80 p-2.5 rounded-xl border border-blue-100 flex items-center justify-between text-[11px]">
+                        <div className="flex items-center gap-1.5">
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-blue-600" />
+                          <span className="text-slate-600 font-bold">Lấy từ Sheet:</span>
+                        </div>
+                        <select
+                          value={scheduleConfig.googleSheets?.channelSheetMapping?.fanpage || scheduleConfig.googleSheets?.sheetName || 'topics'}
+                          onChange={(e) => handleUpdateChannelSheetMapping('fanpage', e.target.value)}
+                          className="bg-blue-50 border border-blue-200 text-blue-900 text-[11px] font-extrabold rounded-lg px-2 py-1 outline-hidden cursor-pointer"
+                        >
+                          {availableSheets.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* List of Times */}
+                      <div className="space-y-2">
+                        <label className="block text-[11px] font-bold text-slate-700">Khung giờ Fanpage hiện tại:</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(scheduleConfig.channelSchedules?.fanpage?.times || ['08:00', '16:00']).map((t: string) => (
+                            <span
+                              key={t}
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-blue-100 text-blue-900 font-black text-xs border border-blue-200 shadow-2xs"
+                            >
+                              <Clock className="w-3 h-3 text-blue-600" />
+                              {t}
+                              {renderSlotSheetSelect('fanpage', t)}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveChannelTime('fanpage', t)}
+                                className="hover:text-rose-600 text-blue-400 cursor-pointer"
+                                title="Xóa giờ này"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Add Time Form */}
+                      <div className="flex items-center gap-2 pt-2 border-t border-blue-100">
+                        <input
+                          type="time"
+                          value={newFanpageTime}
+                          onChange={(e) => setNewFanpageTime(e.target.value)}
+                          className="liquid-input rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 w-28"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleAddChannelTime('fanpage', newFanpageTime)}
+                          className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-xs flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Thêm Giờ
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={scheduleTriggering}
+                        onClick={() => handleTriggerAutoPilot(customRunTopic, 'fanpage')}
+                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                      >
+                        <Send className="w-3.5 h-3.5" /> 🚀 ĐĂNG NGAY LÊN FANPAGE (TEST)
+                      </button>
+                    </div>
+
+                    {/* CARD 2: GROUPS SCHEDULE */}
+                    <div className="p-5 rounded-2xl bg-indigo-50/60 border border-indigo-200/80 shadow-xs space-y-4">
+                      <div className="flex items-center justify-between border-b border-indigo-200/80 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="p-2 rounded-xl bg-indigo-600 text-white shadow-xs">
+                            <Users className="w-4 h-4" />
+                          </span>
+                          <div>
+                            <h4 className="font-extrabold text-sm text-slate-900">151 Nhóm Facebook</h4>
+                            <span className="text-[10px] font-bold text-indigo-700">Port 3002</span>
+                          </div>
+                        </div>
+
+                        {/* Interactive Toggle Switch */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleChannel('groups')}
+                          className="flex items-center gap-2 cursor-pointer group select-none p-1 rounded-xl hover:bg-indigo-100/50 transition-all"
+                          title={scheduleConfig.channels?.groups ? "Bấm để TẮT đăng 151 Nhóm" : "Bấm để BẬT đăng 151 Nhóm"}
+                        >
+                          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full transition-all ${
+                            scheduleConfig.channels?.groups ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-500'
+                          }`}>
+                            {scheduleConfig.channels?.groups ? 'ĐANG BẬT' : 'ĐÃ TẮT'}
+                          </span>
+                          <div className={`w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${
+                            scheduleConfig.channels?.groups ? 'bg-indigo-600' : 'bg-slate-300'
+                          }`}>
+                            <div className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform duration-200 ease-in-out ${
+                              scheduleConfig.channels?.groups ? 'translate-x-5' : 'translate-x-0'
+                            }`} />
+                          </div>
+                        </button>
+                      </div>
+
+                      {/* Next Run Info */}
+                      <div className="bg-white/80 p-2.5 rounded-xl border border-indigo-100 text-[11px]">
+                        <span className="text-slate-500 font-semibold">Lần đăng tiếp theo:</span>
+                        <div className="font-extrabold text-indigo-900 mt-0.5">
+                          {channelNextRuns.groups?.label || 'Chưa xác định'}
+                        </div>
+                      </div>
+
+                      {/* Sheet Source Selection for Groups */}
+                      <div className="bg-white/80 p-2.5 rounded-xl border border-indigo-100 flex items-center justify-between text-[11px]">
+                        <div className="flex items-center gap-1.5">
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-600" />
+                          <span className="text-slate-600 font-bold">Lấy từ Sheet:</span>
+                        </div>
+                        <select
+                          value={scheduleConfig.googleSheets?.channelSheetMapping?.groups || scheduleConfig.googleSheets?.sheetName || 'topics'}
+                          onChange={(e) => handleUpdateChannelSheetMapping('groups', e.target.value)}
+                          className="bg-indigo-50 border border-indigo-200 text-indigo-900 text-[11px] font-extrabold rounded-lg px-2 py-1 outline-hidden cursor-pointer"
+                        >
+                          {availableSheets.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* List of Times */}
+                      <div className="space-y-2">
+                        <label className="block text-[11px] font-bold text-slate-700">Khung giờ Nhóm hiện tại:</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(scheduleConfig.channelSchedules?.groups?.times || ['09:30', '14:00', '20:00']).map((t: string) => (
+                            <span
+                              key={t}
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-indigo-100 text-indigo-900 font-black text-xs border border-indigo-200 shadow-2xs"
+                            >
+                              <Clock className="w-3 h-3 text-indigo-600" />
+                              {t}
+                              {renderSlotSheetSelect('groups', t)}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveChannelTime('groups', t)}
+                                className="hover:text-rose-600 text-indigo-400 cursor-pointer"
+                                title="Xóa giờ này"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Add Time Form */}
+                      <div className="flex items-center gap-2 pt-2 border-t border-indigo-100">
+                        <input
+                          type="time"
+                          value={newGroupsTime}
+                          onChange={(e) => setNewGroupsTime(e.target.value)}
+                          className="liquid-input rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 w-28"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleAddChannelTime('groups', newGroupsTime)}
+                          className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Thêm Giờ
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={scheduleTriggering}
+                        onClick={() => handleTriggerAutoPilot(customRunTopic, 'groups')}
+                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                      >
+                        <Send className="w-3.5 h-3.5" /> 🚀 ĐĂNG NGAY LÊN 151 NHÓM (TEST)
+                      </button>
+                    </div>
+
+                    {/* CARD 3: PERSONAL PROFILE SCHEDULE */}
+                    <div className="p-5 rounded-2xl bg-purple-50/60 border border-purple-200/80 shadow-xs space-y-4">
+                      <div className="flex items-center justify-between border-b border-purple-200/80 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="p-2 rounded-xl bg-purple-600 text-white shadow-xs">
+                            <Globe className="w-4 h-4" />
+                          </span>
+                          <div>
+                            <h4 className="font-extrabold text-sm text-slate-900">Facebook Cá Nhân</h4>
+                            <span className="text-[10px] font-bold text-purple-700">Port 3003</span>
+                          </div>
+                        </div>
+
+                        {/* Interactive Toggle Switch */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleChannel('personal')}
+                          className="flex items-center gap-2 cursor-pointer group select-none p-1 rounded-xl hover:bg-purple-100/50 transition-all"
+                          title={scheduleConfig.channels?.personal ? "Bấm để TẮT đăng Cá Nhân" : "Bấm để BẬT đăng Cá Nhân"}
+                        >
+                          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full transition-all ${
+                            scheduleConfig.channels?.personal ? 'bg-purple-100 text-purple-700' : 'bg-slate-200 text-slate-500'
+                          }`}>
+                            {scheduleConfig.channels?.personal ? 'ĐANG BẬT' : 'ĐÃ TẮT'}
+                          </span>
+                          <div className={`w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${
+                            scheduleConfig.channels?.personal ? 'bg-purple-600' : 'bg-slate-300'
+                          }`}>
+                            <div className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform duration-200 ease-in-out ${
+                              scheduleConfig.channels?.personal ? 'translate-x-5' : 'translate-x-0'
+                            }`} />
+                          </div>
+                        </button>
+                      </div>
+
+                      {/* Next Run Info */}
+                      <div className="bg-white/80 p-2.5 rounded-xl border border-purple-100 text-[11px]">
+                        <span className="text-slate-500 font-semibold">Lần đăng tiếp theo:</span>
+                        <div className="font-extrabold text-purple-900 mt-0.5">
+                          {channelNextRuns.personal?.label || 'Chưa xác định'}
+                        </div>
+                      </div>
+
+                      {/* Sheet Source Selection for Personal */}
+                      <div className="bg-white/80 p-2.5 rounded-xl border border-purple-100 flex items-center justify-between text-[11px]">
+                        <div className="flex items-center gap-1.5">
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-purple-600" />
+                          <span className="text-slate-600 font-bold">Lấy từ Sheet:</span>
+                        </div>
+                        <select
+                          value={scheduleConfig.googleSheets?.channelSheetMapping?.personal || scheduleConfig.googleSheets?.sheetName || 'topics'}
+                          onChange={(e) => handleUpdateChannelSheetMapping('personal', e.target.value)}
+                          className="bg-purple-50 border border-purple-200 text-purple-900 text-[11px] font-extrabold rounded-lg px-2 py-1 outline-hidden cursor-pointer"
+                        >
+                          {availableSheets.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* List of Times */}
+                      <div className="space-y-2">
+                        <label className="block text-[11px] font-bold text-slate-700">Khung giờ Cá Nhân hiện tại:</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(scheduleConfig.channelSchedules?.personal?.times || ['11:30', '19:30']).map((t: string) => (
+                            <span
+                              key={t}
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-purple-100 text-purple-900 font-black text-xs border border-purple-200 shadow-2xs"
+                            >
+                              <Clock className="w-3 h-3 text-purple-600" />
+                              {t}
+                              {renderSlotSheetSelect('personal', t)}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveChannelTime('personal', t)}
+                                className="hover:text-rose-600 text-purple-400 cursor-pointer"
+                                title="Xóa giờ này"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Add Time Form */}
+                      <div className="flex items-center gap-2 pt-2 border-t border-purple-100">
+                        <input
+                          type="time"
+                          value={newPersonalTime}
+                          onChange={(e) => setNewPersonalTime(e.target.value)}
+                          className="liquid-input rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 w-28"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleAddChannelTime('personal', newPersonalTime)}
+                          className="flex-1 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-xs flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Thêm Giờ
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={scheduleTriggering}
+                        onClick={() => handleTriggerAutoPilot(customRunTopic, 'personal')}
+                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                      >
+                        <Send className="w-3.5 h-3.5" /> 🚀 ĐĂNG NGAY LÊN CÁ NHÂN (TEST)
+                      </button>
+                    </div>
+
+                  </div>
+                </div>
+              )}
+
+              {/* Sub-tab 2: Google Sheets & Kho chủ đề */}
+              {workflowActiveTab === 'sheets' && (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-200/80 shadow-xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-emerald-200/60">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span className="text-xs font-black text-emerald-950 uppercase tracking-wide">
+                          Xem &amp; Đồng bộ Sheet:
+                        </span>
+                        <div className="flex items-center gap-1 bg-white/80 p-1 rounded-xl border border-emerald-200">
+                          {availableSheets.map((s) => {
+                            const isSelected = (activeSheetTab || scheduleConfig.googleSheets?.sheetName || 'topics') === s;
+                            return (
+                              <button
+                                key={s}
+                                type="button"
+                                disabled={sheetsSyncing}
+                                onClick={() => handleSwitchSheetTab(s)}
+                                className={`px-3 py-1 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                                  isSelected
+                                    ? 'bg-emerald-700 text-white shadow-xs'
+                                    : 'text-emerald-900 hover:bg-emerald-100/70'
+                                }`}
+                              >
+                                {s === 'topics' ? '📁 topics' : '📅 content_calendar'}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <a
+                        href={scheduleConfig.googleSheets?.sheetUrl || 'https://docs.google.com/spreadsheets/d/1tx_RHyRfBgGuYTvO3Tr_08Hrp6SelIsfN9hTQaT3jUY/edit'}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs font-extrabold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 bg-white/80 px-2.5 py-1 rounded-lg border border-emerald-200 hover:shadow-xs transition-all w-fit"
+                      >
+                        Mở Trang Tính <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2 pt-3 text-center">
+                      <div className="bg-white/90 p-2.5 rounded-xl border border-emerald-100 shadow-xs">
+                        <div className="text-[10px] font-bold text-slate-500 uppercase">Tổng Topic [{activeSheetTab || scheduleConfig.googleSheets?.sheetName || 'topics'}]</div>
+                        <div className="text-base font-black text-slate-900 mt-0.5">{sheetsOverview?.total ?? 0}</div>
+                      </div>
+                      <div className="bg-white/90 p-2.5 rounded-xl border border-emerald-100 shadow-xs">
+                        <div className="text-[10px] font-bold text-emerald-600 uppercase">Đã Đăng (Done)</div>
+                        <div className="text-base font-black text-emerald-700 mt-0.5">{sheetsOverview?.done ?? 0}</div>
+                      </div>
+                      <div className="bg-white/90 p-2.5 rounded-xl border border-emerald-100 shadow-xs">
+                        <div className="text-[10px] font-bold text-amber-600 uppercase">Đang Xử Lý</div>
+                        <div className="text-base font-black text-amber-700 mt-0.5">{sheetsOverview?.inProgress ?? 0}</div>
+                      </div>
+                      <div className="bg-white/90 p-2.5 rounded-xl border border-emerald-100 shadow-xs">
+                        <div className="text-[10px] font-bold text-indigo-600 uppercase">Chờ Đăng (Pending)</div>
+                        <div className="text-base font-black text-indigo-700 mt-0.5">{sheetsOverview?.pending ?? 0}</div>
+                      </div>
+                    </div>
+
+                    {/* Phân chia Sheet riêng từng kênh */}
+                    <div className="mt-4 pt-3 border-t border-emerald-200/60 bg-white/70 rounded-xl p-3">
+                      <h5 className="text-xs font-black text-slate-800 mb-2 flex items-center gap-1.5">
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                        Phân Chia Nguồn Sheet Riêng Cho Từng Kênh:
+                      </h5>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200">
+                          <label className="block text-[11px] font-black text-blue-900 mb-1">Fanpage lấy từ:</label>
+                          <select
+                            value={scheduleConfig.googleSheets?.channelSheetMapping?.fanpage || scheduleConfig.googleSheets?.sheetName || 'topics'}
+                            onChange={(e) => handleUpdateChannelSheetMapping('fanpage', e.target.value)}
+                            className="w-full bg-white border border-blue-300 text-blue-900 text-xs font-bold rounded-lg px-2.5 py-1.5 outline-hidden cursor-pointer"
+                          >
+                            {availableSheets.map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-indigo-50 border border-indigo-200">
+                          <label className="block text-[11px] font-black text-indigo-900 mb-1">151 Nhóm lấy từ:</label>
+                          <select
+                            value={scheduleConfig.googleSheets?.channelSheetMapping?.groups || scheduleConfig.googleSheets?.sheetName || 'topics'}
+                            onChange={(e) => handleUpdateChannelSheetMapping('groups', e.target.value)}
+                            className="w-full bg-white border border-indigo-300 text-indigo-900 text-xs font-bold rounded-lg px-2.5 py-1.5 outline-hidden cursor-pointer"
+                          >
+                            {availableSheets.map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-purple-50 border border-purple-200">
+                          <label className="block text-[11px] font-black text-purple-900 mb-1">Cá Nhân lấy từ:</label>
+                          <select
+                            value={scheduleConfig.googleSheets?.channelSheetMapping?.personal || scheduleConfig.googleSheets?.sheetName || 'topics'}
+                            onChange={(e) => handleUpdateChannelSheetMapping('personal', e.target.value)}
+                            className="w-full bg-white border border-purple-300 text-purple-900 text-xs font-bold rounded-lg px-2.5 py-1.5 outline-hidden cursor-pointer"
+                          >
+                            {availableSheets.map((s) => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={sheetsSyncing}
+                      onClick={() => handleSyncGoogleSheets(activeSheetTab)}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold flex items-center gap-2 cursor-pointer shadow-sm"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${sheetsSyncing ? 'animate-spin' : ''}`} />
+                      {sheetsSyncing ? 'Đang đồng bộ...' : `Đồng Bộ Dữ Liệu Sheet [${activeSheetTab || scheduleConfig.googleSheets?.sheetName || 'topics'}]`}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Sub-tab 3: Gemini & Mascot AI */}
+              {workflowActiveTab === 'ai_config' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Google Gemini API Key chính:</label>
+                    <div className="relative">
+                      <input
+                        type={showGeminiKeySecret ? 'text' : 'password'}
+                        value={scheduleConfig.geminiApiKey || ''}
+                        onChange={(e) => setScheduleConfig({ ...scheduleConfig, geminiApiKey: e.target.value })}
+                        placeholder="Nhập Gemini API Key..."
+                        className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-mono text-slate-900 pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowGeminiKeySecret(!showGeminiKeySecret)}
+                        className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-slate-500">Key này được dùng trước. Khi hết quota, hệ thống sẽ chuyển sang key dự phòng.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Gemini API key dự phòng:</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={newGeminiApiKey}
+                        onChange={(e) => setNewGeminiApiKey(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.preventDefault();
+                        }}
+                        placeholder="Dán API key dự phòng..."
+                        className="liquid-input min-w-0 flex-1 rounded-xl px-4 py-2.5 text-xs font-mono text-slate-900"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const key = newGeminiApiKey.trim();
+                          const existingKeys = [scheduleConfig.geminiApiKey, ...(scheduleConfig.geminiApiKeys || [])];
+                          if (!key || existingKeys.includes(key)) return;
+                          setScheduleConfig({
+                            ...scheduleConfig,
+                            geminiApiKeys: [...(scheduleConfig.geminiApiKeys || []), key],
+                          });
+                          setNewGeminiApiKey('');
+                        }}
+                        className="shrink-0 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700"
+                        title="Thêm key dự phòng"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </div>
+                    {(scheduleConfig.geminiApiKeys || []).length > 0 ? (
+                      <div className="mt-2 space-y-1.5">
+                        {(scheduleConfig.geminiApiKeys || []).map((key: string, index: number) => (
+                          <div key={`${key.slice(-6)}-${index}`} className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            <span className="text-xs font-mono text-slate-600">Dự phòng #{index + 1}: ••••••••{key.slice(-4)}</span>
+                            <button
+                              type="button"
+                              onClick={() => setScheduleConfig({
+                                ...scheduleConfig,
+                                geminiApiKeys: (scheduleConfig.geminiApiKeys || []).filter((_: string, keyIndex: number) => keyIndex !== index),
+                              })}
+                              className="text-slate-400 hover:text-rose-600"
+                              title="Xóa key dự phòng"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-[11px] text-slate-400">Chưa có key dự phòng.</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Model Gemini:</label>
+                    <select
+                      value={scheduleConfig.model || 'gemini-2.5-flash'}
+                      onChange={(e) => setScheduleConfig({ ...scheduleConfig, model: e.target.value })}
+                      className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900"
+                    >
+                      <option value="gemini-2.5-flash">gemini-2.5-flash (Khuyên dùng - Cực nhanh &amp; Chuẩn)</option>
+                      <option value="gemini-2.5-pro">gemini-2.5-pro (Mạnh mẽ, văn phong chuyên sâu)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Tỉ lệ ảnh tạo bởi ChatGPT:</label>
+                    <select
+                      value={scheduleConfig.aspectRatio || '4:5'}
+                      onChange={(e) => setScheduleConfig({ ...scheduleConfig, aspectRatio: e.target.value })}
+                      className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900"
+                    >
+                      <option value="4:5">4:5 (Khuyên dùng - Chuẩn giao diện bài viết Facebook)</option>
+                      <option value="16:9">16:9 (Ngang - Phù hợp bài tin tức)</option>
+                      <option value="1:1">1:1 (Vuông - Chuẩn đa nền tảng)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Mascot Du (Gấu robot đỏ công nghệ):</label>
+                    <select
+                      value={scheduleConfig.hasMascotDu ? 'true' : 'false'}
+                      onChange={(e) => setScheduleConfig({ ...scheduleConfig, hasMascotDu: e.target.value === 'true' })}
+                      className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900"
+                    >
+                      <option value="true">BẬT Mascot Du (3D Vinyl Chú Gấu Robot Đỏ DUDI)</option>
+                      <option value="false">TẮT (Chụp ảnh người thật Photorealistic)</option>
+                    </select>
+                  </div>
+
+                  <div className="col-span-full pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={scheduleLoading}
+                      onClick={() => handleSaveScheduleConfig(scheduleConfig)}
+                      className="px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-md flex items-center gap-2 transition-all cursor-pointer"
+                    >
+                      <Check className="w-4 h-4" /> Lưu Cấu Hình AI
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
           </div>
         )}

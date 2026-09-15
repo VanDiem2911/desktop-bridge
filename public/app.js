@@ -368,7 +368,7 @@ async function handleQuickPost(e) {
         action: 'generate_chatgpt_image',
         prompt: prompt || 'Professional modern marketing visual for Vietnamese technology company',
         aspectRatio: aspectRatio || '4:5',
-        referenceImageUrl: hasDu ? 'https://res.cloudinary.com/dbwahdjzg/image/upload/v1786351452/4022ffed-ef18-4faf-bf7e-156716aa5d4e.png' : null,
+        referenceImageUrl: hasDu ? 'https://res.cloudinary.com/dbwahdjzg/image/upload/v1789449519/nail_DU_hjqnmq.png' : null,
       }),
     });
 

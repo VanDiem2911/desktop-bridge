@@ -177,51 +177,71 @@ async function ensureChromeForAccount(profileDirName, targetPort) {
   throw new Error(`Không mở được Chrome trên cổng ${targetPort} cho profile ${profileDirName}`);
 }
 
-function cleanCaption(value) {
-  if (value && typeof value === 'object') {
-    if (typeof value.facebookPost === 'string' && value.facebookPost.trim()) return value.facebookPost.trim();
-    if (typeof value.articleMarkdown === 'string' && value.articleMarkdown.trim()) {
-      return value.articleMarkdown
-        .replace(/^#{1,6}\s*/gm, '')
-        .replace(/\*\*(.*?)\*\*/g, '$1')
-        .replace(/\*(.*?)\*/g, '$1')
-        .replace(/^>\s?/gm, '')
-        .replace(/^---+\s*$/gm, '')
-        .trim();
-    }
-    if (typeof value.socialCaption === 'string' && value.socialCaption.trim()) return value.socialCaption.trim();
-    if (typeof value.caption === 'string' && value.caption.trim()) return value.caption.trim();
-    if (typeof value.content === 'string' && value.content.trim()) return value.content.trim();
-  }
-
-  const raw = String(value ?? '').trim();
-  const unfenced = raw
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/i, '')
+function stripMarkdown(text) {
+  if (!text || typeof text !== 'string') return '';
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1') // Xóa ** in đậm
+    .replace(/\*(.*?)\*/g, '$1')     // Xóa * in nghiêng
+    .replace(/_{2}(.*?)_{2}/g, '$1') // Xóa __
+    .replace(/_(.*?)_/g, '$1')       // Xóa _
+    .replace(/^#{1,6}\s*/gm, '')     // Xóa # tiêu đề
+    .replace(/^>\s?/gm, '')          // Xóa > quote
+    .replace(/^---+\s*$/gm, '')      // Xóa ---
+    .replace(/`([^`]+)`/g, '$1')     // Xóa backtick
     .trim();
+}
 
-  for (const candidate of [raw, unfenced]) {
-    try {
-      const parsed = JSON.parse(candidate);
-      if (parsed && typeof parsed === 'object') {
-        if (typeof parsed.facebookPost === 'string' && parsed.facebookPost.trim()) return parsed.facebookPost.trim();
-        if (typeof parsed.articleMarkdown === 'string' && parsed.articleMarkdown.trim()) {
-          return parsed.articleMarkdown
-            .replace(/^#{1,6}\s*/gm, '')
-            .replace(/\*\*(.*?)\*\*/g, '$1')
-            .replace(/\*(.*?)\*/g, '$1')
-            .replace(/^>\s?/gm, '')
-            .replace(/^---+\s*$/gm, '')
-            .trim();
-        }
-        if (typeof parsed.socialCaption === 'string' && parsed.socialCaption.trim()) return parsed.socialCaption.trim();
-        if (typeof parsed.caption === 'string' && parsed.caption.trim()) return parsed.caption.trim();
-        if (typeof parsed.content === 'string' && parsed.content.trim()) return parsed.content.trim();
-      }
-    } catch {}
+function cleanCaption(value) {
+  let result = '';
+  if (value && typeof value === 'object') {
+    if (typeof value.facebookPost === 'string' && value.facebookPost.trim()) result = value.facebookPost.trim();
+    else if (typeof value.articleMarkdown === 'string' && value.articleMarkdown.trim()) result = value.articleMarkdown.trim();
+    else if (typeof value.socialCaption === 'string' && value.socialCaption.trim()) result = value.socialCaption.trim();
+    else if (typeof value.caption === 'string' && value.caption.trim()) result = value.caption.trim();
+    else if (typeof value.content === 'string' && value.content.trim()) result = value.content.trim();
   }
 
-  return unfenced.replace(/\\n/g, '\n');
+  if (!result) {
+    const raw = String(value ?? '').trim();
+    const unfenced = raw
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+
+    for (const candidate of [raw, unfenced]) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed && typeof parsed === 'object') {
+          if (typeof parsed.facebookPost === 'string' && parsed.facebookPost.trim()) {
+            result = parsed.facebookPost.trim();
+            break;
+          }
+          if (typeof parsed.articleMarkdown === 'string' && parsed.articleMarkdown.trim()) {
+            result = parsed.articleMarkdown.trim();
+            break;
+          }
+          if (typeof parsed.socialCaption === 'string' && parsed.socialCaption.trim()) {
+            result = parsed.socialCaption.trim();
+            break;
+          }
+          if (typeof parsed.caption === 'string' && parsed.caption.trim()) {
+            result = parsed.caption.trim();
+            break;
+          }
+          if (typeof parsed.content === 'string' && parsed.content.trim()) {
+            result = parsed.content.trim();
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    if (!result) {
+      result = unfenced.replace(/\\n/g, '\n');
+    }
+  }
+
+  return stripMarkdown(result);
 }
 
 async function firstVisible(page, selectors, timeout = 15000) {
@@ -544,6 +564,67 @@ async function detectFacebookWarningOrBlock(page, dialog = null) {
   return null;
 }
 
+function cleanFbUrl(href) {
+  if (!href) return null;
+  let fullUrl = href;
+  if (fullUrl.startsWith('/')) {
+    fullUrl = 'https://www.facebook.com' + fullUrl;
+  }
+  try {
+    const u = new URL(fullUrl);
+    u.searchParams.delete('__cft__[0]');
+    u.searchParams.delete('__tn__');
+    u.searchParams.delete('notif_id');
+    u.searchParams.delete('notif_t');
+    u.searchParams.delete('ref');
+    return u.toString();
+  } catch {
+    return fullUrl;
+  }
+}
+
+async function extractLatestPostUrl(page, fallbackUrl) {
+  try {
+    const timeLocators = [
+      'a[role="link"]:has-text("Vừa xong")',
+      'a[role="link"]:has-text("Just now")',
+      'a[role="link"]:has-text("1 phút")',
+      'a[role="link"]:has-text("1 min")',
+      'a[role="link"]:has-text("2 phút")',
+      'a[role="link"]:has-text("2 min")',
+    ];
+    for (const sel of timeLocators) {
+      const loc = page.locator(sel).first();
+      if (await loc.count().catch(() => 0) && await loc.isVisible().catch(() => false)) {
+        let href = await loc.getAttribute('href').catch(() => null);
+        if (href) return cleanFbUrl(href);
+      }
+    }
+
+    const feedLocators = [
+      'div[role="feed"] a[href*="/posts/"]',
+      'div[role="feed"] a[href*="permalink.php"]',
+      'div[role="feed"] a[href*="story_fbid="]',
+      'div[role="feed"] a[href*="/photo/"]',
+      'div[role="feed"] a[href*="/photos/"]',
+      'div[role="main"] a[href*="/posts/"]',
+      'div[role="main"] a[href*="permalink.php"]',
+      'div[role="main"] a[href*="story_fbid="]',
+      'div[role="main"] a[href*="/photo/"]',
+    ];
+    for (const sel of feedLocators) {
+      const loc = page.locator(sel).first();
+      if (await loc.count().catch(() => 0)) {
+        let href = await loc.getAttribute('href').catch(() => null);
+        if (href) return cleanFbUrl(href);
+      }
+    }
+  } catch (err) {
+    console.warn('[Facebook Group] Không thể trích xuất link bài viết:', err.message);
+  }
+  return fallbackUrl;
+}
+
 /**
  * Đăng bài vào 1 Facebook Group (Tự động kiểm tra & tham gia nhóm trước khi đăng)
  */
@@ -756,8 +837,9 @@ async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType 
   }
 
   await delay(5000);
-  console.log(`[Group Post] Hoàn thành đăng nhóm: ${groupUrl}`);
-  return { success: true, joinStatus: joinResult.status };
+  const postUrl = await extractLatestPostUrl(page, groupUrl);
+  console.log(`[Group Post] Hoàn thành đăng nhóm: ${groupUrl} (Link: ${postUrl})`);
+  return { success: true, joinStatus: joinResult.status, postUrl };
 }
 
 /**
@@ -920,8 +1002,8 @@ async function executeGroupPosting(body) {
       for (const groupUrl of targetGroupList) {
         const postStartTime = Date.now();
         try {
-          await postToSingleGroup(page, groupUrl, postCaption, finalImageBase64);
-          accResult.groups.push({ groupUrl, status: 'success', timestamp: new Date().toISOString() });
+          const singleRes = await postToSingleGroup(page, groupUrl, postCaption, finalImageBase64);
+          accResult.groups.push({ groupUrl, postUrl: singleRes?.postUrl || groupUrl, status: 'success', timestamp: new Date().toISOString() });
           logPostActivity({
             type: 'post',
             channel: 'groups',
@@ -1008,9 +1090,12 @@ async function executeGroupPosting(body) {
   saveConfig(config);
 
   console.log(`[Group Server] Đã hoàn thành toàn bộ lượt đăng bài vào nhóm.`);
+  const allPostUrls = results.flatMap(r => (r.groups || []).filter(g => g.status === 'success' && g.postUrl).map(g => g.postUrl));
   return {
     ok: true,
     totalAccounts: accountsToRun.length,
+    postUrls: allPostUrls,
+    postUrl: allPostUrls[0] || null,
     completedAt: new Date().toISOString(),
     results,
   };
@@ -1075,19 +1160,14 @@ async function openChatGptPage(account, { newConversation = false } = {}) {
   const context = browser.contexts()[0];
   if (!context) throw new Error('Chrome has no browser context');
 
-  let page;
-  if (newConversation) {
+  let page = context.pages().find((candidate) => candidate.url().includes('chatgpt.com'));
+  if (!page) {
     page = await context.newPage();
-    await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded' });
-    await delay(3000);
-  } else {
-    page = context.pages().find((candidate) => candidate.url().includes('chatgpt.com'));
-    if (!page) {
-      page = await context.newPage();
-      await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded' });
-      await delay(3000);
-    }
   }
+  // Luôn điều hướng về https://chatgpt.com/ để bắt đầu phiên chat mới, dọn sạch ảnh cũ trong DOM
+  console.log(`[Group ChatGPT] Điều hướng về https://chatgpt.com/ để bắt đầu phiên tạo ảnh mới (loại bỏ hoàn toàn ảnh cũ)...`);
+  await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await delay(3000);
   await page.bringToFront();
   return { browser, page };
 }
@@ -1219,17 +1299,19 @@ function sanitizePromptForPolicy(rawPrompt) {
   return safe;
 }
 
-async function waitForGeneratedImageGpt(page, initialSrcs = new Set()) {
+async function waitForGeneratedImageGpt(page, initialSrcs = new Set(), waitStartTime = Date.now()) {
   const deadline = Date.now() + 360000; // timeout 6 phút
   let hasStarted = false;
 
   while (Date.now() < deadline) {
-    const bodyText = await page.locator('body').innerText();
+    const bodyText = await page.locator('body').innerText().catch(() => '');
     const stopBtn = page.locator('button[aria-label*="Stop"], button[data-testid*="stop"]').first();
-    const isStreaming = (await stopBtn.count()) && (await stopBtn.isVisible());
+    const isStreaming = (await stopBtn.count().catch(() => 0)) && (await stopBtn.isVisible().catch(() => false));
     const isCreating = bodyText.includes('Creating image') || isStreaming;
 
-    if (isCreating) hasStarted = true;
+    if (isCreating || (Date.now() - waitStartTime > 15000)) {
+      hasStarted = true;
+    }
 
     const limitCheck = await checkChatGptLimit(page);
     if (limitCheck.isLimited && !isCreating) {
@@ -1244,11 +1326,11 @@ async function waitForGeneratedImageGpt(page, initialSrcs = new Set()) {
     const image1Btn = page.locator('button, [role="button"]').filter({
       hasText: /image\s*1\s*is\s*better/i,
     }).first();
-    if (await image1Btn.count() > 0) {
+    if (await image1Btn.count().catch(() => 0) > 0) {
       try { await image1Btn.click({ timeout: 2000 }); } catch {}
     }
 
-    if (!isCreating) {
+    if (!isCreating && hasStarted) {
       const assistantImgs = await page.locator('[data-message-author-role="assistant"] img').evaluateAll((imgs) =>
         imgs
           .map((img) => ({
@@ -1258,13 +1340,14 @@ async function waitForGeneratedImageGpt(page, initialSrcs = new Set()) {
           }))
           .filter(({ src, width, height }) => src && width >= 256 && height >= 256 && !src.includes('avatar') && !src.includes('profile'))
           .map(({ src }) => src),
-      );
+      ).catch(() => []);
 
       const allSrcs = await imageSourcesGpt(page);
       const newSrcs = allSrcs.filter((s) => !initialSrcs.has(s));
       const candidateSrcs = [...new Set([...assistantImgs.filter((s) => !initialSrcs.has(s)), ...newSrcs])];
 
       if (candidateSrcs.length > 0) {
+        await delay(3000);
         const lastSrc = candidateSrcs.at(-1);
         console.log(`[Group ChatGPT] Đã lấy ảnh mới: ${lastSrc.slice(0, 80)}...`);
         return await downloadAsBase64Gpt(page, lastSrc);
@@ -1407,10 +1490,11 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, newConve
       await input.fill(fullPrompt);
       await input.press('Enter');
       console.log(`[${account.name}] Đã gửi prompt lần ${attempt}. Đang theo dõi tiến trình...`);
+      const promptSentAt = Date.now();
       await delay(5000);
 
       try {
-        const image = await waitForGeneratedImageGpt(page, initialSrcs);
+        const image = await waitForGeneratedImageGpt(page, initialSrcs, promptSentAt);
         console.log(`[${account.name}] Tạo ảnh Group thành công ở lần thử ${attempt}.`);
         return {
           ...image,

@@ -178,51 +178,71 @@ async function ensureChromeForGpt(account) {
 
 // ==================== XỬ LÝ CAPTION & VALIDATION ====================
 
-function cleanCaption(value) {
-  if (value && typeof value === 'object') {
-    if (typeof value.facebookPost === 'string' && value.facebookPost.trim()) return value.facebookPost.trim();
-    if (typeof value.articleMarkdown === 'string' && value.articleMarkdown.trim()) {
-      return value.articleMarkdown
-        .replace(/^#{1,6}\s*/gm, '')
-        .replace(/\*\*(.*?)\*\*/g, '$1')
-        .replace(/\*(.*?)\*/g, '$1')
-        .replace(/^>\s?/gm, '')
-        .replace(/^---+\s*$/gm, '')
-        .trim();
-    }
-    if (typeof value.socialCaption === 'string' && value.socialCaption.trim()) return value.socialCaption.trim();
-    if (typeof value.caption === 'string' && value.caption.trim()) return value.caption.trim();
-    if (typeof value.content === 'string' && value.content.trim()) return value.content.trim();
-  }
-
-  const raw = String(value ?? '').trim();
-  const unfenced = raw
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/i, '')
+function stripMarkdown(text) {
+  if (!text || typeof text !== 'string') return '';
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1') // Xóa ** in đậm
+    .replace(/\*(.*?)\*/g, '$1')     // Xóa * in nghiêng
+    .replace(/_{2}(.*?)_{2}/g, '$1') // Xóa __
+    .replace(/_(.*?)_/g, '$1')       // Xóa _
+    .replace(/^#{1,6}\s*/gm, '')     // Xóa # tiêu đề
+    .replace(/^>\s?/gm, '')          // Xóa > quote
+    .replace(/^---+\s*$/gm, '')      // Xóa ---
+    .replace(/`([^`]+)`/g, '$1')     // Xóa backtick
     .trim();
+}
 
-  for (const candidate of [raw, unfenced]) {
-    try {
-      const parsed = JSON.parse(candidate);
-      if (parsed && typeof parsed === 'object') {
-        if (typeof parsed.facebookPost === 'string' && parsed.facebookPost.trim()) return parsed.facebookPost.trim();
-        if (typeof parsed.articleMarkdown === 'string' && parsed.articleMarkdown.trim()) {
-          return parsed.articleMarkdown
-            .replace(/^#{1,6}\s*/gm, '')
-            .replace(/\*\*(.*?)\*\*/g, '$1')
-            .replace(/\*(.*?)\*/g, '$1')
-            .replace(/^>\s?/gm, '')
-            .replace(/^---+\s*$/gm, '')
-            .trim();
-        }
-        if (typeof parsed.socialCaption === 'string' && parsed.socialCaption.trim()) return parsed.socialCaption.trim();
-        if (typeof parsed.caption === 'string' && parsed.caption.trim()) return parsed.caption.trim();
-        if (typeof parsed.content === 'string' && parsed.content.trim()) return parsed.content.trim();
-      }
-    } catch {}
+function cleanCaption(value) {
+  let result = '';
+  if (value && typeof value === 'object') {
+    if (typeof value.facebookPost === 'string' && value.facebookPost.trim()) result = value.facebookPost.trim();
+    else if (typeof value.articleMarkdown === 'string' && value.articleMarkdown.trim()) result = value.articleMarkdown.trim();
+    else if (typeof value.socialCaption === 'string' && value.socialCaption.trim()) result = value.socialCaption.trim();
+    else if (typeof value.caption === 'string' && value.caption.trim()) result = value.caption.trim();
+    else if (typeof value.content === 'string' && value.content.trim()) result = value.content.trim();
   }
 
-  return unfenced.replace(/\\n/g, '\n');
+  if (!result) {
+    const raw = String(value ?? '').trim();
+    const unfenced = raw
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+
+    for (const candidate of [raw, unfenced]) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed && typeof parsed === 'object') {
+          if (typeof parsed.facebookPost === 'string' && parsed.facebookPost.trim()) {
+            result = parsed.facebookPost.trim();
+            break;
+          }
+          if (typeof parsed.articleMarkdown === 'string' && parsed.articleMarkdown.trim()) {
+            result = parsed.articleMarkdown.trim();
+            break;
+          }
+          if (typeof parsed.socialCaption === 'string' && parsed.socialCaption.trim()) {
+            result = parsed.socialCaption.trim();
+            break;
+          }
+          if (typeof parsed.caption === 'string' && parsed.caption.trim()) {
+            result = parsed.caption.trim();
+            break;
+          }
+          if (typeof parsed.content === 'string' && parsed.content.trim()) {
+            result = parsed.content.trim();
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    if (!result) {
+      result = unfenced.replace(/\\n/g, '\n');
+    }
+  }
+
+  return stripMarkdown(result);
 }
 
 function assertRequest(body) {
@@ -457,6 +477,67 @@ async function clickDialogActionButton(page, allowPost = true) {
   return null;
 }
 
+function cleanFbUrl(href) {
+  if (!href) return null;
+  let fullUrl = href;
+  if (fullUrl.startsWith('/')) {
+    fullUrl = 'https://www.facebook.com' + fullUrl;
+  }
+  try {
+    const u = new URL(fullUrl);
+    u.searchParams.delete('__cft__[0]');
+    u.searchParams.delete('__tn__');
+    u.searchParams.delete('notif_id');
+    u.searchParams.delete('notif_t');
+    u.searchParams.delete('ref');
+    return u.toString();
+  } catch {
+    return fullUrl;
+  }
+}
+
+async function extractLatestPostUrl(page, fallbackUrl) {
+  try {
+    const timeLocators = [
+      'a[role="link"]:has-text("Vừa xong")',
+      'a[role="link"]:has-text("Just now")',
+      'a[role="link"]:has-text("1 phút")',
+      'a[role="link"]:has-text("1 min")',
+      'a[role="link"]:has-text("2 phút")',
+      'a[role="link"]:has-text("2 min")',
+    ];
+    for (const sel of timeLocators) {
+      const loc = page.locator(sel).first();
+      if (await loc.count().catch(() => 0) && await loc.isVisible().catch(() => false)) {
+        let href = await loc.getAttribute('href').catch(() => null);
+        if (href) return cleanFbUrl(href);
+      }
+    }
+
+    const feedLocators = [
+      'div[role="feed"] a[href*="/posts/"]',
+      'div[role="feed"] a[href*="permalink.php"]',
+      'div[role="feed"] a[href*="story_fbid="]',
+      'div[role="feed"] a[href*="/photo/"]',
+      'div[role="feed"] a[href*="/photos/"]',
+      'div[role="main"] a[href*="/posts/"]',
+      'div[role="main"] a[href*="permalink.php"]',
+      'div[role="main"] a[href*="story_fbid="]',
+      'div[role="main"] a[href*="/photo/"]',
+    ];
+    for (const sel of feedLocators) {
+      const loc = page.locator(sel).first();
+      if (await loc.count().catch(() => 0)) {
+        let href = await loc.getAttribute('href').catch(() => null);
+        if (href) return cleanFbUrl(href);
+      }
+    }
+  } catch (err) {
+    console.warn('[Facebook Personal] Không thể trích xuất link bài viết:', err.message);
+  }
+  return fallbackUrl;
+}
+
 async function publishFacebookPersonal({
   account: reqAccountId,
   accountId,
@@ -636,11 +717,13 @@ async function publishFacebookPersonal({
     await delay(5000);
     await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
 
+    const postUrl = await extractLatestPostUrl(page, targetUrl);
     isPublishConfirmed = true;
-    console.log('[Personal Post] ✅ ĐÃ XÁC NHẬN BÀI VIẾT ĐĂNG THÀNH CÔNG 100% LÊN FACEBOOK CÁ NHÂN!');
+    console.log(`[Personal Post] ✅ ĐÃ XÁC NHẬN BÀI VIẾT ĐĂNG THÀNH CÔNG 100% LÊN FACEBOOK CÁ NHÂN! Link: ${postUrl}`);
     return {
       ok: true,
       source: 'facebook-personal',
+      postUrl,
       publishedAt: new Date().toISOString(),
     };
   } finally {
@@ -806,17 +889,30 @@ function sanitizePromptForPolicy(rawPrompt) {
  * Chờ ChatGPT generate xong rồi lấy ảnh MỚI được tạo ra.
  * Tuyệt đối không lấy lại ảnh mẫu / ảnh tham chiếu ban đầu.
  */
-async function waitForGeneratedImage(page, initialSrcs = new Set()) {
+async function waitForGeneratedImage(page, initialSrcs = new Set(), waitStartTime = Date.now(), initialAssistantCount = 0) {
   const deadline = Date.now() + 360000; // timeout 6 phút
   let hasStarted = false;
 
-  while (Date.now() < deadline) {
-    const bodyText = await page.locator('body').innerText();
-    const stopBtn = page.locator('button[aria-label*="Stop"], button[data-testid*="stop"]').first();
-    const isStreaming = (await stopBtn.count()) && (await stopBtn.isVisible());
-    const isCreating = bodyText.includes('Creating image') || isStreaming;
+  console.log(`[Personal ChatGPT] Đang theo dõi tiến trình tạo ảnh (số tin nhắn assistant ban đầu: ${initialAssistantCount})...`);
 
-    if (isCreating) hasStarted = true;
+  while (Date.now() < deadline) {
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const stopBtn = page.locator('button[aria-label*="Stop" i], button[data-testid*="stop" i]').first();
+    const isStreaming = (await stopBtn.count().catch(() => 0)) && (await stopBtn.isVisible().catch(() => false));
+    const isCreating = bodyText.includes('Creating image') || bodyText.includes('Đang tạo ảnh') || bodyText.includes('Generating image') || isStreaming;
+
+    const currentAssistantCount = await page.locator('[data-message-author-role="assistant"]').count().catch(() => 0);
+    const hasNewAssistantMsg = currentAssistantCount > initialAssistantCount;
+
+    // Chỉ coi là đã bắt đầu khi:
+    // 1. Thấy trạng thái "Creating image" / isStreaming
+    // 2. HOẶC xuất hiện tin nhắn assistant mới phản hồi cho prompt này
+    if (isCreating || hasNewAssistantMsg) {
+      if (!hasStarted) {
+        hasStarted = true;
+        console.log(`[Personal ChatGPT] Đã phát hiện ChatGPT bắt đầu phản hồi/tạo ảnh (isCreating=${isCreating}, newAssistant=${hasNewAssistantMsg})...`);
+      }
+    }
 
     // Kiểm tra rate limit / hết token
     const limitCheck = await checkChatGptLimit(page);
@@ -834,54 +930,70 @@ async function waitForGeneratedImage(page, initialSrcs = new Set()) {
     const image1Btn = page.locator('button, [role="button"]').filter({
       hasText: /image\s*1\s*is\s*better/i,
     }).first();
-    if (await image1Btn.count() > 0) {
+    if (await image1Btn.count().catch(() => 0) > 0) {
       try {
         await image1Btn.click({ timeout: 2000 });
         console.log('Auto-selected Image 1.');
       } catch {}
     }
 
-    if (!isCreating) {
-      // 1. Tìm ảnh trong tin nhắn phản hồi của assistant
-      const assistantImgs = await page.locator('[data-message-author-role="assistant"] img').evaluateAll((imgs) =>
-        imgs
-          .map((img) => ({
-            src: img.currentSrc || img.src,
-            width: img.naturalWidth,
-            height: img.naturalHeight,
-          }))
-          .filter(({ src, width, height }) => src && width >= 256 && height >= 256 && !src.includes('avatar') && !src.includes('profile'))
-          .map(({ src }) => src),
-      );
+    // Khi ChatGPT đã bắt đầu VÀ không còn đang stream/tạo ảnh nữa
+    if (hasStarted && !isCreating && !isStreaming) {
+      // 1. ƯU TIÊN SỐ 1: Tìm ảnh nằm bên trong tin nhắn assistant MỚI NHẤT
+      if (hasNewAssistantMsg) {
+        const lastAssistant = page.locator('[data-message-author-role="assistant"]').last();
+        const assistantImgs = await lastAssistant.locator('img').evaluateAll((imgs) =>
+          imgs
+            .map((img) => ({
+              src: img.currentSrc || img.src,
+              width: img.naturalWidth,
+              height: img.naturalHeight,
+              complete: img.complete,
+            }))
+            .filter(({ src, width, height, complete }) => src && complete && width >= 256 && height >= 256 && !src.includes('avatar') && !src.includes('profile'))
+            .map(({ src }) => src),
+        ).catch(() => []);
+
+        // Lọc bỏ bất kỳ ảnh nào đã có từ trước
+        const validNewImgs = assistantImgs.filter((s) => !initialSrcs.has(s));
+        if (validNewImgs.length > 0) {
+          await delay(2000);
+          const lastSrc = validNewImgs.at(-1);
+          console.log(`[Personal ChatGPT] ✅ Đã lấy chính xác ảnh MỚI TẠO từ tin nhắn phản hồi: ${lastSrc.slice(0, 80)}...`);
+          return await downloadAsBase64(page, lastSrc);
+        }
+      }
 
       // 2. Tìm tất cả ảnh mới chưa từng có trên trang trước khi prompt
       const allSrcs = await imageSources(page);
       const newSrcs = allSrcs.filter((s) => !initialSrcs.has(s));
 
-      const candidateSrcs = [...new Set([...assistantImgs.filter((s) => !initialSrcs.has(s)), ...newSrcs])];
-
-      if (candidateSrcs.length > 0) {
-        const lastSrc = candidateSrcs.at(-1);
-        console.log(`[Personal ChatGPT] Đã lấy ảnh mới tạo: ${lastSrc.slice(0, 80)}...`);
+      if (newSrcs.length > 0) {
+        await delay(2000);
+        const lastSrc = newSrcs.at(-1);
+        console.log(`[Personal ChatGPT] ✅ Đã lấy ảnh mới tạo từ DOM (không trùng ảnh cũ): ${lastSrc.slice(0, 80)}...`);
         return await downloadAsBase64(page, lastSrc);
       }
 
-      // Fallback: tìm canvas lớn mới
+      // 3. Fallback: canvas lớn mới
       const canvasIndex = await page.locator('canvas').evaluateAll((canvases) => {
         const imageCanvases = canvases
           .map((canvas, index) => ({ index, width: canvas.width, height: canvas.height }))
           .filter(({ width, height }) => width >= 512 && height >= 512);
         return imageCanvases.length ? imageCanvases.at(-1).index : null;
-      });
+      }).catch(() => null);
       if (canvasIndex !== null) return await canvasAsBase64(page, canvasIndex);
 
-      if (hasStarted && !isCreating) {
-        await delay(5000);
-        const doubleCheckSrcs = (await imageSources(page)).filter((s) => !initialSrcs.has(s));
-        if (doubleCheckSrcs.length > 0) {
-          return await downloadAsBase64(page, doubleCheckSrcs.at(-1));
+      // Nếu đã chạy xong nhưng không có ảnh nào trong tin nhắn assistant mới
+      const elapsed = Date.now() - waitStartTime;
+      if (elapsed > 45000) {
+        if (hasNewAssistantMsg) {
+          const lastAssistantText = await page.locator('[data-message-author-role="assistant"]').last().innerText().catch(() => '');
+          if (lastAssistantText) {
+            throw new Error(`ChatGPT không tạo ảnh mà trả về văn bản: "${lastAssistantText.slice(0, 200)}"`);
+          }
         }
-        throw new Error('ChatGPT đã phản hồi xong nhưng không tạo ra ảnh mới (có thể bị chặn bởi bộ lọc nội dung).');
+        throw new Error('ChatGPT đã phản hồi xong nhưng không tạo ra ảnh mới cho chủ đề này.');
       }
     }
 
@@ -1098,7 +1210,7 @@ Respond ONLY with text in JSON format (no image, no markdown, no extra text):
   return { isValid: true, reason: 'Chưa xác định được lỗi chữ (mặc định cho qua)' };
 }
 
-const DEFAULT_DU_REFERENCE_URL = 'https://res.cloudinary.com/dbwahdjzg/image/upload/v1786351452/4022ffed-ef18-4faf-bf7e-156716aa5d4e.png';
+const DEFAULT_DU_REFERENCE_URL = 'https://res.cloudinary.com/dbwahdjzg/image/upload/v1789449519/nail_DU_hjqnmq.png';
 
 // 20 BACKGROUND NỔI BẬT ĐA DẠNG MÀU SẮC (Tím, Xanh nước biển, Lục bảo, Đỏ, Cyberpunk, 3D Luxury)
 const VIBRANT_BACKGROUNDS = [
@@ -1222,26 +1334,48 @@ function pickVariation(promptText = '', hasDu = true) {
   ].join('\n');
 }
 
-async function openChatGptPersonalPage(account, { newConversation = false } = {}) {
+async function openChatGptPersonalPage(account, { newConversation = true } = {}) {
   const cdpUrl = await ensureChromeForGpt(account);
   const browser = await chromium.connectOverCDP(cdpUrl);
   const context = browser.contexts()[0];
   if (!context) throw new Error('Chrome has no browser context');
 
-  let page;
-  if (newConversation) {
+  let page = context.pages().find((candidate) => candidate.url().includes('chatgpt.com'));
+  if (!page) {
     page = await context.newPage();
-    await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded' });
-    await delay(3000);
-  } else {
-    page = context.pages().find((candidate) => candidate.url().includes('chatgpt.com'));
-    if (!page) {
-      page = await context.newPage();
-      await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded' });
-      await delay(3000);
-    }
   }
+
+  console.log(`[Personal ChatGPT] Điều hướng về https://chatgpt.com/ và mở phiên chat mới sạch sẽ 100%...`);
   await page.bringToFront();
+  await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await delay(2000);
+
+  // Bấm nút "New chat" nếu đang có phiên chat cũ để xóa sạch DOM tin nhắn & ảnh cũ
+  const newChatSelectors = [
+    'a[data-testid="create-new-chat-button"]',
+    'button[data-testid="create-new-chat-button"]',
+    'a[href="/"]',
+    'button[aria-label*="New chat" i]',
+    'button[aria-label*="Đoạn chat mới" i]',
+    'button[aria-label*="Cuộc trò chuyện mới" i]',
+  ];
+  for (const selector of newChatSelectors) {
+    try {
+      const btn = page.locator(selector).first();
+      if (await btn.count() && await btn.isVisible()) {
+        await btn.click({ timeout: 2000 });
+        console.log(`[Personal ChatGPT] Đã bấm nút "New chat" để tạo phiên trò chuyện mới.`);
+        await delay(1500);
+        break;
+      }
+    } catch {}
+  }
+
+  if (page.url().includes('/c/')) {
+    await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await delay(2000);
+  }
+
   return { browser, page };
 }
 
@@ -1257,7 +1391,8 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       console.log(`[${account.name}] Bắt đầu tạo ảnh (Lần thử ${attempt}/${MAX_RETRIES})...`);
 
-      // Ghi nhận các ảnh đã có trước khi gửi prompt / đính kèm ảnh
+      // Ghi nhận số lượng tin nhắn assistant và các ảnh đã có trước khi gửi prompt
+      const initialAssistantCount = await page.locator('[data-message-author-role="assistant"]').count().catch(() => 0);
       const initialSrcs = new Set(await imageSources(page));
 
       // Upload ảnh tham chiếu Du (khi có yêu cầu con DU)
@@ -1310,10 +1445,11 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
       await input.press('Enter');
 
       console.log(`[${account.name}] Đã gửi prompt lần ${attempt}. Đang theo dõi quá trình tạo ảnh...`);
+      const promptSentAt = Date.now();
       await delay(5000);
 
       try {
-        const image = await waitForGeneratedImage(page, initialSrcs);
+        const image = await waitForGeneratedImage(page, initialSrcs, promptSentAt, initialAssistantCount);
 
         let textVerification = { isValid: true, reason: 'Chưa bật kiểm tra chữ' };
         if (checkText) {
