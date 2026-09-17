@@ -35,6 +35,18 @@ export interface ChannelSchedules {
   personal: ChannelScheduleItem;
 }
 
+export interface AutoTopicGenerationConfig {
+  enabled: boolean;
+  niche: string;
+  quantityPerRun: number;
+  targetSheet: string;
+  triggerMode: 'auto_refill' | 'scheduled';
+  minPendingThreshold: number;
+  scheduleTime: string;
+  lastGeneratedAt?: string | null;
+  lastGeneratedCount?: number;
+}
+
 export interface ScheduleConfig {
   enabled: boolean;
   aiProvider?: 'groq' | 'gemini';
@@ -54,6 +66,7 @@ export interface ScheduleConfig {
   aspectRatio: string;
   hasMascotDu: boolean;
   googleSheets?: GoogleSheetConfig;
+  autoTopicGeneration?: AutoTopicGenerationConfig;
   topics: string[];
   companyInfo?: {
     name: string;
@@ -108,6 +121,17 @@ const DEFAULT_CONFIG: ScheduleConfig = {
     spreadsheetId: '1tx_RHyRfBgGuYTvO3Tr_08Hrp6SelIsfN9hTQaT3jUY',
     sheetName: 'topics',
     autoUpdateStatus: true,
+  },
+  autoTopicGeneration: {
+    enabled: true,
+    niche: 'Thiết kế Website chuẩn SEO, Chuyển đổi số & AI Marketing doanh nghiệp',
+    quantityPerRun: 5,
+    targetSheet: 'topics',
+    triggerMode: 'auto_refill',
+    minPendingThreshold: 3,
+    scheduleTime: '07:00',
+    lastGeneratedAt: null,
+    lastGeneratedCount: 0,
   },
   topics: [
     'Xây dựng hệ thống CRM quản lý khách hàng thông minh cho doanh nghiệp',
@@ -298,6 +322,31 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, result });
     }
 
+    // 1.2 Tự động tìm kiếm chủ đề và nạp trực tiếp vào Google Sheet
+    if (action === 'generate-topics') {
+      const { niche, count = 5, sheetName = 'topics', customPrompt } = body;
+      const { botServer: bPortTopics } = getServerPorts();
+      const isBotRunning = await isPortOpen(bPortTopics, 500);
+
+      if (isBotRunning) {
+        try {
+          const genRes = await fetch(`http://127.0.0.1:${bPortTopics}/generate-topics`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ niche, count, sheetName, customPrompt }),
+          });
+          const genData = await genRes.json();
+          return NextResponse.json(genData);
+        } catch {}
+      }
+
+      const autoPilotPath = path.join(BRIDGE_DIR, 'lib', 'auto-pilot.mjs');
+      const autoPilotUrl = new URL(`file://${autoPilotPath.replace(/\\/g, '/')}`).href;
+      const { autoDiscoverAndAppendTopics } = await import(/* webpackIgnore: true */ autoPilotUrl);
+      const result = await autoDiscoverAndAppendTopics({ niche, count, sheetName, customPrompt });
+      return NextResponse.json({ ok: true, result });
+    }
+
     // 2. Lấy thông tin & Đồng bộ Google Sheets
     if (action === 'sheets-info') {
       const { spreadsheetId, sheetName } = body;
@@ -393,6 +442,7 @@ export async function POST(req: Request) {
       ...(body.aspectRatio ? { aspectRatio: body.aspectRatio } : {}),
       ...(body.hasMascotDu !== undefined ? { hasMascotDu: Boolean(body.hasMascotDu) } : {}),
       ...(body.googleSheets ? { googleSheets: { ...currentConfig.googleSheets, ...body.googleSheets } } : {}),
+      ...(body.autoTopicGeneration ? { autoTopicGeneration: { ...currentConfig.autoTopicGeneration, ...body.autoTopicGeneration } } : {}),
       ...(Array.isArray(body.topics) ? { topics: body.topics } : {}),
       ...(body.companyInfo ? { companyInfo: { ...currentConfig.companyInfo, ...body.companyInfo } } : {}),
     };

@@ -6,7 +6,8 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { runAutoPilotCycle, loadScheduleConfig, executeSingleNode, getAutoPilotProgress } from './lib/auto-pilot.mjs';
+import { runAutoPilotCycle, loadScheduleConfig, executeSingleNode, getAutoPilotProgress, autoDiscoverAndAppendTopics } from './lib/auto-pilot.mjs';
+import { getSheetTopicsOverview } from './lib/google-sheets.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1203,6 +1204,94 @@ app.post('/execute-node', async (req, res) => {
   }
 });
 
+// Endpoint tự động tìm kiếm và nạp chủ đề mới vào Google Sheet
+app.post('/generate-topics', async (req, res) => {
+  const { niche, count = 5, sheetName = 'topics', customPrompt } = req.body || {};
+  try {
+    const result = await autoDiscoverAndAppendTopics({ niche, count, sheetName, customPrompt });
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// TỰ ĐỘNG BỔ SUNG CHỦ ĐỀ VÀO GOOGLE SHEET (AUTO REFILL / SCHEDULE)
+// -------------------------------------------------------------
+let isTopicGenerating = false;
+let lastTopicCheckSlot = '';
+let lastTopicGenDate = '';
+
+async function checkAutoTopicRefillSchedule() {
+  try {
+    const scheduleConfig = loadScheduleConfig();
+    const autoGen = scheduleConfig.autoTopicGeneration;
+    if (!autoGen?.enabled) return;
+
+    const sid = scheduleConfig.googleSheets?.spreadsheetId;
+    if (!sid) return;
+
+    const now = new Date();
+    const vnTimeStr = now.toLocaleTimeString('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' });
+    const todayDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+    const targetSheet = autoGen.targetSheet || scheduleConfig.googleSheets?.sheetName || 'topics';
+    const triggerMode = autoGen.triggerMode || 'auto_refill';
+
+    let shouldGenerate = false;
+    let reason = '';
+
+    if (triggerMode === 'auto_refill') {
+      const checkSlot = `${todayDateStr}_${vnTimeStr.slice(0, 4)}0`;
+      if (lastTopicCheckSlot !== checkSlot) {
+        lastTopicCheckSlot = checkSlot;
+        const overview = await getSheetTopicsOverview(sid, targetSheet);
+        const minPending = autoGen.minPendingThreshold || 3;
+        if (overview.pending <= minPending) {
+          shouldGenerate = true;
+          reason = `Số chủ đề chờ đăng (${overview.pending}) trong sheet [${targetSheet}] còn ít hơn ngưỡng tối thiểu (${minPending})`;
+        }
+      }
+    } else if (triggerMode === 'scheduled') {
+      const targetTime = autoGen.scheduleTime || '07:00';
+      const slotKey = `${todayDateStr}_${targetTime}`;
+      if (vnTimeStr === targetTime && lastTopicGenDate !== slotKey) {
+        lastTopicGenDate = slotKey;
+        shouldGenerate = true;
+        reason = `Đến khung giờ tự động nạp chủ đề hàng ngày (${targetTime})`;
+      }
+    }
+
+    if (shouldGenerate && !isTopicGenerating) {
+      isTopicGenerating = true;
+      console.log(`[AutoTopicGen] 🤖 Bắt đầu tự động tìm kiếm & nạp chủ đề: ${reason}`);
+      try {
+        const count = autoGen.quantityPerRun || 5;
+        const result = await autoDiscoverAndAppendTopics({
+          niche: autoGen.niche,
+          count,
+          sheetName: targetSheet,
+        });
+        console.log(`[AutoTopicGen] ✅ Đã nạp thành công ${result.count} chủ đề mới vào Google Sheet [${targetSheet}]!`);
+        if (botConfig.botToken && botConfig.chatId) {
+          await sendTelegramMessage(
+            `🤖 <b>TỰ ĐỘNG BỔ SUNG CHỦ ĐỀ VÀO GOOGLE SHEET</b>\n\n` +
+            `📋 <b>Lý do:</b> ${reason}\n` +
+            `📊 <b>Số lượng nạp:</b> ${result.count} bài vào sheet <code>${targetSheet}</code>\n` +
+            `💡 <b>Chủ đề mẫu:</b>\n- <i>${result.topics?.[0]?.topic || ''}</i>\n\n` +
+            `⏰ <i>Hệ thống sẽ tự động viết bài và đăng theo lịch đã cài đặt!</i>`
+          );
+        }
+      } catch (genErr) {
+        console.error('[AutoTopicGen Error]', genErr.message);
+      } finally {
+        isTopicGenerating = false;
+      }
+    }
+  } catch (err) {
+    console.error('[AutoTopicGen Check Error]', err.message);
+  }
+}
+
 // -------------------------------------------------------------
 // KHỞI ĐỘNG SERVER & TIMERS
 // -------------------------------------------------------------
@@ -1221,4 +1310,8 @@ app.listen(PORT, '127.0.0.1', () => {
 
   // Kiểm tra Lịch trình Auto-Pilot mỗi 30s
   setInterval(checkAutoPilotSchedule, 30000);
+
+  // Kiểm tra Bổ sung chủ đề tự động vào Google Sheet mỗi 30s
+  setInterval(checkAutoTopicRefillSchedule, 30000);
 });
+
