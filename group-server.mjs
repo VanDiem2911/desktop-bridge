@@ -74,6 +74,87 @@ function saveConfig(config) {
   }
 }
 
+/**
+ * Quản lý Chiến thuật 3 Nhóm:
+ * - Nhóm 1 (group_1): Đội đăng bài hôm nay
+ * - Nhóm 2 (group_2): Đội dự phòng luân phiên (sẽ chạy ngày mai)
+ * - Nhóm 3 (quarantine): Khu cách ly 7 ngày (168 giờ)
+ */
+function resolveRotationAndQuarantine(config) {
+  if (!config) return config;
+  if (!Array.isArray(config.accounts)) config.accounts = [];
+
+  if (!config.rotation) {
+    config.rotation = {
+      enabled: true,
+      mode: 'daily_alternate',
+      activeGroupToday: 'group_1',
+      lastRotatedDate: '',
+      quarantineDays: 7,
+    };
+  }
+
+  let isDirty = false;
+  const now = Date.now();
+
+  // 1. Kiểm tra và tự động giải phóng tài khoản trong Nhóm 3 (Quarantine) sau 7 ngày
+  for (const acc of config.accounts) {
+    // Migration: nếu chưa có roleGroup thì gán theo id
+    if (!acc.roleGroup) {
+      acc.roleGroup = acc.id === 'acc_2' ? 'group_2' : 'group_1';
+      acc.originalRoleGroup = acc.roleGroup;
+      isDirty = true;
+    }
+
+    if (acc.roleGroup === 'quarantine' || acc.quarantineUntil || acc.cooldownUntil) {
+      const qUntilTime = new Date(acc.quarantineUntil || acc.cooldownUntil).getTime();
+      if (now >= qUntilTime) {
+        const restoredRole = acc.originalRoleGroup || (acc.id === 'acc_2' ? 'group_2' : 'group_1');
+        console.log(`\n======================================================`);
+        console.log(`🎉🎉🎉 [CÁCH LY HOÀN TẤT] TÀI KHOẢN "${acc.name}" ĐÃ HẾT 7 NGÀY CÁCH LY AN TOÀN!`);
+        console.log(`👉 Đã tự động phục hồi về ${restoredRole === 'group_1' ? 'Nhóm 1 (Đội đăng bài)' : 'Nhóm 2 (Đội dự phòng)'}.`);
+        console.log(`======================================================\n`);
+
+        acc.roleGroup = restoredRole;
+        acc.status = 'active';
+        acc.enabled = true;
+        delete acc.quarantineUntil;
+        delete acc.quarantineReason;
+        delete acc.quarantineAt;
+        delete acc.cooldownUntil;
+        delete acc.disabledReason;
+        delete acc.disabledAt;
+        isDirty = true;
+      }
+    }
+  }
+
+  // 2. Kiểm tra luân phiên ngày (Daily Alternation giữa Nhóm 1 và Nhóm 2)
+  if (config.rotation.enabled !== false && config.rotation.mode !== 'manual') {
+    const vnDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }); // YYYY-MM-DD
+    const lastDate = config.rotation.lastRotatedDate || '';
+
+    if (lastDate !== vnDateStr) {
+      const todayDay = parseInt(vnDateStr.split('-')[2], 10) || 1;
+      const nextActive = (todayDay % 2 === 1) ? 'group_1' : 'group_2';
+
+      if (config.rotation.activeGroupToday !== nextActive || !config.rotation.lastRotatedDate) {
+        console.log(`[Group Server] 📅 Sang ngày mới (${vnDateStr})!`);
+        console.log(`[Group Server] 🔄 Luân phiên phiên đăng bài: [${nextActive === 'group_1' ? '🟢 Nhóm 1 (Đội chính)' : '🟡 Nhóm 2 (Đội dự phòng)'}] đăng hôm nay.`);
+        config.rotation.activeGroupToday = nextActive;
+      }
+      config.rotation.lastRotatedDate = vnDateStr;
+      isDirty = true;
+    }
+  }
+
+  if (isDirty) {
+    saveConfig(config);
+  }
+
+  return config;
+}
+
 function getChromeExecutable() {
   const candidates = [
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -191,6 +272,30 @@ function stripMarkdown(text) {
     .trim();
 }
 
+function stripCompanyFooter(caption) {
+  if (!caption || typeof caption !== 'string') return '';
+  const lines = caption.split('\n');
+  const filtered = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const isCompany = /dudi\s+software/i.test(line);
+    const isAddress = /nguy[eễ]n th[iị] minh khai|đường 14|phường xuân hòa|phường thủ đức/i.test(line);
+    const isMst = /mst\s*[:：]|mã số thuế|0318776997/i.test(line);
+    const isWeb = /dudisoftware\.com/i.test(line);
+    const isEmail = /contact@dudisoftware\.com/i.test(line);
+    const isHotline = /(?:hotline|zalo)\s*[:：].*0909\s*163\s*821/i.test(line);
+
+    if (isCompany || isAddress || isMst || isWeb || isEmail || isHotline) {
+      continue;
+    }
+    filtered.push(lines[i]);
+  }
+  while (filtered.length > 0 && !filtered[filtered.length - 1].trim()) {
+    filtered.pop();
+  }
+  return filtered.join('\n').trim();
+}
+
 function cleanCaption(value) {
   let result = '';
   if (value && typeof value === 'object') {
@@ -241,7 +346,7 @@ function cleanCaption(value) {
     }
   }
 
-  return stripMarkdown(result);
+  return stripCompanyFooter(stripMarkdown(result));
 }
 
 async function firstVisible(page, selectors, timeout = 15000) {
@@ -859,30 +964,44 @@ async function executeGroupPosting(body) {
     finalImageBase64 = finalImageBase64.split('base64,')[1];
   }
 
-  const config = loadConfig();
+  const rawConfig = loadConfig();
+  const config = resolveRotationAndQuarantine(rawConfig);
   const now = Date.now();
+  const activeGroupToday = config.rotation?.activeGroupToday || 'group_1';
+  const rotationEnabled = config.rotation?.enabled !== false;
+
+  console.log(`[Group Server] 🛡️ [HỆ THỐNG 3 NHÓM LÁCH BAN FACEBOOK]`);
+  console.log(`[Group Server] 👉 Phiên đăng hôm nay: [${activeGroupToday === 'group_1' ? '🟢 NHÓM 1 (Đội chính)' : '🟡 NHÓM 2 (Đội dự phòng)'}]`);
+  console.log(`[Group Server] 👉 Chế độ luân phiên: ${rotationEnabled ? 'Tự động luân phiên mỗi ngày' : 'Thủ công'}`);
 
   let accountsToRun = (config.accounts || []).filter(acc => {
-    if (acc.enabled === false) return false;
-    if (acc.cooldownUntil) {
-      const cdTime = new Date(acc.cooldownUntil).getTime();
-      if (cdTime > now) {
-        const remainHours = Math.ceil((cdTime - now) / (60 * 60 * 1000));
-        const remainMins = Math.ceil((cdTime - now) / (60 * 1000));
-        const timeText = remainHours > 1 ? `${remainHours} giờ` : `${remainMins} phút`;
-        console.log(`[Group Server] ⏳ Tài khoản "${acc.name}" đang trong thời gian nghỉ ngơi 48h để nhả phạt (còn ~${timeText}, đến ${new Date(acc.cooldownUntil).toLocaleString('vi-VN')}). Tự động bỏ qua.`);
+    // 1. Kiểm tra tài khoản bị tắt thủ công
+    if (acc.enabled === false && acc.roleGroup !== 'quarantine') {
+      console.log(`[Group Server] ⚪ Tài khoản "${acc.name}" đang bị tắt trên Dashboard. Bỏ qua.`);
+      return false;
+    }
+
+    // 2. KIỂM TRA NHÓM 3 (KHU CÁCH LY 7 NGÀY)
+    if (acc.roleGroup === 'quarantine' || (acc.quarantineUntil && new Date(acc.quarantineUntil).getTime() > now)) {
+      const qTime = new Date(acc.quarantineUntil || acc.cooldownUntil).getTime();
+      const remainMs = Math.max(0, qTime - now);
+      const remainDays = Math.floor(remainMs / (24 * 3600 * 1000));
+      const remainHours = Math.ceil((remainMs % (24 * 3600 * 1000)) / (3600 * 1000));
+      const timeStr = remainDays > 0 ? `${remainDays} ngày ${remainHours} giờ` : `${remainHours} giờ`;
+      console.log(`[Group Server] 🔴 Tài khoản "${acc.name}" ĐANG TRONG KHU CÁCH LY 7 NGÀY (Nhóm 3). Còn ~${timeStr} (đến ${new Date(qTime).toLocaleString('vi-VN')}). TUYỆT ĐỐI BỎ QUA để bảo vệ an toàn nick!`);
+      return false;
+    }
+
+    // 3. KIỂM TRA LUÂN PHIÊN NHÓM 1 & NHÓM 2
+    if (rotationEnabled && !targetAccounts) {
+      const accRole = acc.roleGroup || 'group_1';
+      if (accRole !== activeGroupToday) {
+        console.log(`[Group Server] 🛌 Tài khoản "${acc.name}" thuộc [${accRole === 'group_2' ? '🟡 Nhóm 2 (Dự phòng)' : '🟢 Nhóm 1'}] - Đang nghỉ ngơi hôm nay để giữ an toàn nick. Phiên hôm nay là của [${activeGroupToday === 'group_1' ? '🟢 Nhóm 1' : '🟡 Nhóm 2'}].`);
         return false;
-      } else {
-        // Đã qua 48h nghỉ ngơi an toàn! Tự động xóa cooldown
-        delete acc.cooldownUntil;
-        acc.status = 'active';
-        delete acc.disabledReason;
-        saveConfig(config);
-        console.log(`[Group Server] 🎉 Tài khoản "${acc.name}" đã hoàn thành 48h nghỉ ngơi an toàn! Tự động kích hoạt lại.`);
-        return true;
       }
     }
-    return true;
+
+    return acc.enabled !== false;
   });
 
   if (targetAccounts) {
@@ -897,7 +1016,7 @@ async function executeGroupPosting(body) {
   }
 
   if (accountsToRun.length === 0) {
-    throw new Error('Không có tài khoản nào được bật (enabled: true) trong groups-config.json. Hãy bật tài khoản trên Dashboard!');
+    throw new Error(`Không có tài khoản nào thuộc [${activeGroupToday === 'group_1' ? 'Nhóm 1' : 'Nhóm 2'}] sẵn sàng để đăng bài hôm nay (có thể các nick đang trong Khu cách ly 7 ngày hoặc bị tắt). Hãy kiểm tra lại trên Dashboard!`);
   }
 
   const results = [];
@@ -961,29 +1080,48 @@ async function executeGroupPosting(body) {
       // KIỂM TRA NGAY NẾU TÀI KHOẢN ĐANG DÍNH CHECKPOINT HOẶC CẢNH BÁO TRƯỚC KHI BẮT ĐẦU
       const preCheckWarning = await detectFacebookWarningOrBlock(page);
       if (preCheckWarning) {
-        const cooldownDate = new Date(Date.now() + 48 * 60 * 60 * 1000);
-        const cooldownUntil = cooldownDate.toISOString();
-        const cooldownText = cooldownDate.toLocaleString('vi-VN');
+        const quarantineDays = config.rotation?.quarantineDays || 7;
+        const quarantineDate = new Date(Date.now() + quarantineDays * 24 * 60 * 60 * 1000);
+        const quarantineUntil = quarantineDate.toISOString();
+        const quarantineText = quarantineDate.toLocaleString('vi-VN');
 
-        console.error(`\n🚨🚨🚨 [TỰ ĐỘNG CHO NGHỈ 48H] Tài khoản "${account.name}" đang bị checkpoint/khóa: ${preCheckWarning}`);
-        console.error(`⏳ Tự động cho nghỉ 48 tiếng (đến ${cooldownText}) để Facebook nhả phạt an toàn.`);
+        console.error(`\n======================================================`);
+        console.error(`🚨🚨🚨 [CẢNH BÁO FACEBOOK] Tài khoản "${account.name}" bị checkpoint/khóa!`);
+        console.error(`👉 Chi tiết: ${preCheckWarning}`);
+        console.error(`👉 HÀNH ĐỘNG BẢO VỆ: CHUYỂN VÀO NHÓM 3 (CÁCH LY 7 NGÀY ĐẾN ${quarantineText})!`);
+        console.error(`👉 Đóng băng toàn bộ hoạt động trong 168 giờ để nhả phạt Facebook an toàn.`);
+        console.error(`======================================================\n`);
 
         const targetAccInConfig = (config.accounts || []).find(a => String(a.id) === String(account.id));
         if (targetAccInConfig) {
+          if (targetAccInConfig.roleGroup !== 'quarantine') {
+            targetAccInConfig.originalRoleGroup = targetAccInConfig.roleGroup || 'group_1';
+          }
+          targetAccInConfig.roleGroup = 'quarantine';
           targetAccInConfig.enabled = false;
-          targetAccInConfig.cooldownUntil = cooldownUntil;
-          targetAccInConfig.status = 'cooldown_48h';
-          targetAccInConfig.disabledReason = `${preCheckWarning}. Cho nghỉ 48h đến ${cooldownText}`;
+          targetAccInConfig.quarantineUntil = quarantineUntil;
+          targetAccInConfig.quarantineReason = preCheckWarning;
+          targetAccInConfig.quarantineAt = new Date().toISOString();
+          targetAccInConfig.cooldownUntil = quarantineUntil;
+          targetAccInConfig.status = 'quarantined_7d';
+          targetAccInConfig.disabledReason = `Facebook cảnh báo: ${preCheckWarning}. Cách ly 7 ngày đến ${quarantineText}`;
           targetAccInConfig.disabledAt = new Date().toISOString();
         }
+        if (account.roleGroup !== 'quarantine') {
+          account.originalRoleGroup = account.roleGroup || 'group_1';
+        }
+        account.roleGroup = 'quarantine';
         account.enabled = false;
-        account.cooldownUntil = cooldownUntil;
-        account.status = 'cooldown_48h';
-        account.disabledReason = `${preCheckWarning}. Cho nghỉ 48h đến ${cooldownText}`;
+        account.quarantineUntil = quarantineUntil;
+        account.quarantineReason = preCheckWarning;
+        account.quarantineAt = new Date().toISOString();
+        account.cooldownUntil = quarantineUntil;
+        account.status = 'quarantined_7d';
+        account.disabledReason = `Facebook cảnh báo: ${preCheckWarning}. Cách ly 7 ngày đến ${quarantineText}`;
         account.disabledAt = new Date().toISOString();
         saveConfig(config);
 
-        accResult.accountError = `Đã tự động TẮT và cho nghỉ 48h (đến ${cooldownText}): ${preCheckWarning}`;
+        accResult.accountError = `Đã tự động CHUYỂN VÀO NHÓM 3 (Cách ly 7 ngày đến ${quarantineText}): ${preCheckWarning}`;
         logPostActivity({
           type: 'post',
           channel: 'groups',
@@ -992,7 +1130,7 @@ async function executeGroupPosting(body) {
           targetUrl: 'N/A',
           status: 'failed',
           caption: postCaption,
-          error: `[CHO NGHỈ 48H] ${preCheckWarning}`,
+          error: `[CÁCH LY 7 NGÀY] ${preCheckWarning}`,
           durationMs: 0,
         });
         results.push(accResult);
@@ -1040,34 +1178,49 @@ async function executeGroupPosting(body) {
           });
 
           if (isWarningBlocked) {
-            const cooldownDate = new Date(Date.now() + 48 * 60 * 60 * 1000);
-            const cooldownUntil = cooldownDate.toISOString();
-            const cooldownText = cooldownDate.toLocaleString('vi-VN');
+            const quarantineDays = config.rotation?.quarantineDays || 7;
+            const quarantineDate = new Date(Date.now() + quarantineDays * 24 * 60 * 60 * 1000);
+            const quarantineUntil = quarantineDate.toISOString();
+            const quarantineText = quarantineDate.toLocaleString('vi-VN');
 
             console.error(`\n======================================================`);
             console.error(`🚨🚨🚨 PHÁT HIỆN TÀI KHOẢN "${account.name}" BỊ FACEBOOK CẢNH BÁO! 🚨🚨🚨`);
             console.error(`👉 Chi tiết: ${groupError.message}`);
-            console.error(`👉 Hành động bảo vệ: TỰ ĐỘNG CHO NGHỈ ÍT NHẤT 48 TIẾNG (ĐẾN ${cooldownText})!`);
-            console.error(`👉 Cập nhật enabled = false và cooldownUntil vào groups-config.json`);
+            console.error(`👉 HÀNH ĐỘNG BẢO VỆ: CHUYỂN VÀO NHÓM 3 (CÁCH LY 7 NGÀY ĐẾN ${quarantineText})!`);
+            console.error(`👉 Tự động bảo lưu nhóm gốc, đóng băng nick trong 168 giờ để nhả phạt.`);
             console.error(`👉 DỪNG NGAY TẤT CẢ CÁC NHÓM CÒN LẠI ĐỂ TRÁNH BAY NICK!`);
             console.error(`======================================================\n`);
 
             const targetAccInConfig = (config.accounts || []).find(a => String(a.id) === String(account.id));
             if (targetAccInConfig) {
+              if (targetAccInConfig.roleGroup !== 'quarantine') {
+                targetAccInConfig.originalRoleGroup = targetAccInConfig.roleGroup || 'group_1';
+              }
+              targetAccInConfig.roleGroup = 'quarantine';
               targetAccInConfig.enabled = false;
-              targetAccInConfig.cooldownUntil = cooldownUntil;
-              targetAccInConfig.status = 'cooldown_48h';
-              targetAccInConfig.disabledReason = `Facebook cảnh báo: ${groupError.message}. Cho nghỉ 48h đến ${cooldownText}`;
+              targetAccInConfig.quarantineUntil = quarantineUntil;
+              targetAccInConfig.quarantineReason = groupError.message;
+              targetAccInConfig.quarantineAt = new Date().toISOString();
+              targetAccInConfig.cooldownUntil = quarantineUntil;
+              targetAccInConfig.status = 'quarantined_7d';
+              targetAccInConfig.disabledReason = `Facebook cảnh báo: ${groupError.message}. Cách ly 7 ngày đến ${quarantineText}`;
               targetAccInConfig.disabledAt = new Date().toISOString();
             }
+            if (account.roleGroup !== 'quarantine') {
+              account.originalRoleGroup = account.roleGroup || 'group_1';
+            }
+            account.roleGroup = 'quarantine';
             account.enabled = false;
-            account.cooldownUntil = cooldownUntil;
-            account.status = 'cooldown_48h';
-            account.disabledReason = `Facebook cảnh báo: ${groupError.message}. Cho nghỉ 48h đến ${cooldownText}`;
+            account.quarantineUntil = quarantineUntil;
+            account.quarantineReason = groupError.message;
+            account.quarantineAt = new Date().toISOString();
+            account.cooldownUntil = quarantineUntil;
+            account.status = 'quarantined_7d';
+            account.disabledReason = `Facebook cảnh báo: ${groupError.message}. Cách ly 7 ngày đến ${quarantineText}`;
             account.disabledAt = new Date().toISOString();
             saveConfig(config);
 
-            accResult.accountError = `Tài khoản đã TỰ ĐỘNG TẮT và cho nghỉ 48h để nhả phạt (đến ${cooldownText}): ${groupError.message}`;
+            accResult.accountError = `Tài khoản đã TỰ ĐỘNG CHUYỂN VÀO NHÓM 3 (Cách ly 7 ngày đến ${quarantineText}): ${groupError.message}`;
             break; // DỪNG TOÀN BỘ CÁC NHÓM TIẾP THEO CỦA NICK NÀY NGAY!
           }
         }
@@ -1671,6 +1824,105 @@ app.post('/post-groups', async (req, res) => {
   } finally {
     activeGroupJob = false;
   }
+});
+
+// Endpoint lấy thông tin 3 nhóm luân phiên & cách ly
+app.get('/rotation-status', (_req, res) => {
+  const rawConfig = loadConfig();
+  const config = resolveRotationAndQuarantine(rawConfig);
+
+  const group1 = (config.accounts || []).filter(a => (a.roleGroup || 'group_1') === 'group_1');
+  const group2 = (config.accounts || []).filter(a => a.roleGroup === 'group_2');
+  const quarantine = (config.accounts || []).filter(a => a.roleGroup === 'quarantine');
+
+  res.json({
+    ok: true,
+    rotation: config.rotation,
+    group1,
+    group2,
+    quarantine,
+  });
+});
+
+// Endpoint chuyển đổi nhóm đang đăng hôm nay (group_1 <-> group_2)
+app.post('/switch-active-group', (req, res) => {
+  const { targetGroup } = req.body || {};
+  const rawConfig = loadConfig();
+  const config = resolveRotationAndQuarantine(rawConfig);
+
+  if (!config.rotation) {
+    config.rotation = { enabled: true, mode: 'daily_alternate', activeGroupToday: 'group_1', quarantineDays: 7 };
+  }
+
+  const current = config.rotation.activeGroupToday || 'group_1';
+  const newActive = targetGroup === 'group_2' ? 'group_2' : (targetGroup === 'group_1' ? 'group_1' : (current === 'group_1' ? 'group_2' : 'group_1'));
+  config.rotation.activeGroupToday = newActive;
+  saveConfig(config);
+
+  console.log(`[Group Server] 🔄 Đã chuyển phiên đăng bài hôm nay thành: [${newActive === 'group_1' ? 'Nhóm 1' : 'Nhóm 2'}]`);
+  res.json({ ok: true, activeGroupToday: newActive, message: `Đã chuyển phiên đăng hôm nay sang ${newActive === 'group_1' ? 'Nhóm 1' : 'Nhóm 2'}` });
+});
+
+// Endpoint gán nhóm thủ công cho tài khoản (group_1 | group_2 | quarantine)
+app.post('/set-account-group', (req, res) => {
+  const { accountId, roleGroup } = req.body || {};
+  if (!accountId || !roleGroup || !['group_1', 'group_2', 'quarantine'].includes(roleGroup)) {
+    return res.status(400).json({ ok: false, error: 'accountId và roleGroup (group_1 | group_2 | quarantine) không hợp lệ' });
+  }
+
+  const rawConfig = loadConfig();
+  const config = resolveRotationAndQuarantine(rawConfig);
+  const acc = (config.accounts || []).find(a => String(a.id) === String(accountId));
+  if (!acc) return res.status(404).json({ ok: false, error: 'Không tìm thấy tài khoản' });
+
+  if (roleGroup === 'quarantine') {
+    const qDays = config.rotation?.quarantineDays || 7;
+    acc.originalRoleGroup = acc.roleGroup === 'quarantine' ? (acc.originalRoleGroup || 'group_1') : (acc.roleGroup || 'group_1');
+    acc.roleGroup = 'quarantine';
+    acc.quarantineUntil = new Date(Date.now() + qDays * 24 * 3600 * 1000).toISOString();
+    acc.quarantineReason = 'Chuyển vào khu cách ly thủ công từ Dashboard';
+    acc.quarantineAt = new Date().toISOString();
+    acc.cooldownUntil = acc.quarantineUntil;
+    acc.status = 'quarantined_7d';
+    acc.enabled = false;
+  } else {
+    acc.roleGroup = roleGroup;
+    acc.originalRoleGroup = roleGroup;
+    acc.status = 'active';
+    acc.enabled = true;
+    delete acc.quarantineUntil;
+    delete acc.quarantineReason;
+    delete acc.quarantineAt;
+    delete acc.cooldownUntil;
+    delete acc.disabledReason;
+    delete acc.disabledAt;
+  }
+
+  saveConfig(config);
+  res.json({ ok: true, account: acc, message: `Đã chuyển tài khoản "${acc.name}" vào ${roleGroup === 'group_1' ? 'Nhóm 1' : roleGroup === 'group_2' ? 'Nhóm 2' : 'Nhóm 3 (Cách ly 7 ngày)'}` });
+});
+
+// Endpoint mở khóa cách ly sớm
+app.post('/release-quarantine', (req, res) => {
+  const { accountId } = req.body || {};
+  const rawConfig = loadConfig();
+  const config = resolveRotationAndQuarantine(rawConfig);
+  const acc = (config.accounts || []).find(a => String(a.id) === String(accountId));
+  if (!acc) return res.status(404).json({ ok: false, error: 'Không tìm thấy tài khoản' });
+
+  const restored = acc.originalRoleGroup || (acc.id === 'acc_2' ? 'group_2' : 'group_1');
+  acc.roleGroup = restored;
+  acc.status = 'active';
+  acc.enabled = true;
+  delete acc.quarantineUntil;
+  delete acc.quarantineReason;
+  delete acc.quarantineAt;
+  delete acc.cooldownUntil;
+  delete acc.disabledReason;
+  delete acc.disabledAt;
+
+  saveConfig(config);
+  res.json({ ok: true, account: acc, message: `Đã mở khóa cách ly sớm cho tài khoản "${acc.name}". Đã phục hồi về ${restored === 'group_1' ? 'Nhóm 1' : 'Nhóm 2'}` });
 });
 
 app.listen(port, host, () => {

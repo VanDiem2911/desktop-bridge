@@ -10,6 +10,7 @@ import {
   CHATGPT_CONFIG_PATH,
   FANPAGE_CONFIG_PATH,
   checkChromeTabStatus,
+  fetchFacebookTitle,
 } from '@/lib/server-utils';
 
 interface FanpageAccount {
@@ -180,12 +181,6 @@ export async function GET() {
         description: 'Các Profile Chrome riêng biệt để xoay vòng đăng bài nhóm',
         items: groupItems,
       },
-      {
-        category: 'personal',
-        categoryName: `👤 Facebook Cá nhân (${personalItems.length} Tài khoản Cá nhân)`,
-        description: 'Profile Chrome chuyên dụng để xuất bản bài viết lên Facebook cá nhân',
-        items: personalItems,
-      },
     ];
 
     // Kiểm tra trạng thái port online & trạng thái tab login qua CDP song song
@@ -285,14 +280,23 @@ export async function POST(req: NextRequest) {
     if (action === 'add_fanpage') {
       const config = getFanpageConfig();
       const nextId = config.accounts.length > 0 ? Math.max(...config.accounts.map(a => Number(a.id) || 0)) + 1 : 1;
+      let finalName = name?.trim();
+      const cleanUrl = pageUrl?.trim() || 'https://www.facebook.com/';
+      if (!finalName && cleanUrl && cleanUrl !== 'https://www.facebook.com/') {
+        finalName = await fetchFacebookTitle(cleanUrl);
+      }
+      if (!finalName) {
+        finalName = `Facebook Fanpage ${nextId}`;
+      }
+
       const newAcc: FanpageAccount = {
         id: nextId,
-        name: name?.trim() || `Facebook Fanpage ${nextId}`,
-        pageUrl: pageUrl?.trim() || 'https://www.facebook.com/',
+        name: finalName,
+        pageUrl: cleanUrl,
         profileDir: profileDir?.trim() || (nextId === 1 ? 'n8n-chatgpt-profile' : `n8n-fanpage-profile-${nextId}`),
         port: port ? Number(port) : (nextId === 1 ? 9222 : 9250 + nextId),
         enabled: enabled !== false,
-        desc: description?.trim() || `Fanpage: ${pageUrl || 'Chưa đặt link'} (Port ${port || (nextId === 1 ? 9222 : 9250 + nextId)})`,
+        desc: description?.trim() || `Fanpage: ${cleanUrl} (Port ${port || (nextId === 1 ? 9222 : 9250 + nextId)})`,
       };
       config.accounts.push(newAcc);
       writeJsonFile(FANPAGE_CONFIG_PATH, config);
@@ -340,14 +344,23 @@ export async function POST(req: NextRequest) {
     if (action === 'add_personal') {
       const config = readJsonFile<{ activeAccount?: number; accounts: Array<{ id: number; name: string; profileUrl: string; profileDir: string; port: number; enabled?: boolean; description?: string }> }>(PERSONAL_CONFIG_PATH, { accounts: [] });
       const nextId = config.accounts.length > 0 ? Math.max(...config.accounts.map(a => Number(a.id) || 0)) + 1 : 1;
+      let finalName = name?.trim();
+      const cleanUrl = (profileUrl || pageUrl)?.trim() || 'https://www.facebook.com/';
+      if (!finalName && cleanUrl && cleanUrl !== 'https://www.facebook.com/') {
+        finalName = await fetchFacebookTitle(cleanUrl);
+      }
+      if (!finalName) {
+        finalName = `Facebook Cá nhân ${nextId}`;
+      }
+
       const newAcc = {
         id: nextId,
-        name: name?.trim() || `Facebook Cá nhân ${nextId}`,
-        profileUrl: (profileUrl || pageUrl)?.trim() || 'https://www.facebook.com/',
+        name: finalName,
+        profileUrl: cleanUrl,
         profileDir: profileDir?.trim() || `n8n-personal-profile-${nextId}`,
         port: port ? Number(port) : (9230 + nextId - 1),
         enabled: enabled !== false,
-        description: description?.trim() || `Trang cá nhân: ${(profileUrl || pageUrl) || 'Chưa đặt link'} (Port ${port || (9230 + nextId - 1)})`,
+        description: description?.trim() || `Trang cá nhân: ${cleanUrl} (Port ${port || (9230 + nextId - 1)})`,
       };
       config.accounts.push(newAcc);
       writeJsonFile(PERSONAL_CONFIG_PATH, config);

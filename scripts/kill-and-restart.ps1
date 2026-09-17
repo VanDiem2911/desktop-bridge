@@ -1,12 +1,11 @@
 # kill-and-restart.ps1
-# Dung va khoi dong lai toan bo 5 Server (Next.js 3000, Fanpage 3001, Groups 3002, Personal 3003, Bot 3004)
+# Dung va khoi dong lai 4 Server (Next.js 3000, Fanpage 3001, Groups 3002, Bot 3004)
 
 $servers = @(
-    @{ Port = 3000; File = 'server.mjs';          Name = 'Next.js Control Center Dashboard' },
-    @{ Port = 3001; File = 'server.mjs';          Name = 'Server 1 (Fanpage & ChatGPT Xen Ke)' },
-    @{ Port = 3002; File = 'group-server.mjs';    Name = 'Server 2 (Facebook Groups)' },
-    @{ Port = 3003; File = 'personal-server.mjs'; Name = 'Server 3 (Facebook Ca Nhan & ChatGPT)' },
-    @{ Port = 3004; File = 'bot-server.mjs';      Name = 'Server 4 (Telegram Bot & Remote Watchdog)' }
+    @{ Port = 3000; File = 'server.mjs';       Name = 'Next.js Control Center Dashboard' },
+    @{ Port = 3001; File = 'server.mjs';       Name = 'Server 1 (Fanpage & ChatGPT Xen Ke)' },
+    @{ Port = 3002; File = 'group-server.mjs'; Name = 'Server 2 (Facebook Groups)' },
+    @{ Port = 3004; File = 'bot-server.mjs';   Name = 'Server 3 (Telegram Bot & Remote Watchdog)' }
 )
 
 Write-Host "=================================================" -ForegroundColor Cyan

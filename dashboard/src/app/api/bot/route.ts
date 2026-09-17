@@ -5,6 +5,7 @@ import {
   readJsonFile,
   writeJsonFile,
   isPortOpen,
+  getServerPorts,
 } from '@/lib/server-utils';
 
 export async function GET() {
@@ -22,7 +23,8 @@ export async function GET() {
       checkIntervalSeconds: 30,
     });
 
-    const isBotRunning = await isPortOpen(3004, 600);
+    const { botServer } = getServerPorts();
+    const isBotRunning = await isPortOpen(botServer, 600);
 
     let botInfo: { username?: string; firstName?: string } | null = null;
     if (config.botToken?.trim()) {
@@ -74,9 +76,10 @@ export async function POST(req: Request) {
       };
       writeJsonFile(BOT_CONFIG_PATH, updated);
 
-      // Nếu bot server 3004 đang chạy, báo cho bot reload config
+      // Nếu bot server đang chạy, báo cho bot reload config
       try {
-        await fetch('http://127.0.0.1:3004/reload-config', { method: 'POST' }).catch(() => {});
+        const { botServer: bp } = getServerPorts();
+        await fetch(`http://127.0.0.1:${bp}/reload-config`, { method: 'POST' }).catch(() => {});
       } catch {}
 
       return NextResponse.json({
@@ -144,11 +147,13 @@ export async function POST(req: Request) {
 
     if (action === 'trigger_digest') {
       try {
-        const res = await fetch('http://127.0.0.1:3004/trigger-digest', { method: 'POST' });
+        const { botServer: bp2 } = getServerPorts();
+        const res = await fetch(`http://127.0.0.1:${bp2}/trigger-digest`, { method: 'POST' });
         const data = await res.json();
         return NextResponse.json(data);
       } catch {
-        return NextResponse.json({ ok: false, error: 'Bot Service (port 3004) chưa chạy hoặc không phản hồi' }, { status: 500 });
+        const { botServer: bp3 } = getServerPorts();
+        return NextResponse.json({ ok: false, error: `Bot Service (port ${bp3}) chưa chạy hoặc không phản hồi` }, { status: 500 });
       }
     }
 

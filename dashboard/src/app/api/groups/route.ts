@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readJsonFile, writeJsonFile, GROUPS_CONFIG_PATH, POST_HISTORY_PATH } from '@/lib/server-utils';
+import { readJsonFile, writeJsonFile, GROUPS_CONFIG_PATH, POST_HISTORY_PATH, fetchFacebookTitle } from '@/lib/server-utils';
 
 export interface CentralPoolItem {
   id: string;
@@ -15,10 +15,28 @@ export interface CentralPoolItem {
   lastPostedAt?: string | null;
 }
 
+export interface RotationConfig {
+  enabled: boolean;
+  mode: 'daily_alternate' | 'manual';
+  activeGroupToday: 'group_1' | 'group_2';
+  lastRotatedDate?: string;
+  quarantineDays?: number;
+}
+
 export interface GroupAccountItem {
   id: string;
   name: string;
+  profileUrl?: string;
   enabled?: boolean;
+  status?: string;
+  roleGroup?: 'group_1' | 'group_2' | 'quarantine';
+  originalRoleGroup?: 'group_1' | 'group_2';
+  quarantineUntil?: string | null;
+  quarantineReason?: string | null;
+  quarantineAt?: string | null;
+  cooldownUntil?: string | null;
+  disabledReason?: string | null;
+  disabledAt?: string | null;
   profileDir?: string;
   groupUrls?: string[];
   lastGroupIndex?: number;
@@ -28,6 +46,7 @@ export interface GroupAccountItem {
 export interface GroupsConfig {
   accounts: GroupAccountItem[];
   centralPool?: CentralPoolItem[];
+  rotation?: RotationConfig;
 }
 
 interface PostHistoryEntry {
@@ -102,6 +121,56 @@ function syncAndEnrichConfig(config: GroupsConfig): { config: GroupsConfig; pool
   if (!Array.isArray(config.centralPool)) config.centralPool = [];
 
   let isDirty = false;
+
+  // Khởi tạo hoặc chuẩn hóa cấu hình Luân phiên 3 Nhóm
+  if (!config.rotation) {
+    config.rotation = {
+      enabled: true,
+      mode: 'daily_alternate',
+      activeGroupToday: 'group_1',
+      lastRotatedDate: '',
+      quarantineDays: 7,
+    };
+    isDirty = true;
+  }
+
+  // Tự động kiểm tra luân phiên ngày (Daily Alternation)
+  if (config.rotation.enabled !== false && config.rotation.mode !== 'manual') {
+    const vnDateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+    if (config.rotation.lastRotatedDate !== vnDateStr) {
+      const todayDay = parseInt(vnDateStr.split('-')[2], 10) || 1;
+      config.rotation.activeGroupToday = (todayDay % 2 === 1) ? 'group_1' : 'group_2';
+      config.rotation.lastRotatedDate = vnDateStr;
+      isDirty = true;
+    }
+  }
+
+  const now = Date.now();
+  for (const acc of config.accounts) {
+    if (!acc.roleGroup) {
+      acc.roleGroup = acc.id === 'acc_2' ? 'group_2' : 'group_1';
+      acc.originalRoleGroup = acc.roleGroup;
+      isDirty = true;
+    }
+
+    // Tự động giải phóng nick khỏi Nhóm 3 (Quarantine) nếu đã hết 7 ngày
+    if (acc.roleGroup === 'quarantine' || acc.quarantineUntil || acc.cooldownUntil) {
+      const qTime = new Date(acc.quarantineUntil || acc.cooldownUntil || '').getTime();
+      if (qTime && now >= qTime) {
+        acc.roleGroup = acc.originalRoleGroup || (acc.id === 'acc_2' ? 'group_2' : 'group_1');
+        acc.status = 'active';
+        acc.enabled = true;
+        acc.quarantineUntil = null;
+        acc.quarantineReason = null;
+        acc.quarantineAt = null;
+        acc.cooldownUntil = null;
+        acc.disabledReason = null;
+        acc.disabledAt = null;
+        isDirty = true;
+      }
+    }
+  }
+
   const historyMap = getLatestHistoryMap();
   const accountMap = new Map(config.accounts.map((a) => [a.id, a.name]));
 
@@ -557,12 +626,22 @@ export async function POST(req: NextRequest) {
     // 5. CÁC ACTION QUẢN LÝ TÀI KHOẢN CŨ (GIỮ NGUYÊN & ĐỒNG BỘ)
     // ==========================================
     if (action === 'add_account') {
-      const { name, profileDir, groupUrls = [], enabled = true } = body;
+      const { name, profileUrl, profileDir, groupUrls = [], enabled = true } = body;
       const nextIndex = config.accounts.length + 1;
       const id = `acc_${nextIndex}`;
+      let finalName = name?.trim();
+      const cleanProfileUrl = profileUrl?.trim();
+      if (!finalName && cleanProfileUrl && cleanProfileUrl.includes('facebook.com')) {
+        finalName = await fetchFacebookTitle(cleanProfileUrl);
+      }
+      if (!finalName) {
+        finalName = `Tài khoản ${nextIndex}`;
+      }
+
       const newAcc: GroupAccountItem = {
         id,
-        name: name?.trim() || `Tài khoản ${nextIndex}`,
+        name: finalName,
+        profileUrl: cleanProfileUrl || undefined,
         enabled: enabled !== false,
         profileDir: profileDir?.trim() || `n8n-fb-group-profile-${nextIndex}`,
         groupUrls: Array.isArray(groupUrls) ? groupUrls : [],
@@ -612,12 +691,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'update_account') {
-      const { accountId, name, profileDir, enabled } = body;
+      const { accountId, name, profileUrl, profileDir, enabled } = body;
       const target = config.accounts.find((a) => a.id === accountId);
       if (!target) {
         return NextResponse.json({ ok: false, error: 'Không tìm thấy tài khoản' }, { status: 404 });
       }
       if (name) target.name = name.trim();
+      if (profileUrl !== undefined) target.profileUrl = profileUrl.trim();
       if (profileDir) target.profileDir = profileDir.trim();
       if (enabled !== undefined) target.enabled = Boolean(enabled);
       writeJsonFile(GROUPS_CONFIG_PATH, config);
@@ -779,13 +859,106 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (action === 'save_all') {
-      if (Array.isArray(body.accounts)) {
-        config.accounts = body.accounts;
-        writeJsonFile(GROUPS_CONFIG_PATH, config);
-        const { config: enriched, poolStats } = syncAndEnrichConfig(config);
-        return NextResponse.json({ ok: true, message: 'Đã lưu toàn bộ danh sách nhóm!', data: enriched, stats: poolStats });
+    if (action === 'change_role_group') {
+      const { accountId, roleGroup } = body;
+      const target = config.accounts.find((a) => a.id === accountId);
+      if (!target) return NextResponse.json({ ok: false, error: 'Không tìm thấy tài khoản' }, { status: 404 });
+
+      if (roleGroup === 'quarantine') {
+        const qDays = config.rotation?.quarantineDays || 7;
+        target.originalRoleGroup = target.roleGroup === 'quarantine' ? (target.originalRoleGroup || 'group_1') : (target.roleGroup || 'group_1');
+        target.roleGroup = 'quarantine';
+        target.quarantineUntil = new Date(Date.now() + qDays * 24 * 3600 * 1000).toISOString();
+        target.quarantineReason = 'Chuyển vào khu cách ly thủ công từ Dashboard';
+        target.quarantineAt = new Date().toISOString();
+        target.cooldownUntil = target.quarantineUntil;
+        target.status = 'quarantined_7d';
+        target.enabled = false;
+      } else {
+        target.roleGroup = roleGroup;
+        target.originalRoleGroup = roleGroup;
+        target.status = 'active';
+        target.enabled = true;
+        target.quarantineUntil = null;
+        target.quarantineReason = null;
+        target.quarantineAt = null;
+        target.cooldownUntil = null;
+        target.disabledReason = null;
+        target.disabledAt = null;
       }
+
+      writeJsonFile(GROUPS_CONFIG_PATH, config);
+      const { config: enriched, poolStats } = syncAndEnrichConfig(config);
+      return NextResponse.json({
+        ok: true,
+        message: `Đã chuyển tài khoản "${target.name}" sang ${roleGroup === 'group_1' ? '🟢 Nhóm 1 (Đội chính)' : roleGroup === 'group_2' ? '🟡 Nhóm 2 (Dự phòng)' : '🔴 Nhóm 3 (Cách ly 7 ngày)'}!`,
+        data: enriched,
+        stats: poolStats,
+      });
+    }
+
+    if (action === 'release_quarantine') {
+      const { accountId } = body;
+      const target = config.accounts.find((a) => a.id === accountId);
+      if (!target) return NextResponse.json({ ok: false, error: 'Không tìm thấy tài khoản' }, { status: 404 });
+
+      const restored = target.originalRoleGroup || (target.id === 'acc_2' ? 'group_2' : 'group_1');
+      target.roleGroup = restored;
+      target.status = 'active';
+      target.enabled = true;
+      target.quarantineUntil = null;
+      target.quarantineReason = null;
+      target.quarantineAt = null;
+      target.cooldownUntil = null;
+      target.disabledReason = null;
+      target.disabledAt = null;
+
+      writeJsonFile(GROUPS_CONFIG_PATH, config);
+      const { config: enriched, poolStats } = syncAndEnrichConfig(config);
+      return NextResponse.json({
+        ok: true,
+        message: `Đã mở khóa cách ly sớm cho "${target.name}"! Tài khoản đã được phục hồi về ${restored === 'group_1' ? '🟢 Nhóm 1' : '🟡 Nhóm 2'}.`,
+        data: enriched,
+        stats: poolStats,
+      });
+    }
+
+    if (action === 'switch_active_group') {
+      const { targetGroup } = body;
+      if (!config.rotation) {
+        config.rotation = { enabled: true, mode: 'daily_alternate', activeGroupToday: 'group_1', quarantineDays: 7 };
+      }
+      const current = config.rotation.activeGroupToday || 'group_1';
+      const newActive = targetGroup === 'group_2' ? 'group_2' : (targetGroup === 'group_1' ? 'group_1' : (current === 'group_1' ? 'group_2' : 'group_1'));
+      config.rotation.activeGroupToday = newActive;
+
+      writeJsonFile(GROUPS_CONFIG_PATH, config);
+      const { config: enriched, poolStats } = syncAndEnrichConfig(config);
+      return NextResponse.json({
+        ok: true,
+        message: `Đã chuyển phiên đăng hôm nay sang [${newActive === 'group_1' ? '🟢 Nhóm 1 (Đội chính)' : '🟡 Nhóm 2 (Đội dự phòng)'}]!`,
+        data: enriched,
+        stats: poolStats,
+      });
+    }
+
+    if (action === 'update_rotation') {
+      const { enabled, mode, quarantineDays } = body;
+      if (!config.rotation) {
+        config.rotation = { enabled: true, mode: 'daily_alternate', activeGroupToday: 'group_1', quarantineDays: 7 };
+      }
+      if (enabled !== undefined) config.rotation.enabled = Boolean(enabled);
+      if (mode !== undefined) config.rotation.mode = mode;
+      if (quarantineDays !== undefined) config.rotation.quarantineDays = Number(quarantineDays);
+
+      writeJsonFile(GROUPS_CONFIG_PATH, config);
+      const { config: enriched, poolStats } = syncAndEnrichConfig(config);
+      return NextResponse.json({
+        ok: true,
+        message: 'Đã cập nhật cấu hình luân phiên 3 nhóm!',
+        data: enriched,
+        stats: poolStats,
+      });
     }
 
     return NextResponse.json({ error: 'Action không hợp lệ' }, { status: 400 });

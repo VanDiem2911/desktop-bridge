@@ -1,7 +1,7 @@
 # kill-servers.ps1
-# Dung (kill) toan bo cac tien trinh dang chay tren Port 3000, 3001, 3002 va 3003
+# Dung (kill) toan bo cac tien trinh dang chay tren Port 3000, 3001, 3002 va 3004
 
-$ports = @(3000, 3001, 3002, 3003, 3004)
+$ports = @(3000, 3001, 3002, 3004)
 
 Write-Host "=================================================" -ForegroundColor Cyan
 Write-Host "   DANG DUNG (KILL) TOAN BO 4 SERVERS BRIDGE...  " -ForegroundColor Yellow

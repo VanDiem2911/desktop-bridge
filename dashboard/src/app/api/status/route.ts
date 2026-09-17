@@ -1,26 +1,30 @@
 import { NextResponse } from 'next/server';
-import { isPortOpen } from '@/lib/server-utils';
+import { isPortOpen, getServerPorts, CHATGPT_CONFIG_PATH, readJsonFile } from '@/lib/server-utils';
 
 export async function GET() {
   try {
-    const [srv3001, srv3002, srv3003, gpt1, gpt2] = await Promise.all([
-      isPortOpen(3001),
-      isPortOpen(3002),
-      isPortOpen(3003),
-      isPortOpen(9222),
-      isPortOpen(9242),
+    const ports = getServerPorts();
+    const chatgptConfig = readJsonFile<{ accounts: Array<{ port?: number; id?: number }> }>(CHATGPT_CONFIG_PATH, { accounts: [] });
+    const gptPorts = (chatgptConfig.accounts || []).slice(0, 2).map(a => a.port || 0);
+    const gpt1Port = gptPorts[0] || 9222;
+    const gpt2Port = gptPorts[1] || 9242;
+
+    const [srv3001, srv3002, gpt1, gpt2] = await Promise.all([
+      isPortOpen(ports.fanpageServer),
+      isPortOpen(ports.groupsServer),
+      isPortOpen(gpt1Port),
+      isPortOpen(gpt2Port),
     ]);
 
     return NextResponse.json({
       ok: true,
       servers: {
-        fanpageGpt: { port: 3001, name: 'Fanpage & ChatGPT', active: srv3001 },
-        fbGroups: { port: 3002, name: 'Facebook Groups', active: srv3002 },
-        fbPersonal: { port: 3003, name: 'Trang Cá Nhân & GPT', active: srv3003 },
+        fanpageGpt: { port: ports.fanpageServer, name: 'Fanpage & ChatGPT', active: srv3001 },
+        fbGroups: { port: ports.groupsServer, name: 'Facebook Groups', active: srv3002 },
       },
       chromeGpt: {
-        acc1: { port: 9222, active: gpt1 },
-        acc2: { port: 9242, active: gpt2 },
+        acc1: { port: gpt1Port, active: gpt1 },
+        acc2: { port: gpt2Port, active: gpt2 },
       },
     });
   } catch (error: unknown) {

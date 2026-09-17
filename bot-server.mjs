@@ -608,7 +608,7 @@ async function handleTelegramMessage(message) {
 
     case '/restart': {
       await sendTelegramMessage(
-        '⏳ <b>Đang kích hoạt quy trình khởi động lại toàn bộ hệ thống...</b>\n• Tắt các tiến trình cũ (3000, 3001, 3002, 3003, 3004)\n• Cập nhật build và khởi chạy lại dịch vụ ngầm.\n<i>Vui lòng chờ khoảng 15-25 giây.</i>',
+        '⏳ <b>Đang kích hoạt quy trình khởi động lại toàn bộ hệ thống...</b>\n• Tắt các tiến trình cũ (3000, 3001, 3002, 3004)\n• Cập nhật build và khởi chạy lại dịch vụ ngầm.\n<i>Vui lòng chờ khoảng 15-25 giây.</i>',
         chatId,
       );
 
@@ -626,17 +626,16 @@ async function handleTelegramMessage(message) {
         const p3000 = await checkPort(3000);
         const p3001 = await checkPort(3001);
         const p3002 = await checkPort(3002);
-        const p3003 = await checkPort(3003);
-        const allOk = p3000 && p3001 && p3002 && p3003;
+        const allOk = p3000 && p3001 && p3002;
 
         if (allOk) {
           await sendTelegramMessage(
-            '✅ <b>HỆ THỐNG ĐÃ KHỞI ĐỘNG LẠI THÀNH CÔNG!</b>\n🟢 Dashboard 3000: Online\n🟢 Bridge 3001, 3002, 3003: Online\n🚀 Hệ thống đã sẵn sàng nhận việc!',
+            '✅ <b>HỆ THỐNG ĐÃ KHỞI ĐỘNG LẠI THÀNH CÔNG!</b>\n🟢 Dashboard 3000: Online\n🟢 Bridge 3001, 3002: Online\n🚀 Hệ thống đã sẵn sàng nhận việc!',
             chatId,
           );
         } else {
           await sendTelegramMessage(
-            `⚠️ <b>Khởi động lại hoàn tất nhưng một số port chưa sẵn sàng:</b>\n• 3000: ${p3000 ? '🟢' : '🔴'}\n• 3001: ${p3001 ? '🟢' : '🔴'}\n• 3002: ${p3002 ? '🟢' : '🔴'}\n• 3003: ${p3003 ? '🟢' : '🔴'}\nVui lòng gửi lại lệnh <code>/status</code> sau vài giây.`,
+            `⚠️ <b>Khởi động lại hoàn tất nhưng một số port chưa sẵn sàng:</b>\n• 3000: ${p3000 ? '🟢' : '🔴'}\n• 3001: ${p3001 ? '🟢' : '🔴'}\n• 3002: ${p3002 ? '🟢' : '🔴'}\nVui lòng gửi lại lệnh <code>/status</code> sau vài giây.`,
             chatId,
           );
         }
@@ -671,19 +670,17 @@ async function handleTelegramMessage(message) {
 // BÁO CÁO TRẠNG THÁI HỆ THỐNG (/status)
 // -------------------------------------------------------------
 async function getSystemStatusText() {
-  const [p3000, p3001, p3002, p3003, p5678] = await Promise.all([
+  const [p3000, p3001, p3002, p5678] = await Promise.all([
     checkPort(3000),
     checkPort(3001),
     checkPort(3002),
-    checkPort(3003),
     checkPort(5678), // n8n port mặc định
   ]);
 
-  const [c9222, c9223, c9224, c9225, c9242] = await Promise.all([
+  const [c9222, c9223, c9224, c9242] = await Promise.all([
     checkPort(9222), // ChatGPT 1 & Fanpage
     checkPort(9223), // Groups Nick 1
     checkPort(9224), // Groups Nick 2
-    checkPort(9225), // Personal
     checkPort(9242), // ChatGPT 2
   ]);
 
@@ -715,7 +712,6 @@ async function getSystemStatusText() {
     `• Dashboard (3000): ${p3000 ? '🟢 Online' : '🔴 Mất kết nối'}`,
     `• Bridge Fanpage & GPT (3001): ${p3001 ? '🟢 Online' : '🔴 Mất kết nối'}`,
     `• Bridge Groups (3002): ${p3002 ? '🟢 Online' : '🔴 Mất kết nối'}`,
-    `• Bridge Cá nhân (3003): ${p3003 ? '🟢 Online' : '🔴 Mất kết nối'}`,
     `• n8n Workflow (5678): ${p5678 ? '🟢 Online' : '⚪ Chưa bật'}`,
     '',
     '🌐 <b>Chrome Debugging & Nick FB/AI:</b>',
@@ -723,7 +719,6 @@ async function getSystemStatusText() {
     `• ChatGPT 2 Quota Fallback (9242): ${c9242 ? '🟢 Sẵn sàng' : '⚪ Đang tắt'}`,
     `• Facebook Group Nick 1 (9223): ${c9223 ? '🟢 Sẵn sàng' : '⚪ Đang tắt'}`,
     `• Facebook Group Nick 2 (9224): ${c9242 ? '🟢 Sẵn sàng' : '⚪ Đang tắt'}`,
-    `• Facebook Cá nhân (9225): ${c9225 ? '🟢 Sẵn sàng' : '⚪ Đang tắt'}`,
     '',
     '📈 <b>Tiến độ hôm nay:</b>',
     `• Đã đăng thành công: <b>${todaySuccess}</b> bài`,
@@ -748,7 +743,6 @@ async function runWatchdogCheck() {
     const servers = [
       { port: 3001, name: 'Server 1 (Fanpage & ChatGPT Xen Kẽ)' },
       { port: 3002, name: 'Server 2 (Facebook Groups)' },
-      { port: 3003, name: 'Server 3 (Facebook Cá Nhân)' },
     ];
 
     for (const s of servers) {
@@ -1010,7 +1004,7 @@ app.post('/reload-config', (req, res) => {
   res.json({ ok: true, message: 'Đã tải lại cấu hình bot', config: botConfig });
 });
 
-// Nhận cảnh báo lỗi tức thì từ server.mjs / group-server.mjs / personal-server.mjs
+// Nhận cảnh báo lỗi tức thì từ server.mjs / group-server.mjs
 app.post('/alert', async (req, res) => {
   const { title, details, imageBase64, channel, targetUrl } = req.body;
   if (!botConfig.enableAlerts) return res.json({ ok: false, reason: 'alerts_disabled' });

@@ -12,7 +12,7 @@ function resolveBridgeDir(): string {
     path.resolve(process.cwd(), '..', 'desktop-bridge'),
   ];
   for (const c of candidates) {
-    if (fs.existsSync(path.join(c, 'group-server.mjs')) && fs.existsSync(path.join(c, 'personal-server.mjs'))) {
+    if (fs.existsSync(path.join(c, 'group-server.mjs')) && fs.existsSync(path.join(c, 'server.mjs'))) {
       return c;
     }
   }
@@ -51,6 +51,37 @@ export const FANPAGE_CONFIG_PATH = resolveConfigPath('fanpage-config.json', 'fan
 export const BOT_CONFIG_PATH = resolveConfigPath('bot-config.json', 'bot-config.example.json');
 export const SCHEDULE_CONFIG_PATH = path.join(BRIDGE_DIR, 'configs', 'schedule-config.json');
 export const POST_HISTORY_PATH = path.join(BRIDGE_DIR, 'configs', 'post-history.json');
+
+/** Cổng mặc định cho các server nội bộ — có thể ghi đè qua serverPorts trong schedule-config.json */
+const DEFAULT_SERVER_PORTS = {
+  fanpageServer: 3001,  // server.mjs — Fanpage & ChatGPT
+  groupsServer: 3002,   // group-server.mjs — Facebook Groups
+  botServer: 3004,      // bot-server.mjs — Telegram Bot & Scheduler
+};
+
+export interface ServerPorts {
+  fanpageServer: number;
+  groupsServer: number;
+  botServer: number;
+}
+
+/**
+ * Đọc port cấu hình từ schedule-config.json (trường serverPorts).
+ * Nếu chưa khai báo → dùng port mặc định để backward-compatible.
+ */
+export function getServerPorts(): ServerPorts {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SCHEDULE_CONFIG_PATH, 'utf-8')) as Record<string, unknown>;
+    const sp = (raw.serverPorts || {}) as Partial<ServerPorts>;
+    return {
+      fanpageServer: sp.fanpageServer || DEFAULT_SERVER_PORTS.fanpageServer,
+      groupsServer:  sp.groupsServer  || DEFAULT_SERVER_PORTS.groupsServer,
+      botServer:     sp.botServer     || DEFAULT_SERVER_PORTS.botServer,
+    };
+  } catch {
+    return { ...DEFAULT_SERVER_PORTS };
+  }
+}
 
 export interface BotConfig {
   botToken?: string;
@@ -290,4 +321,85 @@ export function openChromeProfile(profileDir: string, port: number, url = 'https
     ],
     { detached: true, stdio: 'ignore' },
   ).unref();
+}
+
+function decodeHtmlEntities(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/&#([0-9]+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim();
+}
+
+export function extractFallbackNameFromUrl(url: string): string {
+  try {
+    const cleanUrl = url.replace(/[?#].*$/, '').replace(/\/+$/, '');
+    const parts = cleanUrl.split('/').filter(Boolean);
+    const lastPart = parts[parts.length - 1];
+    if (!lastPart || lastPart === 'facebook.com' || lastPart === 'groups') return '';
+    return lastPart
+      .replace(/[-_.]+/g, ' ')
+      .split(' ')
+      .filter(Boolean)
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+  } catch {
+    return '';
+  }
+}
+
+export async function fetchFacebookTitle(url: string): Promise<string> {
+  if (!url || typeof url !== 'string' || !url.includes('facebook.com')) return '';
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+      },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(6000),
+    });
+
+    const html = await res.text();
+    const ogTitle = html.match(/<meta\s+property=["']og:title["']\s+content=["']([^"']+)["']/i)
+                 || html.match(/<meta\s+content=["']([^"']+)["']\s+property=["']og:title["']/i);
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+
+    let raw = ogTitle ? ogTitle[1] : (titleMatch ? titleMatch[1] : '');
+    raw = decodeHtmlEntities(raw);
+
+    // Xóa hậu tố đặc trưng của Facebook
+    const clean = raw
+      .replace(/\s*(\||\-)\s*(Trang chủ\s*\|\s*)?Facebook.*$/i, '')
+      .replace(/\s*(\||\-)\s*(Home\s*\|\s*)?Facebook.*$/i, '')
+      .replace(/\s*(\||\-)\s*Meta.*$/i, '')
+      .trim();
+
+    const lower = clean.toLowerCase();
+    if (
+      clean &&
+      lower !== 'facebook' &&
+      lower !== 'error' &&
+      !lower.includes('log in') &&
+      !lower.includes('đăng nhập') &&
+      !lower.includes('security check')
+    ) {
+      return clean;
+    }
+  } catch {
+    // ignore
+  }
+
+  const slug = extractFallbackNameFromUrl(url);
+  if (slug) {
+    return url.includes('/groups/') ? `Nhóm ${slug}` : `Fanpage ${slug}`;
+  }
+  return '';
 }

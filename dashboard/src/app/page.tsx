@@ -52,6 +52,10 @@ import {
   Workflow,
   ChevronDown,
   FileSpreadsheet,
+  ShieldAlert,
+  Lock,
+  Unlock,
+  ArrowLeftRight,
 } from 'lucide-react';
 
 interface HistoryEntry {
@@ -101,7 +105,6 @@ interface ServerStatus {
   servers: {
     fanpageGpt: { port: number; name: string; active: boolean };
     fbGroups: { port: number; name: string; active: boolean };
-    fbPersonal: { port: number; name: string; active: boolean };
   };
   chromeGpt: {
     acc1: { port: number; active: boolean };
@@ -135,10 +138,27 @@ interface AccountCategory {
   items: AccountItem[];
 }
 
+interface RotationConfig {
+  enabled: boolean;
+  mode: 'daily_alternate' | 'manual';
+  activeGroupToday: 'group_1' | 'group_2';
+  lastRotatedDate?: string;
+  quarantineDays?: number;
+}
+
 interface GroupAccount {
   id: string;
   name: string;
   enabled?: boolean;
+  status?: string;
+  roleGroup?: 'group_1' | 'group_2' | 'quarantine';
+  originalRoleGroup?: 'group_1' | 'group_2';
+  quarantineUntil?: string | null;
+  quarantineReason?: string | null;
+  quarantineAt?: string | null;
+  cooldownUntil?: string | null;
+  disabledReason?: string | null;
+  disabledAt?: string | null;
   profileDir?: string;
   groupUrls?: string[];
 }
@@ -218,7 +238,7 @@ function parseErrorMessage(rawError?: string | null): {
 }
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'accounts' | 'groups' | 'quick-post' | 'schedule' | 'bot'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'accounts' | 'groups' | 'schedule' | 'bot'>('overview');
   const [status, setStatus] = useState<ServerStatus | null>(null);
 
   // Telegram Bot & Watchdog State
@@ -244,14 +264,18 @@ export default function DashboardPage() {
   // Schedule & Auto-Pilot State
   const [scheduleConfig, setScheduleConfig] = useState({
     enabled: true,
+    aiProvider: 'groq' as 'groq' | 'gemini',
     geminiApiKey: '',
     geminiApiKeys: [] as string[],
+    groqApiKey: '',
+    groqApiKeys: [] as string[],
     model: 'gemini-2.5-flash',
+    groqModel: 'llama-3.3-70b-versatile',
     scheduleTimes: ['08:00', '16:00'],
     channelSchedules: {
       fanpage: { enabled: true, times: ['08:00', '16:00'], sheetByTime: Object.fromEntries<string>([]) },
       groups: { enabled: true, times: ['09:30', '14:00', '20:00'], sheetByTime: Object.fromEntries<string>([]) },
-      personal: { enabled: false, times: ['11:30', '19:30'], sheetByTime: Object.fromEntries<string>([]) },
+      personal: { enabled: false, times: [] as string[], sheetByTime: Object.fromEntries<string>([]) },
     },
     channels: { fanpage: true, groups: true, personal: false },
     aspectRatio: '4:5',
@@ -266,7 +290,6 @@ export default function DashboardPage() {
       channelSheetMapping: {
         fanpage: 'topics',
         groups: 'content_calendar',
-        personal: 'topics',
       } as { fanpage?: string; groups?: string; personal?: string },
     },
     topics: [] as string[],
@@ -320,6 +343,9 @@ export default function DashboardPage() {
   const [newTopicInput, setNewTopicInput] = useState<string>('');
   const [showGeminiKeySecret, setShowGeminiKeySecret] = useState<boolean>(false);
   const [newGeminiApiKey, setNewGeminiApiKey] = useState<string>('');
+  const [showGroqKeySecret, setShowGroqKeySecret] = useState<boolean>(false);
+  const [newGroqApiKey, setNewGroqApiKey] = useState<string>('');
+  const [testingAi, setTestingAi] = useState<boolean>(false);
   const [customRunTopic, setCustomRunTopic] = useState<string>('');
   const [autoPilotStep, setAutoPilotStep] = useState<number>(0);
   const [triggerResult, setTriggerResult] = useState<any>(null);
@@ -350,7 +376,7 @@ export default function DashboardPage() {
   const [availableSheets, setAvailableSheets] = useState<string[]>(['topics', 'content_calendar']);
   const [activeSheetTab, setActiveSheetTab] = useState<string>('topics');
   const [accounts, setAccounts] = useState<AccountCategory[]>([]);
-  const [groupsData, setGroupsData] = useState<{ accounts: GroupAccount[]; centralPool?: CentralPoolItem[] }>({ accounts: [], centralPool: [] });
+  const [groupsData, setGroupsData] = useState<{ accounts: GroupAccount[]; centralPool?: CentralPoolItem[]; rotation?: RotationConfig }>({ accounts: [], centralPool: [] });
   const [poolStats, setPoolStats] = useState<{
     total: number;
     assigned: number;
@@ -437,13 +463,14 @@ export default function DashboardPage() {
   const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
   const [newAccountForm, setNewAccountForm] = useState({
     name: '',
+    profileUrl: '',
     profileDir: '',
     enabled: true,
     groupUrlsText: '',
   });
 
   const [isEditAccountOpen, setIsEditAccountOpen] = useState(false);
-  const [editingAccount, setEditingAccount] = useState<{ id: string; name: string; profileDir: string; enabled: boolean } | null>(null);
+  const [editingAccount, setEditingAccount] = useState<{ id: string; name: string; profileUrl?: string; profileDir: string; enabled: boolean } | null>(null);
 
   // Modals state - Fanpage Accounts
   const [isAddFanpageOpen, setIsAddFanpageOpen] = useState(false);
@@ -457,6 +484,8 @@ export default function DashboardPage() {
   });
   const [isEditFanpageOpen, setIsEditFanpageOpen] = useState(false);
   const [editingFanpage, setEditingFanpage] = useState<{ id: string; name: string; pageUrl: string; profileDir: string; port: number; description: string; enabled: boolean } | null>(null);
+  const [isDetectingName, setIsDetectingName] = useState<boolean>(false);
+  const [detectedGroupName, setDetectedGroupName] = useState<string>('');
 
   // Modals state - Personal Accounts
   const [isAddPersonalOpen, setIsAddPersonalOpen] = useState(false);
@@ -479,7 +508,7 @@ export default function DashboardPage() {
   const [bulkMode, setBulkMode] = useState<'append' | 'replace'>('append');
 
   // Quick Post State
-  const [qpChannel, setQpChannel] = useState<'fanpage' | 'groups' | 'personal'>('fanpage');
+  const [qpChannel, setQpChannel] = useState<'fanpage' | 'groups'>('fanpage');
   const [qpCaption, setQpCaption] = useState<string>('');
   const [qpPrompt, setQpPrompt] = useState<string>('');
   const [qpAspect, setQpAspect] = useState<string>('4:5');
@@ -740,17 +769,49 @@ export default function DashboardPage() {
   const handleSaveScheduleConfig = async (newCfg: typeof scheduleConfig) => {
     try {
       setScheduleLoading(true);
+
+      // Tự động gộp key dự phòng nếu người dùng đã gõ/dán vào ô nhưng chưa bấm nút [+]
+      const updatedGroqApiKeys = [...(newCfg.groqApiKeys || [])];
+      const pendingGroq = newGroqApiKey.trim();
+      if (pendingGroq) {
+        const parts = pendingGroq.split(/[\n,;]+/).map((k) => k.trim()).filter(Boolean);
+        for (const part of parts) {
+          if (!updatedGroqApiKeys.includes(part) && part !== newCfg.groqApiKey) {
+            updatedGroqApiKeys.push(part);
+          }
+        }
+        setNewGroqApiKey('');
+      }
+
+      const updatedGeminiApiKeys = [...(newCfg.geminiApiKeys || [])];
+      const pendingGemini = newGeminiApiKey.trim();
+      if (pendingGemini) {
+        const parts = pendingGemini.split(/[\n,;]+/).map((k) => k.trim()).filter(Boolean);
+        for (const part of parts) {
+          if (!updatedGeminiApiKeys.includes(part) && part !== newCfg.geminiApiKey) {
+            updatedGeminiApiKeys.push(part);
+          }
+        }
+        setNewGeminiApiKey('');
+      }
+
+      const payload = {
+        ...newCfg,
+        groqApiKeys: updatedGroqApiKeys,
+        geminiApiKeys: updatedGeminiApiKeys,
+      };
+
       const res = await fetch('/api/schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newCfg),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.ok) {
         setScheduleConfig(data.config);
         setScheduleNextRun(data.nextRun);
         if (data.channelNextRuns) setChannelNextRuns(data.channelNextRuns);
-        showToast('Đã lưu cấu hình Lịch Đăng Tự Động thành công!', 'success');
+        showToast('Đã lưu cấu hình Lịch Đăng & API Key vào file thành công!', 'success');
       } else {
         showToast(data.error || 'Lỗi lưu cấu hình', 'error');
       }
@@ -759,6 +820,74 @@ export default function DashboardPage() {
       showToast('Lỗi: ' + msg, 'error');
     } finally {
       setScheduleLoading(false);
+    }
+  };
+
+  const handleAddBackupKey = async (provider: 'groq' | 'gemini', rawKey: string) => {
+    const key = rawKey.trim();
+    if (!key) return showToast('Vui lòng dán key dự phòng trước!', 'info');
+    const splitKeys = key.split(/[\n,;]+/).map((k) => k.trim()).filter(Boolean);
+    if (splitKeys.length === 0) return;
+
+    if (provider === 'groq') {
+      const existing = [scheduleConfig.groqApiKey, ...(scheduleConfig.groqApiKeys || [])];
+      const newKeysToAdd = splitKeys.filter((k) => !existing.includes(k));
+      if (newKeysToAdd.length === 0) return showToast('Key này đã có trong danh sách!', 'info');
+      const updatedList = [...(scheduleConfig.groqApiKeys || []), ...newKeysToAdd];
+      setNewGroqApiKey('');
+      await handleSaveScheduleConfig({ ...scheduleConfig, groqApiKeys: updatedList });
+      showToast(`Đã thêm & LƯU ${newKeysToAdd.length} key Groq dự phòng vào file!`, 'success');
+    } else {
+      const existing = [scheduleConfig.geminiApiKey, ...(scheduleConfig.geminiApiKeys || [])];
+      const newKeysToAdd = splitKeys.filter((k) => !existing.includes(k));
+      if (newKeysToAdd.length === 0) return showToast('Key này đã có trong danh sách!', 'info');
+      const updatedList = [...(scheduleConfig.geminiApiKeys || []), ...newKeysToAdd];
+      setNewGeminiApiKey('');
+      await handleSaveScheduleConfig({ ...scheduleConfig, geminiApiKeys: updatedList });
+      showToast(`Đã thêm & LƯU ${newKeysToAdd.length} key Gemini dự phòng vào file!`, 'success');
+    }
+  };
+
+  const handleRemoveBackupKey = async (provider: 'groq' | 'gemini', index: number) => {
+    if (provider === 'groq') {
+      const updatedList = (scheduleConfig.groqApiKeys || []).filter((_: string, i: number) => i !== index);
+      await handleSaveScheduleConfig({ ...scheduleConfig, groqApiKeys: updatedList });
+      showToast('Đã xóa key Groq dự phòng và cập nhật file cấu hình!', 'success');
+    } else {
+      const updatedList = (scheduleConfig.geminiApiKeys || []).filter((_: string, i: number) => i !== index);
+      await handleSaveScheduleConfig({ ...scheduleConfig, geminiApiKeys: updatedList });
+      showToast('Đã xóa key Gemini dự phòng và cập nhật file cấu hình!', 'success');
+    }
+  };
+
+  const handleTestAi = async () => {
+    if (testingAi) return;
+    try {
+      setTestingAi(true);
+      const isGroq = (scheduleConfig.aiProvider || 'groq') === 'groq';
+      showToast(`⚡ Đang gửi yêu cầu test ${isGroq ? 'Groq AI (Llama 3.3)' : 'Gemini AI'} viết bài...`, 'info');
+      const res = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'test-ai',
+          topic: customRunTopic || sheetsOverview?.nextTopic?.topic || 'Tối ưu hóa phễu bán hàng và chuyển đổi số cho SME',
+          aiProvider: scheduleConfig.aiProvider || 'groq',
+          apiKey: (isGroq ? scheduleConfig.groqApiKey : scheduleConfig.geminiApiKey) || '',
+          model: (isGroq ? scheduleConfig.groqModel : scheduleConfig.model) || '',
+        }),
+      });
+      const data = await res.json();
+      if (data.ok && data.data) {
+        showToast(`🎉 [${(data.data.provider || 'AI').toUpperCase()}] Test thành công: "${data.data.title}"`, 'success');
+      } else {
+        showToast(`❌ Lỗi test AI: ${data.error || 'Không rõ nguyên nhân'}`, 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(`❌ Lỗi kết nối: ${msg}`, 'error');
+    } finally {
+      setTestingAi(false);
     }
   };
 
@@ -1088,7 +1217,7 @@ export default function DashboardPage() {
       let payload: any = {};
       if (nodeType === 'sheets') {
         payload = {};
-      } else if (nodeType === 'gemini') {
+      } else if (nodeType === 'gemini' || nodeType === 'groq' || nodeType === 'ai') {
         payload = { topic: customRunTopic || sheetsOverview?.nextTopic?.topic || 'Tối ưu hóa phễu bán hàng và chuyển đổi số' };
       } else if (nodeType === 'chatgpt') {
         payload = {
@@ -1370,16 +1499,65 @@ export default function DashboardPage() {
     }
   };
 
+  // Tự động nhận diện tên Fanpage / Group / Profile từ link Facebook
+  const handleAutoDetectFbName = async (url: string, targetForm: 'newFanpage' | 'editFanpage' | 'newGroup' | 'newPersonal' | 'editPersonal' | 'newGroupAccount' | 'editGroupAccount') => {
+    if (!url || !url.includes('facebook.com')) return;
+    setIsDetectingName(true);
+    try {
+      const res = await fetch(`/api/facebook/lookup-name?url=${encodeURIComponent(url.trim())}`);
+      const data = await res.json();
+      if (data?.ok && data.name) {
+        if (targetForm === 'newFanpage') {
+          setNewFanpageForm(prev => ({ ...prev, name: data.name }));
+          showToast(`Đã tự động nhận diện tên: "${data.name}"`, 'success');
+        } else if (targetForm === 'editFanpage') {
+          setEditingFanpage(prev => prev ? ({ ...prev, name: data.name }) : null);
+          showToast(`Đã cập nhật tên: "${data.name}"`, 'success');
+        } else if (targetForm === 'newGroup') {
+          setDetectedGroupName(data.name);
+          showToast(`Đã nhận diện nhóm: "${data.name}"`, 'success');
+        } else if (targetForm === 'newPersonal') {
+          setNewPersonalForm(prev => ({ ...prev, name: data.name }));
+          showToast(`Đã nhận diện tên: "${data.name}"`, 'success');
+        } else if (targetForm === 'editPersonal') {
+          setEditingPersonal(prev => prev ? ({ ...prev, name: data.name }) : null);
+          showToast(`Đã cập nhật tên: "${data.name}"`, 'success');
+        } else if (targetForm === 'newGroupAccount') {
+          setNewAccountForm(prev => ({ ...prev, name: data.name }));
+          showToast(`Đã tự động nhận diện tên: "${data.name}"`, 'success');
+        } else if (targetForm === 'editGroupAccount') {
+          setEditingAccount(prev => prev ? ({ ...prev, name: data.name }) : null);
+          showToast(`Đã cập nhật tên: "${data.name}"`, 'success');
+        }
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsDetectingName(false);
+    }
+  };
+
   // Fanpage CRUD Handlers
   const handleCreateFanpage = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      let finalName = newFanpageForm.name?.trim();
+      if (!finalName && newFanpageForm.pageUrl) {
+        try {
+          const lookupRes = await fetch(`/api/facebook/lookup-name?url=${encodeURIComponent(newFanpageForm.pageUrl.trim())}`);
+          const lookupData = await lookupRes.json();
+          if (lookupData?.ok && lookupData.name) {
+            finalName = lookupData.name;
+          }
+        } catch {}
+      }
+
       const res = await fetch('/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'add_fanpage',
-          name: newFanpageForm.name,
+          name: finalName || '',
           pageUrl: newFanpageForm.pageUrl,
           profileDir: newFanpageForm.profileDir,
           port: newFanpageForm.port,
@@ -1474,12 +1652,23 @@ export default function DashboardPage() {
   const handleCreatePersonal = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      let finalName = newPersonalForm.name?.trim();
+      if (!finalName && newPersonalForm.profileUrl) {
+        try {
+          const lookupRes = await fetch(`/api/facebook/lookup-name?url=${encodeURIComponent(newPersonalForm.profileUrl.trim())}`);
+          const lookupData = await lookupRes.json();
+          if (lookupData?.ok && lookupData.name) {
+            finalName = lookupData.name;
+          }
+        } catch {}
+      }
+
       const res = await fetch('/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'add_personal',
-          name: newPersonalForm.name,
+          name: finalName || '',
           profileUrl: newPersonalForm.profileUrl,
           profileDir: newPersonalForm.profileDir,
           port: newPersonalForm.port,
@@ -1680,7 +1869,17 @@ export default function DashboardPage() {
     e.preventDefault();
     try {
       const nextIndex = (groupsData.accounts?.length || 0) + 1;
-      const name = newAccountForm.name.trim() || `Tài khoản ${nextIndex}`;
+      let finalName = newAccountForm.name.trim();
+      if (!finalName && newAccountForm.profileUrl) {
+        try {
+          const lookupRes = await fetch(`/api/facebook/lookup-name?url=${encodeURIComponent(newAccountForm.profileUrl.trim())}`);
+          const lookupData = await lookupRes.json();
+          if (lookupData?.ok && lookupData.name) {
+            finalName = lookupData.name;
+          }
+        } catch {}
+      }
+      const name = finalName || `Tài khoản ${nextIndex}`;
       const profileDir = newAccountForm.profileDir.trim() || `n8n-fb-group-profile-${nextIndex}`;
       const groupUrls = newAccountForm.groupUrlsText
         .split('\n')
@@ -1693,6 +1892,7 @@ export default function DashboardPage() {
         body: JSON.stringify({
           action: 'add_account',
           name,
+          profileUrl: newAccountForm.profileUrl,
           profileDir,
           enabled: newAccountForm.enabled,
           groupUrls,
@@ -1703,7 +1903,7 @@ export default function DashboardPage() {
       if (data.ok) {
         showToast(data.message, 'success');
         setIsAddAccountOpen(false);
-        setNewAccountForm({ name: '', profileDir: '', enabled: true, groupUrlsText: '' });
+        setNewAccountForm({ name: '', profileUrl: '', profileDir: '', enabled: true, groupUrlsText: '' });
         fetchAccounts();
         fetchGroups();
       } else {
@@ -1745,6 +1945,7 @@ export default function DashboardPage() {
     setEditingAccount({
       id: rawId,
       name: acc.name,
+      profileUrl: acc.url || '',
       profileDir: acc.profileDir,
       enabled: acc.enabled !== false,
     });
@@ -1762,6 +1963,7 @@ export default function DashboardPage() {
           action: 'update_account',
           accountId: editingAccount.id,
           name: editingAccount.name,
+          profileUrl: editingAccount.profileUrl,
           profileDir: editingAccount.profileDir,
           enabled: editingAccount.enabled,
         }),
@@ -1806,7 +2008,7 @@ export default function DashboardPage() {
 
   // Restart Servers
   const handleRestartServers = async () => {
-    if (!confirm('Khởi động lại toàn bộ hệ thống (Dashboard Port 3000 + 3 Server Bridge 3001, 3002, 3003)?')) return;
+    if (!confirm('Khởi động lại toàn bộ hệ thống (Dashboard Port 3000 + 2 Server Bridge 3001, 3002)?')) return;
     try {
       showToast('Đang khởi động lại Dashboard & các servers...', 'info');
       const res = await fetch('/api/servers/restart', { method: 'POST' });
@@ -1833,6 +2035,7 @@ export default function DashboardPage() {
       if (data.ok) {
         showToast(data.message || 'Đã thêm link nhóm!', 'success');
         setNewGroupUrl('');
+        setDetectedGroupName('');
         setIsAddGroupOpen(false);
         fetchGroups();
       } else {
@@ -2177,6 +2380,103 @@ export default function DashboardPage() {
     }
   };
 
+  // ================= 3 NHÓM LÁCH BAN FB HANDLERS =================
+  const handleSwitchActiveGroup = async (targetGroup?: 'group_1' | 'group_2') => {
+    try {
+      const res = await fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'switch_active_group', targetGroup }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message, 'success');
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi đổi ca đăng bài', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    }
+  };
+
+  const handleChangeRoleGroup = async (
+    accountId: string,
+    roleGroup: 'group_1' | 'group_2' | 'quarantine'
+  ) => {
+    try {
+      const res = await fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'change_role_group', accountId, roleGroup }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message, 'success');
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi chuyển nhóm', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    }
+  };
+
+  const handleReleaseQuarantine = async (accountId: string) => {
+    if (!confirm('Bạn có chắc chắn muốn giải phóng tài khoản này khỏi khu cách ly sớm?')) return;
+    try {
+      const res = await fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'release_quarantine', accountId }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message, 'success');
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi giải phóng cách ly', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    }
+  };
+
+  const handleToggleRotation = async (enabled: boolean) => {
+    try {
+      const res = await fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_rotation', enabled }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message, 'success');
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi cập nhật cấu hình luân phiên', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    }
+  };
+
+  const formatCountdown = (untilStr?: string | null): string => {
+    if (!untilStr) return 'Đang cách ly';
+    const diff = new Date(untilStr).getTime() - Date.now();
+    if (diff <= 0) return 'Đã hết hạn cách ly (Sẵn sàng phục hồi)';
+    const days = Math.floor(diff / (24 * 3600 * 1000));
+    const hours = Math.floor((diff % (24 * 3600 * 1000)) / (3600 * 1000));
+    const minutes = Math.floor((diff % (3600 * 1000)) / (60 * 1000));
+    if (days > 0) return `${days} ngày ${hours} giờ nữa`;
+    if (hours > 0) return `${hours} giờ ${minutes} phút nữa`;
+    return `${minutes} phút nữa`;
+  };
+
   const executeQuickPublish = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!qpCaption.trim()) return showToast('Vui lòng nhập nội dung caption!', 'error');
@@ -2186,10 +2486,8 @@ export default function DashboardPage() {
     showToast('Đang bắt đầu tiến trình tạo ảnh ChatGPT & Đăng bài...', 'info');
 
     try {
-      const gptPort = qpChannel === 'personal' ? 3003 : 3001;
-      
-      // 1. Generate Image
-      const genRes = await fetch(`http://127.0.0.1:${gptPort}/generate`, {
+      // 1. Generate Image — dùng /api/bridge proxy để không hardcode port
+      const genRes = await fetch('/api/bridge?target=fanpage&path=/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2209,10 +2507,8 @@ export default function DashboardPage() {
       const fanpageAcc = accounts.find(c => c.category === 'fanpage')?.items.find(i => i.enabled !== false);
       const fanpageUrl = fanpageAcc?.pageUrl || fanpageAcc?.url;
 
-      const personalAcc = accounts.find(c => c.category === 'personal')?.items.find(i => i.enabled !== false);
-      const personalUrl = personalAcc?.profileUrl || personalAcc?.url;
-
-      let pubUrl = 'http://127.0.0.1:3001/generate';
+      // Dùng /api/bridge proxy để không hardcode port — port đọc từ schedule-config.json
+      let pubUrl = '/api/bridge?target=fanpage&path=/generate';
       let pubBody: Record<string, unknown> = {
         action: 'publish_facebook_page',
         ...(fanpageUrl ? { pageUrl: fanpageUrl } : {}),
@@ -2221,16 +2517,8 @@ export default function DashboardPage() {
       };
 
       if (qpChannel === 'groups') {
-        pubUrl = 'http://127.0.0.1:3002/post-groups';
+        pubUrl = '/api/bridge?target=groups&path=/post-groups';
         pubBody = { caption: qpCaption, imageBase64: genData.imageBase64 };
-      } else if (qpChannel === 'personal') {
-        pubUrl = 'http://127.0.0.1:3003/generate';
-        pubBody = {
-          action: 'publish_facebook_personal',
-          ...(personalUrl ? { pageUrl: personalUrl, profileUrl: personalUrl } : {}),
-          caption: qpCaption,
-          imageBase64: genData.imageBase64,
-        };
       }
 
       const pubRes = await fetch(pubUrl, {
@@ -2401,16 +2689,6 @@ export default function DashboardPage() {
               <Share2 className="w-4 h-4" /> Link Nhóm FB
             </button>
             <button
-              onClick={() => setActiveTab('quick-post')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
-                activeTab === 'quick-post'
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/25 font-bold'
-                  : 'text-slate-600 hover:text-emerald-700 hover:bg-white/60'
-              }`}
-            >
-              <Send className="w-4 h-4" /> Đăng bài Nhanh
-            </button>
-            <button
               onClick={() => { setActiveTab('schedule'); fetchScheduleConfig(); }}
               className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
                 activeTab === 'schedule'
@@ -2465,7 +2743,7 @@ export default function DashboardPage() {
           <div className="space-y-8">
             
             {/* Status Grid Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               
               {/* Server 1 */}
               <div className="liquid-glass liquid-glass-interactive rounded-3xl p-6 relative overflow-hidden">
@@ -2507,27 +2785,6 @@ export default function DashboardPage() {
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 font-medium mt-1">Tự động đăng xoay vòng {groupsData.accounts?.length || 7} tài khoản nhóm</p>
-              </div>
-
-              {/* Server 3 */}
-              <div className="liquid-glass liquid-glass-interactive rounded-3xl p-6 relative overflow-hidden">
-                <div className="flex justify-between items-start mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="p-2 rounded-xl bg-teal-50 text-teal-600 border border-teal-100 shadow-xs">
-                      <Users className="w-4 h-4" />
-                    </span>
-                    <span className="font-bold text-sm text-slate-900">Trang Cá Nhân</span>
-                  </div>
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
-                    status?.servers.fbPersonal.active 
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                      : 'bg-rose-50 text-rose-700 border border-rose-200'
-                  }`}>
-                    <span className={`w-2 h-2 rounded-full ${status?.servers.fbPersonal.active ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
-                    Port 3003
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 font-medium mt-1">Đăng bài lên tường cá nhân độc lập</p>
               </div>
 
               {/* ChatGPT Multi-Account Status */}
@@ -2643,10 +2900,10 @@ export default function DashboardPage() {
                 </div>
 
                 <button
-                  onClick={() => setActiveTab('quick-post')}
-                  className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-xs shadow-lg shadow-emerald-600/30 hover:shadow-xl hover:shadow-emerald-600/40 transition-all flex items-center justify-center gap-2"
+                  onClick={() => setActiveTab('groups')}
+                  className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold text-xs shadow-lg shadow-blue-600/30 hover:shadow-xl hover:shadow-blue-600/40 transition-all flex items-center justify-center gap-2"
                 >
-                  <Send className="w-4 h-4" /> Đăng bài Thử nghiệm ngay
+                  <Share2 className="w-4 h-4" /> Quản lý Link Nhóm FB
                 </button>
               </div>
 
@@ -3196,147 +3453,580 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* Account Cards Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {category.items.map(acc => {
-                    const isEnabled = acc.enabled !== false;
-                    const isOnline = acc.isReady;
-                    const isConfigured = acc.isConfigured || acc.profileExists;
-
-                    return (
-                      <div
-                        key={acc.id}
-                        className={`liquid-glass-subtle liquid-glass-interactive rounded-2xl p-5 flex flex-col justify-between gap-4 border transition-all ${
-                          !isEnabled ? 'opacity-70 bg-slate-50/50 border-slate-200' : 'border-slate-200/80'
-                        }`}
-                      >
-                        <div>
-                          {/* Card Header: Name & Enable Toggle Switch */}
-                          <div className="flex items-center justify-between gap-2 mb-2">
-                            <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5 truncate" title={acc.name}>
-                              {acc.name}
-                            </h4>
-                            
-                            {/* Toggle Switch */}
-                            <button
-                              onClick={() => handleToggleAccount(category.category, acc.id, isEnabled)}
-                              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold transition-all shadow-2xs flex-shrink-0 whitespace-nowrap ${
-                                isEnabled 
-                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100' 
-                                  : 'bg-slate-200/70 text-slate-600 border border-slate-300 hover:bg-slate-200'
-                              }`}
-                              title={isEnabled ? 'Bấm để Tắt tài khoản này' : 'Bấm để Bật tài khoản này'}
-                            >
-                              {isEnabled ? (
-                                <>
-                                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                                  <span>Đang Bật</span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                                  <span>Đã Tắt</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-
-                          {/* Status Badges: Đăng nhập / Profile / Online */}
-                          <div className="flex flex-wrap gap-1.5 mb-3">
-                            {/* Online / Port Status */}
-                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold ${
-                              isOnline 
-                                ? 'bg-emerald-100/90 text-emerald-800 border border-emerald-300' 
-                                : 'bg-slate-100 text-slate-500 border border-slate-200'
-                            }`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-600 animate-pulse' : 'bg-slate-400'}`}></span>
-                              {isOnline ? `Online (Port ${acc.port})` : `Chưa bật (Port ${acc.port})`}
+                {/* Account Cards Grid OR 3-Group Rotation Kanban for Groups */}
+                {category.category === 'groups' ? (
+                  <div className="space-y-6">
+                    {/* Header: Thanh điều khiển Chiến thuật 3 Nhóm */}
+                    <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-slate-50 via-indigo-50/40 to-slate-50 border border-slate-200 shadow-2xs">
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-200/80 flex items-center gap-1.5">
+                              <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                              CHIẾN THUẬT AN TOÀN 3 NHÓM
                             </span>
-
-                            {/* Real-time Login & Profile Status */}
-                            {isOnline ? (
-                              acc.loginStatus === 'logged_in' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Đã đăng nhập
-                                </span>
-                              ) : acc.loginStatus === 'not_logged_in' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 animate-pulse">
-                                  <AlertCircle className="w-3 h-3 text-rose-600" /> Chưa đăng nhập
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                                  <ShieldCheck className="w-3 h-3 text-blue-600" /> Chrome đang mở
-                                </span>
-                              )
-                            ) : (
-                              acc.profileExists ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200" title="Profile đã lưu trên máy. Bấm 'Mở Chrome Đăng nhập' để kiểm tra tài khoản">
-                                  <ShieldCheck className="w-3 h-3 text-slate-500" /> Profile đã tạo
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200" title="Chưa tạo profile. Bấm 'Mở Chrome Đăng nhập' để tạo và đăng nhập">
-                                  <AlertCircle className="w-3 h-3 text-amber-600" /> Chưa tạo Profile
-                                </span>
-                              )
-                            )}
-                          </div>
-
-                          <p className="text-xs text-slate-500 mb-3 line-clamp-2">{acc.desc}</p>
-                          
-                          <div className="flex flex-wrap gap-1.5 text-[11px]">
-                            <span className="bg-slate-100/90 text-slate-700 px-2.5 py-0.5 rounded-lg border border-slate-200/80 font-medium">
-                              Port: <b className="font-bold text-slate-900">{acc.port}</b>
+                            <span className="text-xs text-slate-500 font-medium">
+                              Luân phiên 24h & Cách ly phục hồi 7 ngày (168 giờ)
                             </span>
-                            <span className="bg-slate-100/90 text-slate-700 px-2.5 py-0.5 rounded-lg border border-slate-200/80 truncate max-w-[150px] font-medium" title={acc.profileDir}>
-                              Profile: <b className="font-bold text-slate-900">{acc.profileDir}</b>
-                            </span>
-                            {acc.groupCount !== undefined && (
-                              <span className="bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-lg border border-blue-200 font-bold">
-                                📁 {acc.groupCount} nhóm
-                              </span>
-                            )}
                           </div>
+                          <h4 className="text-base font-extrabold text-slate-900 tracking-tight">
+                            Phân Bổ Ca Đăng Bài & Khu Vực Cách Ly Phục Hồi Trust Score
+                          </h4>
+                          <p className="text-xs text-slate-600 leading-relaxed max-w-3xl">
+                            Tự động đổi ca xen kẽ mỗi ngày giữa <b>🟢 Nhóm 1</b> và <b>🟡 Nhóm 2</b> để Facebook nhận diện hoạt động tự nhiên như người dùng thật. Khi tài khoản gặp cảnh báo checkpoint, bot tự động giam vào <b>🔴 Nhóm 3 (168 giờ)</b> để xóa vi phạm spam và phục hồi độ uy tín.
+                          </p>
                         </div>
 
-                        {/* Action Buttons */}
-                        <div className="space-y-2 pt-2 border-t border-slate-100">
+                        {/* Controls: Ca trực & Đổi ca */}
+                        <div className="flex flex-wrap items-center gap-3 p-2.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs shrink-0">
+                          <div className="px-2 border-r border-slate-200 text-left">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Ca chạy hôm nay</span>
+                            <span className="text-xs font-extrabold flex items-center gap-1.5 mt-0.5">
+                              {groupsData.rotation?.activeGroupToday === 'group_1' ? (
+                                <span className="text-emerald-700 flex items-center gap-1">
+                                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                                  🟢 Nhóm 1 (Đang chạy)
+                                </span>
+                              ) : (
+                                <span className="text-amber-700 flex items-center gap-1">
+                                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                                  🟡 Nhóm 2 (Đang chạy)
+                                </span>
+                              )}
+                            </span>
+                          </div>
+
                           <button
-                            onClick={() => handleOpenChrome(acc.profileDir, acc.port, acc.url || 'https://chatgpt.com/')}
-                            className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-blue-500/20 hover:shadow-lg transition-all flex items-center justify-center gap-2"
+                            onClick={() => handleSwitchActiveGroup()}
+                            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-xs"
+                            title="Đổi phiên trực chiến ngay lập tức giữa Nhóm 1 và Nhóm 2"
                           >
-                            <ExternalLink className="w-3.5 h-3.5" /> Mở Chrome Đăng nhập
+                            <ArrowLeftRight className="w-3.5 h-3.5" />
+                            Đổi ca trực ngay
                           </button>
 
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => {
-                                if (category.category === 'chatgpt') openEditChatGptModal(acc);
-                                else if (category.category === 'fanpage') openEditFanpageModal(acc);
-                                else if (category.category === 'personal') openEditPersonalModal(acc);
-                                else if (category.category === 'groups') openEditAccountModal(acc);
-                              }}
-                              className="flex-1 py-1.5 px-3 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-xs font-bold text-slate-600 transition-all flex items-center justify-center gap-1 shadow-2xs hover:text-blue-600"
-                            >
-                              <Edit3 className="w-3 h-3 text-slate-500" /> Sửa
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (category.category === 'chatgpt') handleDeleteChatGpt(acc.id, acc.name);
-                                else if (category.category === 'fanpage') handleDeleteFanpage(acc.id, acc.name);
-                                else if (category.category === 'personal') handleDeletePersonal(acc.id, acc.name);
-                                else if (category.category === 'groups') handleDeleteAccount(acc.id, acc.name);
-                              }}
-                              className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-all"
-                              title="Xóa tài khoản này"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+                          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none pl-1">
+                            <input
+                              type="checkbox"
+                              checked={groupsData.rotation?.enabled !== false}
+                              onChange={(e) => handleToggleRotation(e.target.checked)}
+                              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span>Tự xoay ca mỗi ngày</span>
+                          </label>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
+                    </div>
+
+                    {/* 3 Columns Kanban Board */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
+                      {/* ================= CỘT 1: NHÓM 1 ================= */}
+                      <div className={`rounded-2xl p-4 sm:p-5 border transition-all flex flex-col min-h-[460px] ${
+                        groupsData.rotation?.activeGroupToday === 'group_1'
+                          ? 'bg-emerald-50/30 border-emerald-300 ring-2 ring-emerald-500/20 shadow-sm'
+                          : 'bg-slate-50/50 border-slate-200/90 shadow-2xs'
+                      }`}>
+                        {/* Column Header */}
+                        <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-200/80">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full bg-emerald-500 shadow-xs" />
+                              <h4 className="font-extrabold text-slate-900 text-sm">🟢 NHÓM 1: ĐỘI CHÍNH</h4>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-0.5">Đăng bài ngày lẻ / Phiên A luân phiên</p>
+                          </div>
+                          {groupsData.rotation?.activeGroupToday === 'group_1' ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 animate-pulse flex items-center gap-1">
+                              🔥 ĐANG CHẠY
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                              💤 Nghỉ ngơi
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Stats Summary Badge */}
+                        <div className="my-3 px-3 py-1.5 rounded-xl bg-white border border-slate-200/80 shadow-2xs flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-700">
+                            👤 {(groupsData.accounts || []).filter((a) => a.roleGroup === 'group_1').length} tài khoản
+                          </span>
+                          <span className="font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
+                            🔗 {(groupsData.accounts || [])
+                              .filter((a) => a.roleGroup === 'group_1')
+                              .reduce((sum, a) => sum + (a.groupUrls?.length || 0), 0)} link nhóm
+                          </span>
+                        </div>
+
+                        {/* Account Cards List */}
+                        <div className="space-y-3 flex-1">
+                          {(groupsData.accounts || []).filter((a) => a.roleGroup === 'group_1').length === 0 ? (
+                            <div className="text-center py-10 text-xs text-slate-400 italic bg-white/70 rounded-xl border border-dashed border-slate-200">
+                              Chưa có tài khoản nào trong Nhóm 1
+                            </div>
+                          ) : (
+                            (groupsData.accounts || [])
+                              .filter((a) => a.roleGroup === 'group_1')
+                              .map((acc) => {
+                                const catItem = category.items.find((it) => it.id === acc.id || it.id === `group_${acc.id}` || it.profileDir === acc.profileDir);
+                                const isOnline = catItem?.isReady;
+                                const loginStatus = catItem?.loginStatus;
+
+                                return (
+                                  <div key={acc.id} className="p-3.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs hover:shadow-xs transition-all space-y-3">
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2.5 min-w-0">
+                                        <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 font-extrabold text-xs flex items-center justify-center shrink-0">
+                                          {acc.name.slice(0, 2).toUpperCase()}
+                                        </div>
+                                        <div className="min-w-0">
+                                          <div className="font-extrabold text-slate-900 text-sm truncate">{acc.name}</div>
+                                          <span className="text-[10px] text-slate-400 font-mono block truncate">
+                                            {acc.profileDir}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <span className="px-2 py-0.5 rounded-md text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-200 shrink-0">
+                                        {acc.groupUrls?.length || 0} link
+                                      </span>
+                                    </div>
+
+                                    {/* Chrome & FB Status */}
+                                    <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold ${
+                                        isOnline ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200'
+                                      }`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                                        Port 3002 {isOnline ? 'Online' : 'Chưa bật'}
+                                      </span>
+                                      {loginStatus === 'logged_in' ? (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                          <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Đã login FB
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                                          Profile sẵn sàng
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                                      <button
+                                        onClick={() => handleOpenChrome(acc.profileDir || '', 3002, 'https://www.facebook.com/')}
+                                        className="w-full py-1.5 px-3 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-all flex items-center justify-center gap-1.5 border border-indigo-200/70"
+                                      >
+                                        <ExternalLink className="w-3.5 h-3.5" /> Mở Chrome Profile
+                                      </button>
+                                      <div className="flex items-center gap-1.5">
+                                        <button
+                                          onClick={() => handleChangeRoleGroup(acc.id, 'group_2')}
+                                          className="flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 transition-all flex items-center justify-center gap-1"
+                                          title="Chuyển sang Nhóm 2 (Đội dự phòng)"
+                                        >
+                                          <ArrowRight className="w-3 h-3" /> Sang Nhóm 2
+                                        </button>
+                                        <button
+                                          onClick={() => handleChangeRoleGroup(acc.id, 'quarantine')}
+                                          className="py-1.5 px-2 rounded-lg text-[11px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 transition-all flex items-center justify-center gap-1"
+                                          title="Cách ly 7 ngày"
+                                        >
+                                          <Lock className="w-3 h-3" /> Cách ly 7N
+                                        </button>
+                                        {catItem && (
+                                          <>
+                                            <button
+                                              onClick={() => openEditAccountModal(catItem)}
+                                              className="p-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 transition-all"
+                                              title="Sửa tài khoản"
+                                            >
+                                              <Edit3 className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                              onClick={() => handleDeleteAccount(acc.id, acc.name)}
+                                              className="p-1.5 rounded-lg bg-slate-50 hover:bg-rose-50 text-rose-600 border border-slate-200 transition-all"
+                                              title="Xóa tài khoản"
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                          )}
+                        </div>
+                      </div>
+
+                      {/* ================= CỘT 2: NHÓM 2 ================= */}
+                      <div className={`rounded-2xl p-4 sm:p-5 border transition-all flex flex-col min-h-[460px] ${
+                        groupsData.rotation?.activeGroupToday === 'group_2'
+                          ? 'bg-amber-50/30 border-amber-300 ring-2 ring-amber-500/20 shadow-sm'
+                          : 'bg-slate-50/50 border-slate-200/90 shadow-2xs'
+                      }`}>
+                        {/* Column Header */}
+                        <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-200/80">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full bg-amber-500 shadow-xs" />
+                              <h4 className="font-extrabold text-slate-900 text-sm">🟡 NHÓM 2: ĐỘI DỰ PHÒNG</h4>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-0.5">Nghỉ ngơi hồi trust / Trực nhật ngày mai</p>
+                          </div>
+                          {groupsData.rotation?.activeGroupToday === 'group_2' ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300 animate-pulse flex items-center gap-1">
+                              🔥 ĐANG CHẠY
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                              💤 Nghỉ ngơi hồi phục
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Stats Summary Badge */}
+                        <div className="my-3 px-3 py-1.5 rounded-xl bg-white border border-slate-200/80 shadow-2xs flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-700">
+                            👤 {(groupsData.accounts || []).filter((a) => a.roleGroup === 'group_2').length} tài khoản
+                          </span>
+                          <span className="font-extrabold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/60">
+                            🔗 {(groupsData.accounts || [])
+                              .filter((a) => a.roleGroup === 'group_2')
+                              .reduce((sum, a) => sum + (a.groupUrls?.length || 0), 0)} link nhóm
+                          </span>
+                        </div>
+
+                        {/* Account Cards List */}
+                        <div className="space-y-3 flex-1">
+                          {(groupsData.accounts || []).filter((a) => a.roleGroup === 'group_2').length === 0 ? (
+                            <div className="text-center py-10 text-xs text-slate-400 italic bg-white/70 rounded-xl border border-dashed border-slate-200">
+                              Chưa có tài khoản nào trong Nhóm 2
+                            </div>
+                          ) : (
+                            (groupsData.accounts || [])
+                              .filter((a) => a.roleGroup === 'group_2')
+                              .map((acc) => {
+                                const catItem = category.items.find((it) => it.id === acc.id || it.id === `group_${acc.id}` || it.profileDir === acc.profileDir);
+                                const isOnline = catItem?.isReady;
+                                const loginStatus = catItem?.loginStatus;
+
+                                return (
+                                  <div key={acc.id} className="p-3.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs hover:shadow-xs transition-all space-y-3">
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-2.5 min-w-0">
+                                        <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 font-extrabold text-xs flex items-center justify-center shrink-0">
+                                          {acc.name.slice(0, 2).toUpperCase()}
+                                        </div>
+                                        <div className="min-w-0">
+                                          <div className="font-extrabold text-slate-900 text-sm truncate">{acc.name}</div>
+                                          <span className="text-[10px] text-slate-400 font-mono block truncate">
+                                            {acc.profileDir}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <span className="px-2 py-0.5 rounded-md text-xs font-extrabold bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
+                                        {acc.groupUrls?.length || 0} link
+                                      </span>
+                                    </div>
+
+                                    {/* Chrome & FB Status */}
+                                    <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold ${
+                                        isOnline ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200'
+                                      }`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+                                        Port 3002 {isOnline ? 'Online' : 'Chưa bật'}
+                                      </span>
+                                      {loginStatus === 'logged_in' ? (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                          <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Đã login FB
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                                          Profile sẵn sàng
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Action Buttons */}
+                                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                                      <button
+                                        onClick={() => handleOpenChrome(acc.profileDir || '', 3002, 'https://www.facebook.com/')}
+                                        className="w-full py-1.5 px-3 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-all flex items-center justify-center gap-1.5 border border-indigo-200/70"
+                                      >
+                                        <ExternalLink className="w-3.5 h-3.5" /> Mở Chrome Profile
+                                      </button>
+                                      <div className="flex items-center gap-1.5">
+                                        <button
+                                          onClick={() => handleChangeRoleGroup(acc.id, 'group_1')}
+                                          className="flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition-all flex items-center justify-center gap-1"
+                                          title="Chuyển sang Nhóm 1 (Đội chính)"
+                                        >
+                                          <ArrowRight className="w-3 h-3" /> Sang Nhóm 1
+                                        </button>
+                                        <button
+                                          onClick={() => handleChangeRoleGroup(acc.id, 'quarantine')}
+                                          className="py-1.5 px-2 rounded-lg text-[11px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 transition-all flex items-center justify-center gap-1"
+                                          title="Cách ly 7 ngày"
+                                        >
+                                          <Lock className="w-3 h-3" /> Cách ly 7N
+                                        </button>
+                                        {catItem && (
+                                          <>
+                                            <button
+                                              onClick={() => openEditAccountModal(catItem)}
+                                              className="p-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 transition-all"
+                                              title="Sửa tài khoản"
+                                            >
+                                              <Edit3 className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                              onClick={() => handleDeleteAccount(acc.id, acc.name)}
+                                              className="p-1.5 rounded-lg bg-slate-50 hover:bg-rose-50 text-rose-600 border border-slate-200 transition-all"
+                                              title="Xóa tài khoản"
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                          )}
+                        </div>
+                      </div>
+
+                      {/* ================= CỘT 3: NHÓM 3 (KHU CÁCH LY 7 NGÀY) ================= */}
+                      <div className="rounded-2xl p-4 sm:p-5 bg-gradient-to-b from-rose-50/40 via-white to-white border border-rose-200/90 shadow-2xs flex flex-col min-h-[460px]">
+                        {/* Column Header */}
+                        <div className="flex items-start justify-between gap-2 pb-3 border-b border-rose-200/70">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full bg-rose-600 animate-pulse" />
+                              <h4 className="font-extrabold text-rose-900 text-sm">🔴 NHÓM 3: KHU CÁCH LY 7 NGÀY</h4>
+                            </div>
+                            <p className="text-[11px] text-rose-600/80 mt-0.5">Đóng băng 168 giờ, tuyệt đối không đụng vào</p>
+                          </div>
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
+                            {(groupsData.accounts || []).filter((a) => a.roleGroup === 'quarantine').length} bị phạt
+                          </span>
+                        </div>
+
+                        {/* Notice Box */}
+                        <div className="p-3 my-3 rounded-xl bg-rose-50/70 border border-rose-200/60 text-[11px] text-rose-800 leading-relaxed">
+                          💡 <b>Nguyên tắc:</b> Tài khoản khi gặp cảnh báo của Facebook sẽ tự động bị giam ở đây trong <b>7 ngày (168 giờ)</b> để xóa cờ vi phạm spam. Sau 7 ngày bot sẽ tự động đưa về nhóm ban đầu.
+                        </div>
+
+                        {/* Quarantined List */}
+                        <div className="space-y-3 flex-1">
+                          {(groupsData.accounts || []).filter((a) => a.roleGroup === 'quarantine').length === 0 ? (
+                            <div className="text-center py-10 px-4 bg-emerald-50/30 rounded-xl border border-dashed border-emerald-200/80 text-slate-500 space-y-2">
+                              <ShieldCheck className="w-8 h-8 text-emerald-500 mx-auto" />
+                              <div className="text-sm font-extrabold text-emerald-800">Tất cả tài khoản đều an toàn!</div>
+                              <p className="text-[11px] text-slate-400">Không có tài khoản nào bị cảnh báo hoặc đang cách ly.</p>
+                            </div>
+                          ) : (
+                            (groupsData.accounts || [])
+                              .filter((a) => a.roleGroup === 'quarantine')
+                              .map((acc) => {
+                                return (
+                                  <div key={acc.id} className="p-3.5 rounded-xl bg-white border border-rose-200 shadow-2xs space-y-3">
+                                    <div className="flex items-start justify-between">
+                                      <div>
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="font-extrabold text-slate-900 text-sm">{acc.name}</span>
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 font-mono font-bold">
+                                            CÁCH LY
+                                          </span>
+                                        </div>
+                                        <span className="text-[11px] text-slate-500 font-mono block mt-0.5">
+                                          📁 {acc.profileDir}
+                                        </span>
+                                      </div>
+                                      <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-bold">
+                                        Gốc: {acc.originalRoleGroup === 'group_2' ? '🟡 Nhóm 2' : '🟢 Nhóm 1'}
+                                      </span>
+                                    </div>
+
+                                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-100 text-[11px] text-rose-700 space-y-1">
+                                      <div className="font-bold flex items-center gap-1">
+                                        <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                        Lý do: {acc.quarantineReason || acc.disabledReason || 'Bị cảnh báo kiểm tra checkpoint'}
+                                      </div>
+                                      <div className="font-medium text-slate-600">
+                                        ⏳ Còn lại: <b className="text-rose-900 font-bold">{formatCountdown(acc.quarantineUntil || acc.cooldownUntil)}</b>
+                                      </div>
+                                    </div>
+
+                                    <div className="space-y-1.5 pt-1">
+                                      <button
+                                        onClick={() => handleOpenChrome(acc.profileDir || '', 3002, 'https://www.facebook.com/')}
+                                        className="w-full py-1.5 px-3 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all flex items-center justify-center gap-1.5 border border-slate-200"
+                                      >
+                                        <ExternalLink className="w-3 h-3" /> Mở Chrome gỡ checkpoint
+                                      </button>
+                                      <button
+                                        onClick={() => handleReleaseQuarantine(acc.id)}
+                                        className="w-full py-2 px-3 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-xs flex items-center justify-center gap-1.5"
+                                      >
+                                        <Unlock className="w-3.5 h-3.5" /> 🔓 Mở khóa sớm (Đã giải checkpoint)
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* Account Cards Grid for ChatGPT, Fanpage, Personal */
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {category.items.map(acc => {
+                      const isEnabled = acc.enabled !== false;
+                      const isOnline = acc.isReady;
+                      const isConfigured = acc.isConfigured || acc.profileExists;
+
+                      return (
+                        <div
+                          key={acc.id}
+                          className={`liquid-glass-subtle liquid-glass-interactive rounded-2xl p-5 flex flex-col justify-between gap-4 border transition-all ${
+                            !isEnabled ? 'opacity-70 bg-slate-50/50 border-slate-200' : 'border-slate-200/80'
+                          }`}
+                        >
+                          <div>
+                            {/* Card Header: Name & Enable Toggle Switch */}
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5 truncate" title={acc.name}>
+                                {acc.name}
+                              </h4>
+                              
+                              {/* Toggle Switch */}
+                              <button
+                                onClick={() => handleToggleAccount(category.category, acc.id, isEnabled)}
+                                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold transition-all shadow-2xs flex-shrink-0 whitespace-nowrap ${
+                                  isEnabled 
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100' 
+                                    : 'bg-slate-200/70 text-slate-600 border border-slate-300 hover:bg-slate-200'
+                                }`}
+                                title={isEnabled ? 'Bấm để Tắt tài khoản này' : 'Bấm để Bật tài khoản này'}
+                              >
+                                {isEnabled ? (
+                                  <>
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                    <span>Đang Bật</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                                    <span>Đã Tắt</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            {/* Status Badges: Đăng nhập / Profile / Online */}
+                            <div className="flex flex-wrap gap-1.5 mb-3">
+                              {/* Online / Port Status */}
+                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold ${
+                                isOnline 
+                                  ? 'bg-emerald-100/90 text-emerald-800 border border-emerald-300' 
+                                  : 'bg-slate-100 text-slate-500 border border-slate-200'
+                              }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-600 animate-pulse' : 'bg-slate-400'}`}></span>
+                                {isOnline ? `Online (Port ${acc.port})` : `Chưa bật (Port ${acc.port})`}
+                              </span>
+
+                              {/* Real-time Login & Profile Status */}
+                              {isOnline ? (
+                                acc.loginStatus === 'logged_in' ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Đã đăng nhập
+                                  </span>
+                                ) : acc.loginStatus === 'not_logged_in' ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 animate-pulse">
+                                    <AlertCircle className="w-3 h-3 text-rose-600" /> Chưa đăng nhập
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                    <ShieldCheck className="w-3 h-3 text-blue-600" /> Chrome đang mở
+                                  </span>
+                                )
+                              ) : (
+                                acc.profileExists ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200" title="Profile đã lưu trên máy. Bấm 'Mở Chrome Đăng nhập' để kiểm tra tài khoản">
+                                    <ShieldCheck className="w-3 h-3 text-slate-500" /> Profile đã tạo
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200" title="Chưa tạo profile. Bấm 'Mở Chrome Đăng nhập' để tạo và đăng nhập">
+                                    <AlertCircle className="w-3 h-3 text-amber-600" /> Chưa tạo Profile
+                                  </span>
+                                )
+                              )}
+                            </div>
+
+                            <p className="text-xs text-slate-500 mb-3 line-clamp-2">{acc.desc}</p>
+                            
+                            <div className="flex flex-wrap gap-1.5 text-[11px]">
+                              <span className="bg-slate-100/90 text-slate-700 px-2.5 py-0.5 rounded-lg border border-slate-200/80 font-medium">
+                                Port: <b className="font-bold text-slate-900">{acc.port}</b>
+                              </span>
+                              <span className="bg-slate-100/90 text-slate-700 px-2.5 py-0.5 rounded-lg border border-slate-200/80 truncate max-w-[150px] font-medium" title={acc.profileDir}>
+                                Profile: <b className="font-bold text-slate-900">{acc.profileDir}</b>
+                              </span>
+                              {acc.groupCount !== undefined && (
+                                <span className="bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-lg border border-blue-200 font-bold">
+                                  📁 {acc.groupCount} nhóm
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="space-y-2 pt-2 border-t border-slate-100">
+                            <button
+                              onClick={() => handleOpenChrome(acc.profileDir, acc.port, acc.url || 'https://chatgpt.com/')}
+                              className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-blue-500/20 hover:shadow-lg transition-all flex items-center justify-center gap-2"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" /> Mở Chrome Đăng nhập
+                            </button>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  if (category.category === 'chatgpt') openEditChatGptModal(acc);
+                                  else if (category.category === 'fanpage') openEditFanpageModal(acc);
+                                  else if (category.category === 'personal') openEditPersonalModal(acc);
+                                  else if (category.category === 'groups') openEditAccountModal(acc);
+                                }}
+                                className="flex-1 py-1.5 px-3 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-xs font-bold text-slate-600 transition-all flex items-center justify-center gap-1 shadow-2xs hover:text-blue-600"
+                              >
+                                <Edit3 className="w-3 h-3 text-slate-500" /> Sửa
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (category.category === 'chatgpt') handleDeleteChatGpt(acc.id, acc.name);
+                                  else if (category.category === 'fanpage') handleDeleteFanpage(acc.id, acc.name);
+                                  else if (category.category === 'personal') handleDeletePersonal(acc.id, acc.name);
+                                  else if (category.category === 'groups') handleDeleteAccount(acc.id, acc.name);
+                                }}
+                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-all"
+                                title="Xóa tài khoản này"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
               </div>
             ))}
@@ -3400,7 +4090,7 @@ export default function DashboardPage() {
                   <UserPlus className="w-4 h-4 text-blue-600" /> Thêm Nick
                 </button>
                 <button
-                  onClick={() => setIsAddGroupOpen(true)}
+                  onClick={() => { setDetectedGroupName(''); setIsAddGroupOpen(true); }}
                   className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-slate-700 shadow-xs transition-all"
                 >
                   <Plus className="w-4 h-4 text-emerald-600" /> Thêm link lẻ
@@ -3408,8 +4098,34 @@ export default function DashboardPage() {
               </div>
             </div>
 
+            {/* 3 Groups Status Notification Banner */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-indigo-50/70 border border-indigo-200/80 shadow-2xs">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-slate-800 flex flex-wrap items-center gap-2">
+                    <span>Chiến thuật 3 Nhóm Luân phiên & Cách ly 7 ngày:</span>
+                    <span className="inline-flex items-center gap-1 font-extrabold text-indigo-700 bg-white px-2 py-0.5 rounded-md border border-indigo-200 text-[11px]">
+                      {groupsData.rotation?.activeGroupToday === 'group_1' ? '🟢 Ca hôm nay: Nhóm 1 (Đội chính)' : '🟡 Ca hôm nay: Nhóm 2 (Đội dự phòng)'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Phân bổ nick vào Nhóm 1, Nhóm 2 và Khu cách ly 7 ngày hiện được hiển thị & quản lý trực quan tại tab <b>Quản lý Tài khoản</b>.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveTab('accounts')}
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-xs shrink-0"
+              >
+                Sang Quản lý Tài khoản <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
             {/* View Switcher Pills */}
-            <div className="flex items-center gap-2 p-1.5 bg-slate-100/90 rounded-2xl w-fit border border-slate-200/80">
+            <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-100/90 rounded-2xl w-fit border border-slate-200/80">
               <button
                 onClick={() => setGroupViewMode('pool')}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
@@ -3893,131 +4609,6 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ==================== TAB 4: ĐĂNG BÀI NHANH ==================== */}
-        {activeTab === 'quick-post' && (
-          <div className="max-w-2xl mx-auto liquid-glass rounded-3xl p-8 space-y-6">
-            
-            <div className="border-b border-slate-200/80 pb-5">
-              <h3 className="font-extrabold text-lg text-slate-900 flex items-center gap-2.5">
-                <span className="p-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100">
-                  <Send className="w-5 h-5" />
-                </span>
-                Trung tâm Đăng bài Trực tiếp (Manual Trigger)
-              </h3>
-              <p className="text-xs text-slate-500 font-medium mt-1">Tạo ảnh ChatGPT và xuất bản ngay lên kênh mong muốn để kiểm tra</p>
-            </div>
-
-            <form onSubmit={executeQuickPublish} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">Chọn Kênh xuất bản:</label>
-                <select
-                  value={qpChannel}
-                  onChange={(e) => setQpChannel(e.target.value as 'fanpage' | 'groups' | 'personal')}
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-900"
-                >
-                  <option value="fanpage">Facebook Fanpage (Bridge Port 3001)</option>
-                  <option value="groups">Facebook Groups (Bridge Port 3002)</option>
-                  <option value="personal">Facebook Trang Cá Nhân (Bridge Port 3003)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">Nội dung Caption đăng bài:</label>
-                <textarea
-                  value={qpCaption}
-                  onChange={(e) => setQpCaption(e.target.value)}
-                  rows={5}
-                  placeholder="Nhập nội dung đầy đủ bài viết đăng lên Facebook..."
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">Prompt Tạo ảnh ChatGPT:</label>
-                <textarea
-                  value={qpPrompt}
-                  onChange={(e) => setQpPrompt(e.target.value)}
-                  rows={2}
-                  placeholder="Mô tả bối cảnh hình ảnh mong muốn..."
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Tỉ lệ ảnh:</label>
-                  <select
-                    value={qpAspect}
-                    onChange={(e) => setQpAspect(e.target.value)}
-                    className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-900"
-                  >
-                    <option value="4:5">4:5 (Khuyên dùng Facebook)</option>
-                    <option value="16:9">16:9 (Ngang)</option>
-                    <option value="1:1">1:1 (Vuông)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Mascot Du:</label>
-                  <select
-                    value={qpHasDu ? 'true' : 'false'}
-                    onChange={(e) => setQpHasDu(e.target.value === 'true')}
-                    className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-900"
-                  >
-                    <option value="true">Có Mascot Du (Workflow Giờ Chẵn)</option>
-                    <option value="false">Người thật Photorealistic (Workflow Giờ Lẻ)</option>
-                  </select>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={qpLoading}
-                className={`w-full py-4 rounded-2xl font-extrabold text-sm shadow-lg transition-all flex items-center justify-center gap-2 ${
-                  qpLoading
-                    ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/30 hover:shadow-xl'
-                }`}
-              >
-                {qpLoading ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin text-slate-500" />
-                    Đang tạo ảnh ChatGPT & Đăng bài (Khoảng 1 - 2 phút)...
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    Bắt đầu Tạo ảnh ChatGPT & Đăng bài ngay
-                  </>
-                )}
-              </button>
-            </form>
-
-            {/* Quick Post Result Box */}
-            {qpResult && (
-              <div className={`p-5 rounded-2xl border ${
-                qpResult.success ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-rose-50 border-rose-200 text-rose-900'
-              }`}>
-                <div className="font-extrabold flex items-center gap-2 text-sm mb-2">
-                  {qpResult.success ? <CheckCircle2 className="w-5 h-5 text-emerald-600" /> : <AlertCircle className="w-5 h-5 text-rose-600" />}
-                  {qpResult.message}
-                </div>
-                {qpResult.imageBase64 && (
-                  <div className="mt-3">
-                    <img
-                      src={`data:image/png;base64,${qpResult.imageBase64}`}
-                      alt="Generated by ChatGPT"
-                      className="max-h-56 rounded-xl border border-slate-200 shadow-md object-contain"
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-
-          </div>
-        )}
-
         {/* ==================== TAB: LỊCH ĐĂNG TỰ ĐỘNG & GEMINI AUTO-PILOT ==================== */}
         {activeTab === 'schedule' && (
           <div className="space-y-8 max-w-6xl mx-auto">
@@ -4122,8 +4713,15 @@ export default function DashboardPage() {
                       <Zap className="w-5 h-5" />
                     </div>
                     <div>
-                      <h3 className="font-extrabold text-lg text-slate-900 flex items-center gap-2">
+                      <h3 className="font-extrabold text-lg text-slate-900 flex flex-wrap items-center gap-2">
                         Quy Trình Đăng Bài Tự Động
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black border shadow-xs ${
+                          (scheduleConfig.aiProvider || 'groq') === 'groq'
+                            ? 'bg-amber-500/15 text-amber-700 border-amber-300'
+                            : 'bg-indigo-500/15 text-indigo-700 border-indigo-300'
+                        }`} title="Hệ thống AI đang được dùng để viết bài Facebook">
+                          {(scheduleConfig.aiProvider || 'groq') === 'groq' ? '⚡ Groq AI (Đang Dùng)' : '✨ Gemini AI (Đang Dùng)'}
+                        </span>
                         {scheduleTriggering && (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
                             <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
@@ -4245,7 +4843,7 @@ export default function DashboardPage() {
                   )}
                 </div>
 
-                {/* Bước 2: Gemini AI */}
+                {/* Bước 2: AI Viết Bài (Groq hoặc Gemini) */}
                 <div className={`p-4 rounded-2xl border transition-all relative ${
                   scheduleTriggering && liveProgress?.step === 2
                     ? 'bg-indigo-50/80 border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
@@ -4257,16 +4855,58 @@ export default function DashboardPage() {
                     <span className="w-7 h-7 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-xs font-black">
                       {liveProgress?.step && liveProgress.step > 2 ? '✓' : '2'}
                     </span>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Viết Bài</span>
+                    <div className="flex items-center justify-between flex-1 ml-2">
+                      <h4 className="text-xs font-extrabold text-slate-800">2. AI Viết Bài</h4>
+                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-md ${
+                        (scheduleConfig.aiProvider || 'groq') === 'groq'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-indigo-100 text-indigo-800'
+                      }`}>
+                        {(scheduleConfig.aiProvider || 'groq') === 'groq' ? '⚡ Groq' : '✨ Gemini'}
+                      </span>
+                    </div>
                   </div>
-                  <h4 className="text-xs font-extrabold text-slate-800">2. Gemini 2.5 Flash</h4>
-                  <p className="text-[11px] text-slate-500 mt-1 leading-snug">
-                    Viết bài chuẩn SEO Facebook, tạo caption hấp dẫn và lên prompt vẽ ảnh.
+
+                  {/* Pills chọn nhanh Groq hoặc Gemini */}
+                  <div className="mt-1 flex items-center gap-1 bg-slate-200/80 p-0.5 rounded-xl">
+                    <button
+                      type="button"
+                      disabled={scheduleTriggering}
+                      onClick={() => handleSaveScheduleConfig({ ...scheduleConfig, aiProvider: 'groq' })}
+                      className={`flex-1 py-1 px-1.5 rounded-lg text-[10px] font-black tracking-tight transition-all cursor-pointer truncate ${
+                        (scheduleConfig.aiProvider || 'groq') === 'groq'
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      }`}
+                      title="Chuyển sang Groq AI (Miễn phí 100%)"
+                    >
+                      ⚡ Groq
+                    </button>
+                    <button
+                      type="button"
+                      disabled={scheduleTriggering}
+                      onClick={() => handleSaveScheduleConfig({ ...scheduleConfig, aiProvider: 'gemini' })}
+                      className={`flex-1 py-1 px-1.5 rounded-lg text-[10px] font-black tracking-tight transition-all cursor-pointer truncate ${
+                        scheduleConfig.aiProvider === 'gemini'
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      }`}
+                      title="Chuyển sang Google Gemini AI"
+                    >
+                      ✨ Gemini
+                    </button>
+                  </div>
+
+                  <p className="text-[10px] text-slate-500 mt-1.5 leading-snug">
+                    Đang dùng: <b className={`font-mono ${(scheduleConfig.aiProvider || 'groq') === 'groq' ? 'text-amber-700' : 'text-indigo-700'}`}>
+                      {(scheduleConfig.aiProvider || 'groq') === 'groq' ? '[⚡ Groq LPU]' : '[✨ Google Gemini]'}
+                    </b>.
+                    <span className="block text-[9px] text-slate-400 mt-0.5">Tự động đổi nếu hết token</span>
                   </p>
                   {scheduleTriggering && liveProgress?.step === 2 && (
                     <div className="mt-2.5 flex items-center gap-1.5 text-[10px] font-bold text-indigo-700">
                       <RefreshCw className="w-3 h-3 animate-spin" />
-                      <span>Gemini đang viết bài...</span>
+                      <span>{(scheduleConfig.aiProvider || 'groq') === 'groq' ? 'Groq LPU đang viết bài...' : 'Gemini đang viết bài...'}</span>
                     </div>
                   )}
                 </div>
@@ -4339,18 +4979,6 @@ export default function DashboardPage() {
                       title="Bấm để Bật/Tắt 151 Nhóm"
                     >
                       {scheduleConfig.channels?.groups ? '✓ 151 Nhóm' : '✕ 151 Nhóm'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleChannel('personal')}
-                      className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all cursor-pointer ${
-                        scheduleConfig.channels?.personal
-                          ? 'bg-purple-600 text-white shadow-xs hover:bg-purple-700'
-                          : 'bg-slate-200 text-slate-400 hover:bg-slate-300'
-                      }`}
-                      title="Bấm để Bật/Tắt Cá Nhân"
-                    >
-                      {scheduleConfig.channels?.personal ? '✓ Cá Nhân' : '✕ Cá Nhân'}
                     </button>
                   </div>
                   {scheduleTriggering && liveProgress?.step === 4 && (
@@ -4453,8 +5081,8 @@ export default function DashboardPage() {
                     )}
                   </div>
 
-                  {/* Kênh đã đăng & Trạng thái Google Sheet */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-emerald-200">
+                  {/* Kênh đã đăng, Trạng thái Google Sheet & Nhà cung cấp AI viết bài */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 pt-2 border-t border-emerald-200">
                     <div className="p-2.5 rounded-xl bg-white/80 border border-emerald-200 text-xs">
                       <span className="text-slate-500">151 Nhóm FB:</span>{' '}
                       <span className="font-bold text-emerald-700">
@@ -4472,6 +5100,15 @@ export default function DashboardPage() {
                       <span className="font-bold text-emerald-700">
                         {triggerResult.sheetUpdated ? '✓ Đã ghi link & ngày đăng' : 'Đã ghi nhận'}
                       </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-white/80 border border-emerald-200 text-xs">
+                      <span className="text-slate-500">AI Viết Bài:</span>{' '}
+                      <span className={`font-black ${triggerResult.provider === 'groq' ? 'text-amber-700' : 'text-indigo-700'}`}>
+                        {triggerResult.provider === 'groq' ? '⚡ Groq Cloud LPU' : '✨ Google Gemini'}
+                      </span>
+                      {triggerResult.fallbackNotice && (
+                        <p className="text-[10px] text-amber-700 font-bold mt-0.5">⚠️ {triggerResult.fallbackNotice}</p>
+                      )}
                     </div>
                   </div>
 
@@ -4530,7 +5167,7 @@ export default function DashboardPage() {
                       workflowActiveTab === 'ai_config' ? 'bg-indigo-600 text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    ✨ Gemini &amp; Mascot
+                    🤖 AI Viết Bài &amp; Mascot
                   </button>
                 </div>
               </div>
@@ -4541,11 +5178,11 @@ export default function DashboardPage() {
                   <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200/80 text-xs text-amber-900 font-medium flex items-center gap-2.5">
                     <Clock className="w-5 h-5 text-amber-600 shrink-0" />
                     <span>
-                      <b>Lịch đăng độc lập từng kênh:</b> Bạn có thể đặt giờ đăng Fanpage riêng (vd: 08:00, 16:00), giờ đăng Nhóm riêng (vd: 09:30, 14:00, 20:00) và giờ đăng Cá Nhân riêng mà không bị gộp chung!
+                      <b>Lịch đăng độc lập từng kênh:</b> Bạn có thể đặt giờ đăng Fanpage riêng (vd: 08:00, 16:00) và giờ đăng Nhóm riêng (vd: 09:30, 14:00, 20:00) mà không bị gộp chung!
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     
                     {/* CARD 1: FANPAGE SCHEDULE */}
                     <div className="p-5 rounded-2xl bg-blue-50/60 border border-blue-200/80 shadow-xs space-y-4">
@@ -4771,117 +5408,7 @@ export default function DashboardPage() {
                       </button>
                     </div>
 
-                    {/* CARD 3: PERSONAL PROFILE SCHEDULE */}
-                    <div className="p-5 rounded-2xl bg-purple-50/60 border border-purple-200/80 shadow-xs space-y-4">
-                      <div className="flex items-center justify-between border-b border-purple-200/80 pb-3">
-                        <div className="flex items-center gap-2">
-                          <span className="p-2 rounded-xl bg-purple-600 text-white shadow-xs">
-                            <Globe className="w-4 h-4" />
-                          </span>
-                          <div>
-                            <h4 className="font-extrabold text-sm text-slate-900">Facebook Cá Nhân</h4>
-                            <span className="text-[10px] font-bold text-purple-700">Port 3003</span>
-                          </div>
-                        </div>
 
-                        {/* Interactive Toggle Switch */}
-                        <button
-                          type="button"
-                          onClick={() => handleToggleChannel('personal')}
-                          className="flex items-center gap-2 cursor-pointer group select-none p-1 rounded-xl hover:bg-purple-100/50 transition-all"
-                          title={scheduleConfig.channels?.personal ? "Bấm để TẮT đăng Cá Nhân" : "Bấm để BẬT đăng Cá Nhân"}
-                        >
-                          <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full transition-all ${
-                            scheduleConfig.channels?.personal ? 'bg-purple-100 text-purple-700' : 'bg-slate-200 text-slate-500'
-                          }`}>
-                            {scheduleConfig.channels?.personal ? 'ĐANG BẬT' : 'ĐÃ TẮT'}
-                          </span>
-                          <div className={`w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ease-in-out ${
-                            scheduleConfig.channels?.personal ? 'bg-purple-600' : 'bg-slate-300'
-                          }`}>
-                            <div className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform duration-200 ease-in-out ${
-                              scheduleConfig.channels?.personal ? 'translate-x-5' : 'translate-x-0'
-                            }`} />
-                          </div>
-                        </button>
-                      </div>
-
-                      {/* Next Run Info */}
-                      <div className="bg-white/80 p-2.5 rounded-xl border border-purple-100 text-[11px]">
-                        <span className="text-slate-500 font-semibold">Lần đăng tiếp theo:</span>
-                        <div className="font-extrabold text-purple-900 mt-0.5">
-                          {channelNextRuns.personal?.label || 'Chưa xác định'}
-                        </div>
-                      </div>
-
-                      {/* Sheet Source Selection for Personal */}
-                      <div className="bg-white/80 p-2.5 rounded-xl border border-purple-100 flex items-center justify-between text-[11px]">
-                        <div className="flex items-center gap-1.5">
-                          <FileSpreadsheet className="w-3.5 h-3.5 text-purple-600" />
-                          <span className="text-slate-600 font-bold">Lấy từ Sheet:</span>
-                        </div>
-                        <select
-                          value={scheduleConfig.googleSheets?.channelSheetMapping?.personal || scheduleConfig.googleSheets?.sheetName || 'topics'}
-                          onChange={(e) => handleUpdateChannelSheetMapping('personal', e.target.value)}
-                          className="bg-purple-50 border border-purple-200 text-purple-900 text-[11px] font-extrabold rounded-lg px-2 py-1 outline-hidden cursor-pointer"
-                        >
-                          {availableSheets.map((s) => (
-                            <option key={s} value={s}>{s}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* List of Times */}
-                      <div className="space-y-2">
-                        <label className="block text-[11px] font-bold text-slate-700">Khung giờ Cá Nhân hiện tại:</label>
-                        <div className="flex flex-wrap gap-1.5">
-                          {(scheduleConfig.channelSchedules?.personal?.times || ['11:30', '19:30']).map((t: string) => (
-                            <span
-                              key={t}
-                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-purple-100 text-purple-900 font-black text-xs border border-purple-200 shadow-2xs"
-                            >
-                              <Clock className="w-3 h-3 text-purple-600" />
-                              {t}
-                              {renderSlotSheetSelect('personal', t)}
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveChannelTime('personal', t)}
-                                className="hover:text-rose-600 text-purple-400 cursor-pointer"
-                                title="Xóa giờ này"
-                              >
-                                ×
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Add Time Form */}
-                      <div className="flex items-center gap-2 pt-2 border-t border-purple-100">
-                        <input
-                          type="time"
-                          value={newPersonalTime}
-                          onChange={(e) => setNewPersonalTime(e.target.value)}
-                          className="liquid-input rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 w-28"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleAddChannelTime('personal', newPersonalTime)}
-                          className="flex-1 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-xs flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                        >
-                          <Plus className="w-3.5 h-3.5" /> Thêm Giờ
-                        </button>
-                      </div>
-
-                      <button
-                        type="button"
-                        disabled={scheduleTriggering}
-                        onClick={() => handleTriggerAutoPilot(customRunTopic, 'personal')}
-                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
-                      >
-                        <Send className="w-3.5 h-3.5" /> 🚀 ĐĂNG NGAY LÊN CÁ NHÂN (TEST)
-                      </button>
-                    </div>
 
                   </div>
                 </div>
@@ -4953,7 +5480,7 @@ export default function DashboardPage() {
                         <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
                         Phân Chia Nguồn Sheet Riêng Cho Từng Kênh:
                       </h5>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200">
                           <label className="block text-[11px] font-black text-blue-900 mb-1">Fanpage lấy từ:</label>
                           <select
@@ -4978,18 +5505,6 @@ export default function DashboardPage() {
                             ))}
                           </select>
                         </div>
-                        <div className="p-2.5 rounded-xl bg-purple-50 border border-purple-200">
-                          <label className="block text-[11px] font-black text-purple-900 mb-1">Cá Nhân lấy từ:</label>
-                          <select
-                            value={scheduleConfig.googleSheets?.channelSheetMapping?.personal || scheduleConfig.googleSheets?.sheetName || 'topics'}
-                            onChange={(e) => handleUpdateChannelSheetMapping('personal', e.target.value)}
-                            className="w-full bg-white border border-purple-300 text-purple-900 text-xs font-bold rounded-lg px-2.5 py-1.5 outline-hidden cursor-pointer"
-                          >
-                            {availableSheets.map((s) => (
-                              <option key={s} value={s}>{s}</option>
-                            ))}
-                          </select>
-                        </div>
                       </div>
                     </div>
                   </div>
@@ -5008,128 +5523,303 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {/* Sub-tab 3: Gemini & Mascot AI */}
+              {/* Sub-tab 3: Groq / Gemini & Mascot AI */}
               {workflowActiveTab === 'ai_config' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-6">
+                  {/* Selector AI Provider */}
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Google Gemini API Key chính:</label>
-                    <div className="relative">
-                      <input
-                        type={showGeminiKeySecret ? 'text' : 'password'}
-                        value={scheduleConfig.geminiApiKey || ''}
-                        onChange={(e) => setScheduleConfig({ ...scheduleConfig, geminiApiKey: e.target.value })}
-                        placeholder="Nhập Gemini API Key..."
-                        className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-mono text-slate-900 pr-10"
-                      />
+                    <label className="block text-xs font-bold text-slate-700 mb-2">Chọn Nhà Cung Cấp AI Viết Bài:</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <button
                         type="button"
-                        onClick={() => setShowGeminiKeySecret(!showGeminiKeySecret)}
-                        className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        onClick={() => setScheduleConfig({ ...scheduleConfig, aiProvider: 'groq' })}
+                        className={`p-4 rounded-2xl border text-left transition-all cursor-pointer relative ${
+                          (scheduleConfig.aiProvider || 'groq') === 'groq'
+                            ? 'bg-gradient-to-br from-amber-50 to-orange-50 border-amber-500 ring-2 ring-amber-500/20 shadow-sm'
+                            : 'bg-white border-slate-200 hover:border-slate-300'
+                        }`}
                       >
-                        <Eye className="w-4 h-4" />
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">⚡</span>
+                            <span className="text-xs font-extrabold text-slate-900">Groq Cloud AI</span>
+                          </div>
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-700 uppercase tracking-wide">
+                            Miễn Phí 100%
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 mt-2 leading-relaxed">
+                          Tốc độ phản hồi cực nhanh (LPU). Dùng model <b>Llama 3.3 70B</b> thông minh hàng đầu, không lo bị cạn hạn ngạch (quota) đột ngột.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setScheduleConfig({ ...scheduleConfig, aiProvider: 'gemini' })}
+                        className={`p-4 rounded-2xl border text-left transition-all cursor-pointer relative ${
+                          scheduleConfig.aiProvider === 'gemini'
+                            ? 'bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-500 ring-2 ring-indigo-500/20 shadow-sm'
+                            : 'bg-white border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">✨</span>
+                            <span className="text-xs font-extrabold text-slate-900">Google Gemini AI</span>
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">
+                            Google AI Studio
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 mt-2 leading-relaxed">
+                          Model Gemini 2.5 Flash / Pro của Google. Yêu cầu API key cá nhân và phụ thuộc hạn ngạch free tier của Google.
+                        </p>
                       </button>
                     </div>
-                    <p className="mt-1.5 text-[11px] text-slate-500">Key này được dùng trước. Khi hết quota, hệ thống sẽ chuyển sang key dự phòng.</p>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Gemini API key dự phòng:</label>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={newGeminiApiKey}
-                        onChange={(e) => setNewGeminiApiKey(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') e.preventDefault();
-                        }}
-                        placeholder="Dán API key dự phòng..."
-                        className="liquid-input min-w-0 flex-1 rounded-xl px-4 py-2.5 text-xs font-mono text-slate-900"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const key = newGeminiApiKey.trim();
-                          const existingKeys = [scheduleConfig.geminiApiKey, ...(scheduleConfig.geminiApiKeys || [])];
-                          if (!key || existingKeys.includes(key)) return;
-                          setScheduleConfig({
-                            ...scheduleConfig,
-                            geminiApiKeys: [...(scheduleConfig.geminiApiKeys || []), key],
-                          });
-                          setNewGeminiApiKey('');
-                        }}
-                        className="shrink-0 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700"
-                        title="Thêm key dự phòng"
-                      >
-                        <Plus className="h-4 w-4" />
-                      </button>
-                    </div>
-                    {(scheduleConfig.geminiApiKeys || []).length > 0 ? (
-                      <div className="mt-2 space-y-1.5">
-                        {(scheduleConfig.geminiApiKeys || []).map((key: string, index: number) => (
-                          <div key={`${key.slice(-6)}-${index}`} className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                            <span className="text-xs font-mono text-slate-600">Dự phòng #{index + 1}: ••••••••{key.slice(-4)}</span>
+                  {/* Groq Settings */}
+                  {(scheduleConfig.aiProvider || 'groq') === 'groq' && (
+                    <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-4 space-y-4">
+                      <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 text-sm font-black">
+                          ⚡
+                        </div>
+                        <div className="text-xs text-amber-900 leading-relaxed">
+                          <p className="font-extrabold text-[13px] text-amber-950">Cách lấy Groq API Key miễn phí (mất 20 giây):</p>
+                          <ol className="list-decimal list-inside space-y-1 mt-1 text-slate-700 font-medium">
+                            <li>Truy cập <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline font-bold hover:text-indigo-800">console.groq.com/keys</a></li>
+                            <li>Đăng nhập bằng tài khoản Google hoặc GitHub.</li>
+                            <li>Bấm <b>Create API Key</b>, đặt tên tùy ý rồi copy chuỗi key bắt đầu bằng <code className="bg-amber-100 px-1.5 py-0.5 rounded text-amber-900 font-mono">gsk_...</code> dán vào ô bên dưới.</li>
+                          </ol>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1.5">Groq API Key chính:</label>
+                          <div className="relative">
+                            <input
+                              type={showGroqKeySecret ? 'text' : 'password'}
+                              value={scheduleConfig.groqApiKey || ''}
+                              onChange={(e) => setScheduleConfig({ ...scheduleConfig, groqApiKey: e.target.value })}
+                              placeholder="gsk_..."
+                              className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-mono text-slate-900 pr-10"
+                            />
                             <button
                               type="button"
-                              onClick={() => setScheduleConfig({
-                                ...scheduleConfig,
-                                geminiApiKeys: (scheduleConfig.geminiApiKeys || []).filter((_: string, keyIndex: number) => keyIndex !== index),
-                              })}
-                              className="text-slate-400 hover:text-rose-600"
-                              title="Xóa key dự phòng"
+                              onClick={() => setShowGroqKeySecret(!showGroqKeySecret)}
+                              className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              <Eye className="w-4 h-4" />
                             </button>
                           </div>
-                        ))}
+                          <p className="mt-1.5 text-[11px] text-slate-500">Key chính dùng để gọi Llama 3.3 viết bài.</p>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1.5">Groq API key dự phòng:</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="password"
+                              value={newGroqApiKey}
+                              onChange={(e) => setNewGroqApiKey(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleAddBackupKey('groq', newGroqApiKey);
+                                }
+                              }}
+                              placeholder="Dán key gsk_... dự phòng..."
+                              className="liquid-input min-w-0 flex-1 rounded-xl px-4 py-2.5 text-xs font-mono text-slate-900"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleAddBackupKey('groq', newGroqApiKey)}
+                              className="shrink-0 rounded-xl bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-700 cursor-pointer shadow-xs"
+                              title="Thêm và lưu key dự phòng"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </button>
+                          </div>
+                          {newGroqApiKey.trim() ? (
+                            <p className="mt-1 text-[11px] font-bold text-amber-700">
+                              👉 Bấm nút [+] hoặc phím Enter để lưu ngay vào cấu hình!
+                            </p>
+                          ) : null}
+                          {(scheduleConfig.groqApiKeys || []).length > 0 ? (
+                            <div className="mt-2 space-y-1.5">
+                              {(scheduleConfig.groqApiKeys || []).map((key: string, index: number) => (
+                                <div key={`${key.slice(-6)}-${index}`} className="flex items-center justify-between rounded-lg border border-amber-200 bg-white px-3 py-2">
+                                  <span className="text-xs font-mono text-slate-600">Dự phòng #{index + 1}: ••••••••{key.slice(-4)}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveBackupKey('groq', index)}
+                                    className="text-slate-400 hover:text-rose-600 cursor-pointer"
+                                    title="Xóa key dự phòng"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-[11px] text-slate-400">Chưa có key dự phòng.</p>
+                          )}
+                        </div>
+
+                        <div className="col-span-full">
+                          <label className="block text-xs font-bold text-slate-700 mb-1.5">Model Groq AI:</label>
+                          <select
+                            value={scheduleConfig.groqModel || 'llama-3.3-70b-versatile'}
+                            onChange={(e) => setScheduleConfig({ ...scheduleConfig, groqModel: e.target.value })}
+                            className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900"
+                          >
+                            <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile (Khuyên dùng - Cực thông minh, viết tiếng Việt sắc sảo, 128k context)</option>
+                            <option value="llama-3.1-8b-instant">llama-3.1-8b-instant (Siêu tốc độ phản hồi mili-giây, miễn phí)</option>
+                            <option value="mixtral-8x7b-32768">mixtral-8x7b-32768 (Context 32k, suy luận logic)</option>
+                          </select>
+                        </div>
                       </div>
-                    ) : (
-                      <p className="mt-2 text-[11px] text-slate-400">Chưa có key dự phòng.</p>
-                    )}
+                    </div>
+                  )}
+
+                  {/* Gemini Settings */}
+                  {scheduleConfig.aiProvider === 'gemini' && (
+                    <div className="bg-indigo-50/60 border border-indigo-200/80 rounded-2xl p-4 space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1.5">Google Gemini API Key chính:</label>
+                          <div className="relative">
+                            <input
+                              type={showGeminiKeySecret ? 'text' : 'password'}
+                              value={scheduleConfig.geminiApiKey || ''}
+                              onChange={(e) => setScheduleConfig({ ...scheduleConfig, geminiApiKey: e.target.value })}
+                              placeholder="Nhập Gemini API Key..."
+                              className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-mono text-slate-900 pr-10"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowGeminiKeySecret(!showGeminiKeySecret)}
+                              className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <p className="mt-1.5 text-[11px] text-slate-500">Key này được dùng trước. Khi hết quota, hệ thống sẽ chuyển sang key dự phòng.</p>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1.5">Gemini API key dự phòng:</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="password"
+                              value={newGeminiApiKey}
+                              onChange={(e) => setNewGeminiApiKey(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleAddBackupKey('gemini', newGeminiApiKey);
+                                }
+                              }}
+                              placeholder="Dán API key dự phòng..."
+                              className="liquid-input min-w-0 flex-1 rounded-xl px-4 py-2.5 text-xs font-mono text-slate-900"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleAddBackupKey('gemini', newGeminiApiKey)}
+                              className="shrink-0 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700 cursor-pointer shadow-xs"
+                              title="Thêm và lưu key dự phòng"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </button>
+                          </div>
+                          {newGeminiApiKey.trim() ? (
+                            <p className="mt-1 text-[11px] font-bold text-indigo-700">
+                              👉 Bấm nút [+] hoặc phím Enter để lưu ngay vào cấu hình!
+                            </p>
+                          ) : null}
+                          {(scheduleConfig.geminiApiKeys || []).length > 0 ? (
+                            <div className="mt-2 space-y-1.5">
+                              {(scheduleConfig.geminiApiKeys || []).map((key: string, index: number) => (
+                                <div key={`${key.slice(-6)}-${index}`} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                  <span className="text-xs font-mono text-slate-600">Dự phòng #{index + 1}: ••••••••{key.slice(-4)}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveBackupKey('gemini', index)}
+                                    className="text-slate-400 hover:text-rose-600 cursor-pointer"
+                                    title="Xóa key dự phòng"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="mt-2 text-[11px] text-slate-400">Chưa có key dự phòng.</p>
+                          )}
+                        </div>
+
+                        <div className="col-span-full">
+                          <label className="block text-xs font-bold text-slate-700 mb-1.5">Model Gemini:</label>
+                          <select
+                            value={scheduleConfig.model || 'gemini-2.5-flash'}
+                            onChange={(e) => setScheduleConfig({ ...scheduleConfig, model: e.target.value })}
+                            className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900"
+                          >
+                            <option value="gemini-2.5-flash">gemini-2.5-flash (Khuyên dùng - Cực nhanh &amp; Chuẩn)</option>
+                            <option value="gemini-2.5-pro">gemini-2.5-pro (Mạnh mẽ, văn phong chuyên sâu)</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Common Settings: Poster & Mascot */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">Tỉ lệ ảnh tạo bởi ChatGPT:</label>
+                      <select
+                        value={scheduleConfig.aspectRatio || '4:5'}
+                        onChange={(e) => setScheduleConfig({ ...scheduleConfig, aspectRatio: e.target.value })}
+                        className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900"
+                      >
+                        <option value="4:5">4:5 (Khuyên dùng - Chuẩn giao diện bài viết Facebook)</option>
+                        <option value="16:9">16:9 (Ngang - Phù hợp bài tin tức)</option>
+                        <option value="1:1">1:1 (Vuông - Chuẩn đa nền tảng)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">Mascot Du (Gấu robot đỏ công nghệ):</label>
+                      <select
+                        value={scheduleConfig.hasMascotDu ? 'true' : 'false'}
+                        onChange={(e) => setScheduleConfig({ ...scheduleConfig, hasMascotDu: e.target.value === 'true' })}
+                        className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900"
+                      >
+                        <option value="true">BẬT Mascot Du (3D Vinyl Chú Gấu Robot Đỏ DUDI)</option>
+                        <option value="false">TẮT (Chụp ảnh người thật Photorealistic)</option>
+                      </select>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Model Gemini:</label>
-                    <select
-                      value={scheduleConfig.model || 'gemini-2.5-flash'}
-                      onChange={(e) => setScheduleConfig({ ...scheduleConfig, model: e.target.value })}
-                      className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900"
+                  {/* Action Buttons */}
+                  <div className="col-span-full pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 mt-2">
+                    <button
+                      type="button"
+                      disabled={testingAi || scheduleLoading}
+                      onClick={handleTestAi}
+                      className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold shadow-xs flex items-center gap-2 transition-all cursor-pointer"
                     >
-                      <option value="gemini-2.5-flash">gemini-2.5-flash (Khuyên dùng - Cực nhanh &amp; Chuẩn)</option>
-                      <option value="gemini-2.5-pro">gemini-2.5-pro (Mạnh mẽ, văn phong chuyên sâu)</option>
-                    </select>
-                  </div>
+                      <RefreshCw className={`w-3.5 h-3.5 ${testingAi ? 'animate-spin text-indigo-600' : 'text-slate-400'}`} />
+                      {testingAi ? 'Đang thử nghiệm...' : `⚡ Test Viết Bài Thử Nghiệm với ${(scheduleConfig.aiProvider || 'groq') === 'groq' ? 'Groq' : 'Gemini'}`}
+                    </button>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Tỉ lệ ảnh tạo bởi ChatGPT:</label>
-                    <select
-                      value={scheduleConfig.aspectRatio || '4:5'}
-                      onChange={(e) => setScheduleConfig({ ...scheduleConfig, aspectRatio: e.target.value })}
-                      className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900"
-                    >
-                      <option value="4:5">4:5 (Khuyên dùng - Chuẩn giao diện bài viết Facebook)</option>
-                      <option value="16:9">16:9 (Ngang - Phù hợp bài tin tức)</option>
-                      <option value="1:1">1:1 (Vuông - Chuẩn đa nền tảng)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">Mascot Du (Gấu robot đỏ công nghệ):</label>
-                    <select
-                      value={scheduleConfig.hasMascotDu ? 'true' : 'false'}
-                      onChange={(e) => setScheduleConfig({ ...scheduleConfig, hasMascotDu: e.target.value === 'true' })}
-                      className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900"
-                    >
-                      <option value="true">BẬT Mascot Du (3D Vinyl Chú Gấu Robot Đỏ DUDI)</option>
-                      <option value="false">TẮT (Chụp ảnh người thật Photorealistic)</option>
-                    </select>
-                  </div>
-
-                  <div className="col-span-full pt-2 flex justify-end">
                     <button
                       type="button"
                       disabled={scheduleLoading}
                       onClick={() => handleSaveScheduleConfig(scheduleConfig)}
-                      className="px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-md flex items-center gap-2 transition-all cursor-pointer"
+                      className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold shadow-md flex items-center gap-2 transition-all cursor-pointer"
                     >
                       <Check className="w-4 h-4" /> Lưu Cấu Hình AI
                     </button>
@@ -5370,7 +6060,7 @@ export default function DashboardPage() {
                     <div>
                       <span className="text-xs font-bold text-slate-800 block">Cảnh báo khi Server Bridge mất kết nối</span>
                       <span className="text-[11px] text-slate-500">
-                        Bắn cảnh báo nếu các cổng 3001, 3002, 3003 hoặc n8n bị tắt/dừng đột ngột.
+                        Bắn cảnh báo nếu các cổng 3001, 3002 hoặc n8n bị tắt/dừng đột ngột.
                       </span>
                     </div>
                   </label>
@@ -5726,15 +6416,66 @@ export default function DashboardPage() {
 
             <form onSubmit={handleCreateAccount} className="space-y-4 pt-1">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Tên tài khoản (Gợi nhớ):</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">Đường link Facebook cá nhân (Trang cá nhân của Nick):</label>
+                  {isDetectingName && (
+                    <span className="text-[11px] font-extrabold text-blue-600 flex items-center gap-1.5 animate-pulse">
+                      <RefreshCw className="w-3 h-3 animate-spin" /> Đang lấy tên Facebook...
+                    </span>
+                  )}
+                </div>
                 <input
-                  type="text"
-                  value={newAccountForm.name}
-                  onChange={(e) => setNewAccountForm({ ...newAccountForm, name: e.target.value })}
-                  placeholder={`VD: Tài khoản ${(groupsData.accounts?.length || 0) + 1} (Nick Seeding)`}
-                  required
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-semibold"
+                  type="url"
+                  value={newAccountForm.profileUrl}
+                  onChange={(e) => {
+                    const url = e.target.value;
+                    setNewAccountForm({ ...newAccountForm, profileUrl: url });
+                    if (url.includes('facebook.com') && url.length > 20) {
+                      handleAutoDetectFbName(url, 'newGroupAccount');
+                    }
+                  }}
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData.getData('text');
+                    if (pasted && pasted.includes('facebook.com')) {
+                      handleAutoDetectFbName(pasted, 'newGroupAccount');
+                    }
+                  }}
+                  placeholder="https://www.facebook.com/tennick hoặc https://www.facebook.com/profile.php?id=..."
+                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
                 />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">Tên tài khoản (Tự động nhận diện):</label>
+                  {newAccountForm.name ? (
+                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      ✓ Đã tự động lấy tên
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-slate-400">Không bắt buộc (Tự điền khi dán link FB)</span>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={newAccountForm.name}
+                    onChange={(e) => setNewAccountForm({ ...newAccountForm, name: e.target.value })}
+                    placeholder={`VD: Tài khoản ${(groupsData.accounts?.length || 0) + 1} (Tự động lấy khi dán link)...`}
+                    className="liquid-input w-full rounded-xl px-4 py-2.5 pr-20 text-sm text-slate-900 font-semibold"
+                  />
+                  {newAccountForm.profileUrl && (
+                    <button
+                      type="button"
+                      disabled={isDetectingName}
+                      onClick={() => handleAutoDetectFbName(newAccountForm.profileUrl, 'newGroupAccount')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 cursor-pointer transition-colors"
+                      title="Bấm để lấy lại tên từ Facebook"
+                    >
+                      ⚡ Lấy tên
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div>
@@ -5803,14 +6544,57 @@ export default function DashboardPage() {
 
             <form onSubmit={handleUpdateAccount} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Tên tài khoản:</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">Đường link Facebook cá nhân:</label>
+                  {isDetectingName && (
+                    <span className="text-[11px] font-extrabold text-blue-600 flex items-center gap-1.5 animate-pulse">
+                      <RefreshCw className="w-3 h-3 animate-spin" /> Đang lấy tên Facebook...
+                    </span>
+                  )}
+                </div>
                 <input
-                  type="text"
-                  value={editingAccount.name}
-                  onChange={(e) => setEditingAccount({ ...editingAccount, name: e.target.value })}
-                  required
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-semibold"
+                  type="url"
+                  value={editingAccount.profileUrl || ''}
+                  onChange={(e) => {
+                    const url = e.target.value;
+                    setEditingAccount({ ...editingAccount, profileUrl: url });
+                    if (url.includes('facebook.com') && url.length > 20) {
+                      handleAutoDetectFbName(url, 'editGroupAccount');
+                    }
+                  }}
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData.getData('text');
+                    if (pasted && pasted.includes('facebook.com')) {
+                      handleAutoDetectFbName(pasted, 'editGroupAccount');
+                    }
+                  }}
+                  placeholder="https://www.facebook.com/tennick hoặc https://www.facebook.com/profile.php?id=..."
+                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Tên tài khoản:</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={editingAccount.name}
+                    onChange={(e) => setEditingAccount({ ...editingAccount, name: e.target.value })}
+                    required
+                    className="liquid-input w-full rounded-xl px-4 py-2.5 pr-20 text-sm text-slate-900 font-semibold"
+                  />
+                  {editingAccount.profileUrl && (
+                    <button
+                      type="button"
+                      disabled={isDetectingName}
+                      onClick={() => handleAutoDetectFbName(editingAccount.profileUrl || '', 'editGroupAccount')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 cursor-pointer transition-colors"
+                      title="Bấm để lấy lại tên từ Facebook"
+                    >
+                      ⚡ Lấy tên
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div>
@@ -5877,21 +6661,62 @@ export default function DashboardPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">URL Nhóm Facebook:</label>
-                <input
-                  type="url"
-                  value={newGroupUrl}
-                  onChange={(e) => setNewGroupUrl(e.target.value)}
-                  placeholder="https://www.facebook.com/groups/..."
-                  required
-                  className="liquid-input w-full rounded-xl px-3.5 py-2.5 text-sm text-slate-900"
-                />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">URL Nhóm Facebook:</label>
+                  {isDetectingName && (
+                    <span className="text-[11px] font-extrabold text-blue-600 flex items-center gap-1.5 animate-pulse">
+                      <RefreshCw className="w-3 h-3 animate-spin" /> Đang lấy tên nhóm...
+                    </span>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    type="url"
+                    value={newGroupUrl}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setNewGroupUrl(val);
+                      if (val.includes('facebook.com') && val.length > 25) {
+                        handleAutoDetectFbName(val, 'newGroup');
+                      }
+                    }}
+                    onPaste={(e) => {
+                      const pasted = e.clipboardData.getData('text');
+                      if (pasted && pasted.includes('facebook.com')) {
+                        handleAutoDetectFbName(pasted, 'newGroup');
+                      }
+                    }}
+                    placeholder="https://www.facebook.com/groups/..."
+                    required
+                    className="liquid-input w-full rounded-xl px-3.5 py-2.5 pr-20 text-sm text-slate-900 font-mono text-xs"
+                  />
+                  {newGroupUrl && (
+                    <button
+                      type="button"
+                      disabled={isDetectingName}
+                      onClick={() => handleAutoDetectFbName(newGroupUrl, 'newGroup')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-lg border border-blue-200 cursor-pointer transition-colors"
+                      title="Bấm để lấy tên nhóm từ link"
+                    >
+                      ⚡ Lấy tên
+                    </button>
+                  )}
+                </div>
+                {detectedGroupName && (
+                  <div className="mt-2.5 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center gap-2 animate-in fade-in">
+                    <span className="text-base">✨</span>
+                    <div className="text-xs text-emerald-900 leading-tight">
+                      <span className="font-semibold text-emerald-700">Tên nhóm nhận diện: </span>
+                      <strong className="font-bold">{detectedGroupName}</strong>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-2.5 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsAddGroupOpen(false)}
+                  onClick={() => { setDetectedGroupName(''); setIsAddGroupOpen(false); }}
                   className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
                 >
                   Hủy
@@ -6571,27 +7396,67 @@ export default function DashboardPage() {
 
             <form onSubmit={handleCreateFanpage} className="space-y-4 pt-1">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Tên Fanpage (Gợi nhớ):</label>
-                <input
-                  type="text"
-                  value={newFanpageForm.name}
-                  onChange={(e) => setNewFanpageForm({ ...newFanpageForm, name: e.target.value })}
-                  placeholder="VD: Fanpage Bất Động Sản, Fanpage Tin Tức..."
-                  required
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-semibold"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Đường link Facebook Fanpage:</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">Đường link Facebook Fanpage:</label>
+                  {isDetectingName && (
+                    <span className="text-[11px] font-extrabold text-blue-600 flex items-center gap-1.5 animate-pulse">
+                      <RefreshCw className="w-3 h-3 animate-spin" /> Đang lấy tên Facebook...
+                    </span>
+                  )}
+                </div>
                 <input
                   type="url"
                   value={newFanpageForm.pageUrl}
-                  onChange={(e) => setNewFanpageForm({ ...newFanpageForm, pageUrl: e.target.value })}
+                  onChange={(e) => {
+                    const url = e.target.value;
+                    setNewFanpageForm({ ...newFanpageForm, pageUrl: url });
+                    if (url.includes('facebook.com') && url.length > 20) {
+                      handleAutoDetectFbName(url, 'newFanpage');
+                    }
+                  }}
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData.getData('text');
+                    if (pasted && pasted.includes('facebook.com')) {
+                      handleAutoDetectFbName(pasted, 'newFanpage');
+                    }
+                  }}
                   placeholder="https://www.facebook.com/tenpage hoặc https://www.facebook.com/profile.php?id=..."
                   required
                   className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
                 />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">Tên Fanpage (Tự động nhận diện):</label>
+                  {newFanpageForm.name ? (
+                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      ✓ Đã tự động lấy tên
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-slate-400">Không bắt buộc (Tự điền khi dán link)</span>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={newFanpageForm.name}
+                    onChange={(e) => setNewFanpageForm({ ...newFanpageForm, name: e.target.value })}
+                    placeholder="Tự động nhận diện từ link FB hoặc nhập nếu muốn đổi..."
+                    className="liquid-input w-full rounded-xl px-4 py-2.5 pr-20 text-sm text-slate-900 font-semibold"
+                  />
+                  {newFanpageForm.pageUrl && (
+                    <button
+                      type="button"
+                      disabled={isDetectingName}
+                      onClick={() => handleAutoDetectFbName(newFanpageForm.pageUrl, 'newFanpage')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 cursor-pointer transition-colors"
+                      title="Bấm để lấy lại tên từ Facebook"
+                    >
+                      ⚡ Lấy tên
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -6671,25 +7536,57 @@ export default function DashboardPage() {
 
             <form onSubmit={handleUpdateFanpage} className="space-y-4 pt-1">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Tên Fanpage:</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">Đường link Facebook Fanpage:</label>
+                  {isDetectingName && (
+                    <span className="text-[11px] font-extrabold text-blue-600 flex items-center gap-1.5 animate-pulse">
+                      <RefreshCw className="w-3 h-3 animate-spin" /> Đang lấy tên Facebook...
+                    </span>
+                  )}
+                </div>
                 <input
-                  type="text"
-                  value={editingFanpage.name}
-                  onChange={(e) => setEditingFanpage({ ...editingFanpage, name: e.target.value })}
+                  type="url"
+                  value={editingFanpage.pageUrl}
+                  onChange={(e) => {
+                    const url = e.target.value;
+                    setEditingFanpage({ ...editingFanpage, pageUrl: url });
+                    if (url.includes('facebook.com') && url.length > 20) {
+                      handleAutoDetectFbName(url, 'editFanpage');
+                    }
+                  }}
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData.getData('text');
+                    if (pasted && pasted.includes('facebook.com')) {
+                      handleAutoDetectFbName(pasted, 'editFanpage');
+                    }
+                  }}
                   required
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-semibold"
+                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Đường link Facebook Fanpage:</label>
-                <input
-                  type="url"
-                  value={editingFanpage.pageUrl}
-                  onChange={(e) => setEditingFanpage({ ...editingFanpage, pageUrl: e.target.value })}
-                  required
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
-                />
+                <label className="block text-xs font-bold text-slate-700 mb-1">Tên Fanpage:</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={editingFanpage.name}
+                    onChange={(e) => setEditingFanpage({ ...editingFanpage, name: e.target.value })}
+                    required
+                    className="liquid-input w-full rounded-xl px-4 py-2.5 pr-20 text-sm text-slate-900 font-semibold"
+                  />
+                  {editingFanpage.pageUrl && (
+                    <button
+                      type="button"
+                      disabled={isDetectingName}
+                      onClick={() => handleAutoDetectFbName(editingFanpage.pageUrl, 'editFanpage')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 cursor-pointer transition-colors"
+                      title="Bấm để lấy lại tên từ Facebook"
+                    >
+                      ⚡ Lấy tên
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -6771,27 +7668,67 @@ export default function DashboardPage() {
 
             <form onSubmit={handleCreatePersonal} className="space-y-4 pt-1">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Tên tài khoản (Gợi nhớ):</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">Đường link Trang Cá Nhân:</label>
+                  {isDetectingName && (
+                    <span className="text-[11px] font-extrabold text-teal-600 flex items-center gap-1.5 animate-pulse">
+                      <RefreshCw className="w-3 h-3 animate-spin" /> Đang lấy tên Facebook...
+                    </span>
+                  )}
+                </div>
                 <input
-                  type="text"
-                  value={newPersonalForm.name}
-                  onChange={(e) => setNewPersonalForm({ ...newPersonalForm, name: e.target.value })}
-                  placeholder="VD: Nick Facebook Cá nhân 2 (Nguyễn Văn A)..."
+                  type="url"
+                  value={newPersonalForm.profileUrl}
+                  onChange={(e) => {
+                    const url = e.target.value;
+                    setNewPersonalForm({ ...newPersonalForm, profileUrl: url });
+                    if (url.includes('facebook.com') && url.length > 20) {
+                      handleAutoDetectFbName(url, 'newPersonal');
+                    }
+                  }}
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData.getData('text');
+                    if (pasted && pasted.includes('facebook.com')) {
+                      handleAutoDetectFbName(pasted, 'newPersonal');
+                    }
+                  }}
+                  placeholder="https://www.facebook.com/tennick hoặc https://www.facebook.com/profile.php?id=..."
                   required
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-semibold"
+                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Đường link Trang Cá Nhân:</label>
-                <input
-                  type="url"
-                  value={newPersonalForm.profileUrl}
-                  onChange={(e) => setNewPersonalForm({ ...newPersonalForm, profileUrl: e.target.value })}
-                  placeholder="https://www.facebook.com/tennick hoặc https://www.facebook.com/"
-                  required
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
-                />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">Tên tài khoản (Tự động nhận diện):</label>
+                  {newPersonalForm.name ? (
+                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      ✓ Đã tự động lấy tên
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-slate-400">Không bắt buộc (Tự điền khi dán link)</span>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={newPersonalForm.name}
+                    onChange={(e) => setNewPersonalForm({ ...newPersonalForm, name: e.target.value })}
+                    placeholder="Tự động nhận diện từ link FB hoặc nhập nếu muốn..."
+                    className="liquid-input w-full rounded-xl px-4 py-2.5 pr-20 text-sm text-slate-900 font-semibold"
+                  />
+                  {newPersonalForm.profileUrl && (
+                    <button
+                      type="button"
+                      disabled={isDetectingName}
+                      onClick={() => handleAutoDetectFbName(newPersonalForm.profileUrl, 'newPersonal')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-teal-600 hover:text-teal-800 bg-teal-50 hover:bg-teal-100 px-2.5 py-1 rounded-lg border border-teal-200 cursor-pointer transition-colors"
+                      title="Bấm để lấy lại tên từ Facebook"
+                    >
+                      ⚡ Lấy tên
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -6871,26 +7808,57 @@ export default function DashboardPage() {
 
             <form onSubmit={handleUpdatePersonal} className="space-y-4 pt-1">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Tên tài khoản:</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">Đường link Trang Cá Nhân:</label>
+                  {isDetectingName && (
+                    <span className="text-[11px] font-extrabold text-teal-600 flex items-center gap-1.5 animate-pulse">
+                      <RefreshCw className="w-3 h-3 animate-spin" /> Đang lấy tên Facebook...
+                    </span>
+                  )}
+                </div>
                 <input
-                  type="text"
-                  value={editingPersonal.name}
-                  onChange={(e) => setEditingPersonal({ ...editingPersonal, name: e.target.value })}
+                  type="url"
+                  value={editingPersonal.profileUrl}
+                  onChange={(e) => {
+                    const url = e.target.value;
+                    setEditingPersonal({ ...editingPersonal, profileUrl: url });
+                    if (url.includes('facebook.com') && url.length > 20) {
+                      handleAutoDetectFbName(url, 'editPersonal');
+                    }
+                  }}
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData.getData('text');
+                    if (pasted && pasted.includes('facebook.com')) {
+                      handleAutoDetectFbName(pasted, 'editPersonal');
+                    }
+                  }}
                   required
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-semibold"
+                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Đường link Trang Cá Nhân:</label>
-                <input
-                  type="url"
-                  value={editingPersonal.profileUrl}
-                  onChange={(e) => setEditingPersonal({ ...editingPersonal, profileUrl: e.target.value })}
-                  placeholder="https://www.facebook.com/tennick hoặc https://www.facebook.com/"
-                  required
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
-                />
+                <label className="block text-xs font-bold text-slate-700 mb-1">Tên tài khoản:</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={editingPersonal.name}
+                    onChange={(e) => setEditingPersonal({ ...editingPersonal, name: e.target.value })}
+                    required
+                    className="liquid-input w-full rounded-xl px-4 py-2.5 pr-20 text-sm text-slate-900 font-semibold"
+                  />
+                  {editingPersonal.profileUrl && (
+                    <button
+                      type="button"
+                      disabled={isDetectingName}
+                      onClick={() => handleAutoDetectFbName(editingPersonal.profileUrl, 'editPersonal')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-teal-600 hover:text-teal-800 bg-teal-50 hover:bg-teal-100 px-2.5 py-1 rounded-lg border border-teal-200 cursor-pointer transition-colors"
+                      title="Bấm để lấy lại tên từ Facebook"
+                    >
+                      ⚡ Lấy tên
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

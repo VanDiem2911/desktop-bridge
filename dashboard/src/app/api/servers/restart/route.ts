@@ -12,7 +12,7 @@ export async function POST() {
       cwd: BRIDGE_DIR,
     }).unref();
 
-    return NextResponse.json({ ok: true, message: 'Đang khởi động lại toàn bộ hệ thống (Dashboard 3000 + 3 Server Bridge)...' });
+    return NextResponse.json({ ok: true, message: 'Đang khởi động lại toàn bộ hệ thống (Dashboard 3000 + 2 Server Bridge)...' });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });

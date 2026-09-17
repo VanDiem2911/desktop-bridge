@@ -6,6 +6,7 @@ import {
   readJsonFile,
   writeJsonFile,
   isPortOpen,
+  getServerPorts,
 } from '@/lib/server-utils';
 
 export interface GoogleSheetConfig {
@@ -36,9 +37,13 @@ export interface ChannelSchedules {
 
 export interface ScheduleConfig {
   enabled: boolean;
+  aiProvider?: 'groq' | 'gemini';
   geminiApiKey: string;
   geminiApiKeys?: string[];
+  groqApiKey?: string;
+  groqApiKeys?: string[];
   model: string;
+  groqModel?: string;
   scheduleTimes: string[];
   channelSchedules?: ChannelSchedules;
   channels: {
@@ -67,8 +72,13 @@ export interface ScheduleConfig {
 
 const DEFAULT_CONFIG: ScheduleConfig = {
   enabled: true,
+  aiProvider: 'groq',
   geminiApiKey: '',
+  geminiApiKeys: [],
+  groqApiKey: '',
+  groqApiKeys: [],
   model: 'gemini-2.5-flash',
+  groqModel: 'llama-3.3-70b-versatile',
   scheduleTimes: ['08:00', '16:00'],
   channelSchedules: {
     fanpage: {
@@ -163,7 +173,8 @@ function calculateChannelNextRuns(channelSchedules?: ChannelSchedules, globalEna
 export async function GET() {
   try {
     const config = readJsonFile<ScheduleConfig>(SCHEDULE_CONFIG_PATH, DEFAULT_CONFIG);
-    const isBotRunning = await isPortOpen(3004, 500);
+    const { botServer } = getServerPorts();
+    const isBotRunning = await isPortOpen(botServer, 500);
     const nextRun = calculateNextRun(config.scheduleTimes || [], config.enabled);
     const channelNextRuns = calculateChannelNextRuns(config.channelSchedules, config.enabled);
 
@@ -187,7 +198,8 @@ export async function GET() {
     let progress = null;
     if (isBotRunning) {
       try {
-        const progRes = await fetch('http://127.0.0.1:3004/autopilot-status');
+        const { botServer: bPort } = getServerPorts();
+        const progRes = await fetch(`http://127.0.0.1:${bPort}/autopilot-status`);
         progress = await progRes.json();
       } catch {}
     } else {
@@ -224,7 +236,8 @@ export async function POST(req: Request) {
     if (action === 'status' || action === 'progress') {
       let progress = null;
       try {
-        const progRes = await fetch('http://127.0.0.1:3004/autopilot-status');
+        const { botServer: bPort2 } = getServerPorts();
+        const progRes = await fetch(`http://127.0.0.1:${bPort2}/autopilot-status`);
         progress = await progRes.json();
       } catch {
         const autoPilotPath = path.join(BRIDGE_DIR, 'lib', 'auto-pilot.mjs');
@@ -238,11 +251,12 @@ export async function POST(req: Request) {
     // 1. Kích hoạt chạy Auto-Pilot / Execute Workflow (n8n Engine)
     if (action === 'trigger' || action === 'execute_workflow') {
       const { topic, channels, accounts, sheetName } = body;
-      const isBotRunning = await isPortOpen(3004, 500);
+      const { botServer: bPort3 } = getServerPorts();
+      const isBotRunning = await isPortOpen(bPort3, 500);
 
       if (isBotRunning) {
-        // Gửi qua Bot Server (Port 3004) để tận dụng luồng nền
-        const triggerRes = await fetch('http://127.0.0.1:3004/trigger-autopilot', {
+        // Gửi qua Bot Server để tận dụng luồng nền
+        const triggerRes = await fetch(`http://127.0.0.1:${bPort3}/trigger-autopilot`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ topic, channels, accounts, sheetName }),
@@ -262,11 +276,12 @@ export async function POST(req: Request) {
     // 1.1 Chạy riêng một Node đơn lẻ (Single Step Execution giống n8n)
     if (action === 'execute_node') {
       const { nodeType, payload } = body;
-      const isBotRunning = await isPortOpen(3004, 500);
+      const { botServer: bPort4 } = getServerPorts();
+      const isBotRunning = await isPortOpen(bPort4, 500);
 
       if (isBotRunning) {
         try {
-          const nodeRes = await fetch('http://127.0.0.1:3004/execute-node', {
+          const nodeRes = await fetch(`http://127.0.0.1:${bPort4}/execute-node`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nodeType, payload }),
@@ -299,40 +314,79 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, sheetsInfo: overview, availableSheets });
     }
 
-    // 3. Thử nghiệm viết bài nhanh với Gemini (không đăng)
-    if (action === 'test-gemini') {
-      const { topic, apiKey, model } = body;
+    // 3. Thử nghiệm viết bài nhanh với AI (Groq / Gemini) (không đăng)
+    if (action === 'test-gemini' || action === 'test-groq' || action === 'test-ai') {
+      const { topic, apiKey, model, aiProvider } = body;
       const currentConfig = readJsonFile<ScheduleConfig>(SCHEDULE_CONFIG_PATH, DEFAULT_CONFIG);
       const autoPilotPath = path.join(BRIDGE_DIR, 'lib', 'auto-pilot.mjs');
       const autoPilotUrl = new URL(`file://${autoPilotPath.replace(/\\/g, '/')}`).href;
-      const { generateContentWithGemini } = await import(/* webpackIgnore: true */ autoPilotUrl);
+      const { generateContentWithAI } = await import(/* webpackIgnore: true */ autoPilotUrl);
+
+      const isGroqKey = apiKey && String(apiKey).startsWith('gsk_');
+      const chosenProvider = aiProvider || (action === 'test-groq' || isGroqKey ? 'groq' : currentConfig.aiProvider || 'gemini');
 
       const testConfig = {
         ...currentConfig,
-        ...(apiKey ? { geminiApiKey: apiKey } : {}),
-        ...(model ? { model } : {}),
+        aiProvider: chosenProvider,
+        ...(apiKey ? (
+          chosenProvider === 'groq' || isGroqKey
+            ? { groqApiKey: apiKey }
+            : { geminiApiKey: apiKey }
+        ) : {}),
+        ...(model ? (
+          chosenProvider === 'groq' || model.includes('llama') || model.includes('mixtral') || model.includes('gemma')
+            ? { groqModel: model }
+            : { model }
+        ) : {}),
       };
 
-      const generated = await generateContentWithGemini(topic || 'Kiểm tra kết nối Gemini AI', testConfig);
+      const generated = await generateContentWithAI(topic || 'Kiểm tra kết nối AI viết bài', testConfig);
       return NextResponse.json({ ok: true, data: generated });
     }
 
     // 4. Lưu cấu hình lịch trình & Google Sheets
     const currentConfig = readJsonFile<ScheduleConfig>(SCHEDULE_CONFIG_PATH, DEFAULT_CONFIG);
-    const normalizedGeminiApiKeys: string[] = [];
-    const geminiApiKeys = Array.isArray(body.geminiApiKeys)
-      ? body.geminiApiKeys.reduce((keys: string[], value: unknown) => {
-          const key = String(value).trim();
-          if (key && !keys.includes(key)) keys.push(key);
+
+    const primaryGeminiKey = body.geminiApiKey !== undefined ? String(body.geminiApiKey).trim() : currentConfig.geminiApiKey;
+    const rawGeminiBackup = Array.isArray(body.geminiApiKeys)
+      ? [...body.geminiApiKeys]
+      : (typeof body.geminiApiKeys === 'string' && body.geminiApiKeys.trim() ? body.geminiApiKeys.split(/[\n,;]+/) : []);
+    if (body.newGeminiApiKey && typeof body.newGeminiApiKey === 'string' && body.newGeminiApiKey.trim()) {
+      rawGeminiBackup.push(body.newGeminiApiKey.trim());
+    }
+    const geminiApiKeys = (body.geminiApiKeys !== undefined || body.newGeminiApiKey !== undefined)
+      ? rawGeminiBackup.reduce((keys: string[], val: unknown) => {
+          const k = String(val || '').trim();
+          if (k && !keys.includes(k) && k !== primaryGeminiKey) keys.push(k);
           return keys;
-        }, normalizedGeminiApiKeys)
+        }, [] as string[])
       : undefined;
+
+    const primaryGroqKey = body.groqApiKey !== undefined ? String(body.groqApiKey).trim() : currentConfig.groqApiKey;
+    const rawGroqBackup = Array.isArray(body.groqApiKeys)
+      ? [...body.groqApiKeys]
+      : (typeof body.groqApiKeys === 'string' && body.groqApiKeys.trim() ? body.groqApiKeys.split(/[\n,;]+/) : []);
+    if (body.newGroqApiKey && typeof body.newGroqApiKey === 'string' && body.newGroqApiKey.trim()) {
+      rawGroqBackup.push(body.newGroqApiKey.trim());
+    }
+    const groqApiKeys = (body.groqApiKeys !== undefined || body.newGroqApiKey !== undefined)
+      ? rawGroqBackup.reduce((keys: string[], val: unknown) => {
+          const k = String(val || '').trim();
+          if (k && !keys.includes(k) && k !== primaryGroqKey) keys.push(k);
+          return keys;
+        }, [] as string[])
+      : undefined;
+
     const updatedConfig: ScheduleConfig = {
       ...currentConfig,
       ...(body.enabled !== undefined ? { enabled: Boolean(body.enabled) } : {}),
+      ...(body.aiProvider !== undefined ? { aiProvider: body.aiProvider } : {}),
       ...(body.geminiApiKey !== undefined ? { geminiApiKey: String(body.geminiApiKey).trim() } : {}),
-      ...(geminiApiKeys !== undefined ? { geminiApiKeys } : {}),
+      geminiApiKeys: geminiApiKeys !== undefined ? geminiApiKeys : (currentConfig.geminiApiKeys || []),
+      ...(body.groqApiKey !== undefined ? { groqApiKey: String(body.groqApiKey).trim() } : {}),
+      groqApiKeys: groqApiKeys !== undefined ? groqApiKeys : (currentConfig.groqApiKeys || []),
       ...(body.model !== undefined ? { model: String(body.model).trim() } : {}),
+      ...(body.groqModel !== undefined ? { groqModel: String(body.groqModel).trim() } : {}),
       ...(Array.isArray(body.scheduleTimes) ? { scheduleTimes: body.scheduleTimes } : {}),
       ...(body.channelSchedules ? { channelSchedules: body.channelSchedules } : {}),
       ...(body.channels ? { channels: { ...currentConfig.channels, ...body.channels } } : {}),
