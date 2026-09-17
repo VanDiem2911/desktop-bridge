@@ -979,7 +979,7 @@ export default function DashboardPage() {
           googleSheets: { channelSheetMapping: updatedMapping }
         }),
       });
-      const chTitle = channel === 'fanpage' ? 'Fanpage' : channel === 'groups' ? '151 Nhóm FB' : 'Trang Cá Nhân';
+      const chTitle = channel === 'fanpage' ? 'Fanpage' : channel === 'groups' ? `${facebookGroupCount} Nhóm FB` : 'Trang Cá Nhân';
       showToast(`Đã gán kênh ${chTitle} lấy bài từ Sheet [${sheetName}]!`, 'success');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1007,7 +1007,7 @@ export default function DashboardPage() {
         label = 'Fanpage';
       } else if (channelKey === 'groups') {
         effectiveChannels = { fanpage: false, groups: true, personal: false };
-        label = '151 Nhóm FB';
+        label = `${facebookGroupCount} Nhóm FB`;
       } else if (channelKey === 'personal') {
         effectiveChannels = { fanpage: false, groups: false, personal: true };
         label = 'Trang Cá Nhân';
@@ -1160,7 +1160,7 @@ export default function DashboardPage() {
 
     setScheduleConfig(newCfg);
     handleSaveScheduleConfig(newCfg);
-    const channelName = channelKey === 'fanpage' ? 'Facebook Fanpage' : channelKey === 'groups' ? '151 Nhóm Facebook' : 'Facebook Cá Nhân';
+    const channelName = channelKey === 'fanpage' ? 'Facebook Fanpage' : channelKey === 'groups' ? `${facebookGroupCount} Nhóm Facebook` : 'Facebook Cá Nhân';
     showToast(`Đã ${newVal ? 'BẬT' : 'TẮT'} đăng lên ${channelName}!`, 'success');
   };
 
@@ -1191,7 +1191,7 @@ export default function DashboardPage() {
       showToast('Đã áp dụng mẫu: Đăng Toàn Diện (Nhóm + Fanpage + Cá Nhân)!', 'info');
     } else if (preset === 'groups_only') {
       updatedChannels = { groups: true, fanpage: false, personal: false };
-      showToast('Đã áp dụng mẫu: Chỉ đăng vào 151 Nhóm FB!', 'info');
+      showToast(`Đã áp dụng mẫu: Chỉ đăng vào ${facebookGroupCount} Nhóm FB!`, 'info');
     } else if (preset === 'fanpage_only') {
       updatedChannels = { groups: false, fanpage: true, personal: false };
       showToast('Đã áp dụng mẫu: Chỉ đăng lên Facebook Fanpage!', 'info');
@@ -2551,6 +2551,7 @@ export default function DashboardPage() {
   };
 
   const totalGroupsCount = (groupsData.accounts || []).reduce((sum, a) => sum + (a.groupUrls?.length || 0), 0);
+  const facebookGroupCount = poolStats.total || groupsData.centralPool?.length || totalGroupsCount;
   const totalAccountsCount = accounts.reduce((sum, c) => sum + (c.items?.length || 0), 0);
   const activeGroupAccount = groupsData.accounts?.find(a => a.id === selectedGroupAcc);
   const filteredGroups = (activeGroupAccount?.groupUrls || []).filter(u => u.toLowerCase().includes(groupSearch.toLowerCase()));
@@ -2887,7 +2888,7 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="liquid-recess p-4 rounded-2xl text-center">
                     <div className="text-3xl font-black bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                      {totalGroupsCount}
+                      {facebookGroupCount}
                     </div>
                     <div className="text-xs font-bold text-slate-500 mt-1">Link Nhóm FB</div>
                   </div>
@@ -4976,9 +4977,9 @@ export default function DashboardPage() {
                           ? 'bg-indigo-600 text-white shadow-xs hover:bg-indigo-700'
                           : 'bg-slate-200 text-slate-400 hover:bg-slate-300'
                       }`}
-                      title="Bấm để Bật/Tắt 151 Nhóm"
+                      title={`Bấm để Bật/Tắt ${facebookGroupCount} Nhóm`}
                     >
-                      {scheduleConfig.channels?.groups ? '✓ 151 Nhóm' : '✕ 151 Nhóm'}
+                      {scheduleConfig.channels?.groups ? `✓ ${facebookGroupCount} Nhóm` : `✕ ${facebookGroupCount} Nhóm`}
                     </button>
                   </div>
                   {scheduleTriggering && liveProgress?.step === 4 && (
@@ -5084,7 +5085,7 @@ export default function DashboardPage() {
                   {/* Kênh đã đăng, Trạng thái Google Sheet & Nhà cung cấp AI viết bài */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 pt-2 border-t border-emerald-200">
                     <div className="p-2.5 rounded-xl bg-white/80 border border-emerald-200 text-xs">
-                      <span className="text-slate-500">151 Nhóm FB:</span>{' '}
+                      <span className="text-slate-500">{facebookGroupCount} Nhóm FB:</span>{' '}
                       <span className="font-bold text-emerald-700">
                         {triggerResult.publishResults?.groups?.success ? `✓ Đã đăng (${triggerResult.publishResults.groups.count || 1} nhóm)` : 'Không bật / Đã bỏ qua'}
                       </span>
@@ -5304,7 +5305,7 @@ export default function DashboardPage() {
                             <Users className="w-4 h-4" />
                           </span>
                           <div>
-                            <h4 className="font-extrabold text-sm text-slate-900">151 Nhóm Facebook</h4>
+                            <h4 className="font-extrabold text-sm text-slate-900">{facebookGroupCount} Nhóm Facebook</h4>
                             <span className="text-[10px] font-bold text-indigo-700">Port 3002</span>
                           </div>
                         </div>
@@ -5314,7 +5315,7 @@ export default function DashboardPage() {
                           type="button"
                           onClick={() => handleToggleChannel('groups')}
                           className="flex items-center gap-2 cursor-pointer group select-none p-1 rounded-xl hover:bg-indigo-100/50 transition-all"
-                          title={scheduleConfig.channels?.groups ? "Bấm để TẮT đăng 151 Nhóm" : "Bấm để BẬT đăng 151 Nhóm"}
+                          title={scheduleConfig.channels?.groups ? `Bấm để TẮT đăng ${facebookGroupCount} Nhóm` : `Bấm để BẬT đăng ${facebookGroupCount} Nhóm`}
                         >
                           <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full transition-all ${
                             scheduleConfig.channels?.groups ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-500'
@@ -5404,7 +5405,7 @@ export default function DashboardPage() {
                         onClick={() => handleTriggerAutoPilot(customRunTopic, 'groups')}
                         className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
                       >
-                        <Send className="w-3.5 h-3.5" /> 🚀 ĐĂNG NGAY LÊN 151 NHÓM (TEST)
+                        <Send className="w-3.5 h-3.5" /> 🚀 ĐĂNG NGAY LÊN {facebookGroupCount} NHÓM (TEST)
                       </button>
                     </div>
 
@@ -5494,7 +5495,7 @@ export default function DashboardPage() {
                           </select>
                         </div>
                         <div className="p-2.5 rounded-xl bg-indigo-50 border border-indigo-200">
-                          <label className="block text-[11px] font-black text-indigo-900 mb-1">151 Nhóm lấy từ:</label>
+                          <label className="block text-[11px] font-black text-indigo-900 mb-1">{facebookGroupCount} Nhóm lấy từ:</label>
                           <select
                             value={scheduleConfig.googleSheets?.channelSheetMapping?.groups || scheduleConfig.googleSheets?.sheetName || 'topics'}
                             onChange={(e) => handleUpdateChannelSheetMapping('groups', e.target.value)}

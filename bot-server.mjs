@@ -50,6 +50,21 @@ function loadBotConfig() {
   };
 }
 
+function loadFacebookGroupCount() {
+  try {
+    const groupsConfig = JSON.parse(fs.readFileSync(GROUPS_CONFIG_PATH, 'utf-8'));
+    if (Array.isArray(groupsConfig.centralPool)) return groupsConfig.centralPool.length;
+
+    const uniqueGroupUrls = new Set(
+      (groupsConfig.accounts || []).flatMap((account) => account.groupUrls || []),
+    );
+    return uniqueGroupUrls.size;
+  } catch (error) {
+    console.error('[Bot] Lỗi đọc số lượng nhóm Facebook:', error.message);
+    return 0;
+  }
+}
+
 // -------------------------------------------------------------
 // HELPER: KIỂM TRA PORT & HTTP
 // -------------------------------------------------------------
@@ -1116,9 +1131,10 @@ async function checkAutoPilotSchedule() {
 
       lastAutoPilotRunSlot = currentSlot;
       isAutoPilotRunning = true;
+      const facebookGroupCount = loadFacebookGroupCount();
       const triggeredNames = [
         triggeredChannels.fanpage ? 'Fanpage' : null,
-        triggeredChannels.groups ? '151 Groups' : null,
+        triggeredChannels.groups ? `${facebookGroupCount} Groups` : null,
         triggeredChannels.personal ? 'Cá Nhân' : null,
       ].filter(Boolean).join(', ');
 
