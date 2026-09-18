@@ -347,7 +347,7 @@ export async function POST(req: NextRequest) {
         groupUrlsText,
         profileDir: customProfileDir,
       } = body;
-      const targetProfileDir = customProfileDir?.trim() || 'n8n-fb-group-profile-1';
+      const targetProfileDir = customProfileDir?.trim() || `n8n-fb-profile-${Date.now()}`;
       const targetPort = 9223;
       const parsedFanpageUrls = parseFacebookUrls(fanpageUrls ?? fanpageUrlsText);
       const parsedGroupUrls = parseFacebookUrls(groupUrls ?? groupUrlsText);
@@ -356,19 +356,18 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, error: 'Hãy chọn ít nhất một nơi để dùng tài khoản Facebook.' }, { status: 400 });
       }
 
-      if (enableFanpage && parsedFanpageUrls.length === 0) {
-        return NextResponse.json({ ok: false, error: 'Hãy nhập ít nhất một link Fanpage khi bật đăng Fanpage.' }, { status: 400 });
-      }
-
       let createdFanpages = 0;
       let createdGroups = 0;
 
       // 1. Thêm vào Fanpage nếu có danh sách link fanpage
       if (enableFanpage) {
         const fpConfig = getFanpageConfig();
-        for (const cleanFpUrl of parsedFanpageUrls) {
+        const fanpageUrlsToCreate = parsedFanpageUrls.length > 0
+          ? parsedFanpageUrls
+          : ['https://www.facebook.com/'];
+        for (const cleanFpUrl of fanpageUrlsToCreate) {
           const nextId = fpConfig.accounts.length > 0 ? Math.max(...fpConfig.accounts.map(a => Number(a.id) || 0)) + 1 : 1;
-          const fpTitle = await fetchFacebookTitle(cleanFpUrl);
+          const fpTitle = cleanFpUrl === 'https://www.facebook.com/' ? '' : await fetchFacebookTitle(cleanFpUrl);
           fpConfig.accounts.push({
             id: nextId,
             name: fpTitle || `Facebook Fanpage ${nextId}`,
