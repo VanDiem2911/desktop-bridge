@@ -53,6 +53,39 @@ function parseFacebookUrls(value: unknown): string[] {
   )];
 }
 
+function assignUniqueFacebookProfiles(
+  fanpages: FanpageAccount[],
+  groups: Array<Record<string, unknown>>,
+): boolean {
+  const usedPorts = new Set<number>();
+  const usedProfiles = new Set<string>();
+  let nextPort = 9223;
+  let changed = false;
+
+  for (const account of [...fanpages, ...groups]) {
+    const currentPort = Number(account.port);
+    const currentProfile = typeof account.profileDir === 'string' ? account.profileDir : '';
+    const hasUniquePort = Number.isInteger(currentPort) && currentPort >= 9223 && !usedPorts.has(currentPort);
+    const hasUniqueProfile = Boolean(currentProfile) && !usedProfiles.has(currentProfile);
+
+    if (hasUniquePort && hasUniqueProfile) {
+      usedPorts.add(currentPort);
+      usedProfiles.add(currentProfile);
+      continue;
+    }
+
+    while (usedPorts.has(nextPort)) nextPort++;
+    account.port = nextPort;
+    account.profileDir = `n8n-fb-profile-${nextPort}`;
+    usedPorts.add(nextPort);
+    usedProfiles.add(`n8n-fb-profile-${nextPort}`);
+    nextPort++;
+    changed = true;
+  }
+
+  return changed;
+}
+
 
 function getFanpageConfig(): { accounts: FanpageAccount[] } {
   const raw = readJsonFile<Record<string, unknown>>(FANPAGE_CONFIG_PATH, {});
@@ -100,6 +133,11 @@ export async function GET() {
         { id: 2, name: 'ChatGPT Tài khoản 2', profileDir: 'n8n-chatgpt-profile-2', port: 9242, enabled: true },
       ],
     });
+
+    if (assignUniqueFacebookProfiles(fanpageConfig.accounts, groupsConfig.accounts || [])) {
+      writeJsonFile(FANPAGE_CONFIG_PATH, fanpageConfig);
+      writeJsonFile(GROUPS_CONFIG_PATH, groupsConfig);
+    }
 
     const localAppData = path.join(os.homedir(), 'AppData', 'Local');
 
@@ -347,8 +385,12 @@ export async function POST(req: NextRequest) {
         groupUrlsText,
         profileDir: customProfileDir,
       } = body;
-      const targetProfileDir = customProfileDir?.trim() || `n8n-fb-profile-${Date.now()}`;
-      const targetPort = 9223;
+      const existingFanpages = getFanpageConfig().accounts;
+      const existingGroups = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] }).accounts || [];
+      const usedPorts = new Set([...existingFanpages, ...existingGroups].map((account) => Number(account.port)).filter(Number.isInteger));
+      let targetPort = 9223;
+      while (usedPorts.has(targetPort)) targetPort++;
+      const targetProfileDir = customProfileDir?.trim() || `n8n-fb-profile-${targetPort}`;
       const parsedFanpageUrls = parseFacebookUrls(fanpageUrls ?? fanpageUrlsText);
       const parsedGroupUrls = parseFacebookUrls(groupUrls ?? groupUrlsText);
 
