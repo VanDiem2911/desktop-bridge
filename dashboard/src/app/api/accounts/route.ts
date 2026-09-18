@@ -38,6 +38,21 @@ interface GroupAccount {
   [key: string]: unknown;
 }
 
+function parseFacebookUrls(value: unknown): string[] {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/\r?\n/)
+      : [];
+
+  return [...new Set(
+    values
+      .filter((url): url is string => typeof url === 'string')
+      .map((url) => url.trim())
+      .filter((url) => /^https?:\/\//i.test(url)),
+  )];
+}
+
 
 function getFanpageConfig(): { accounts: FanpageAccount[] } {
   const raw = readJsonFile<Record<string, unknown>>(FANPAGE_CONFIG_PATH, {});
@@ -145,7 +160,7 @@ export async function GET() {
         rawId: (acc.id as string) || `acc_${num}`,
         accIndex: num,
         name: (acc.name as string) || `Tài khoản Group ${num}`,
-        port: 9222 + num,
+        port: (acc.port as number) || (9222 + num),
         profileDir,
         url: 'https://www.facebook.com/',
         groupCount: groupUrls.length,
@@ -320,20 +335,38 @@ export async function POST(req: NextRequest) {
     }
 
     // ================= TÀI KHOẢN FACEBOOK TOÀN NĂNG (CHO CẢ FANPAGE & GROUPS) =================
-    if (action === 'add_unified_facebook_account') {
-      const { name, profileUrl, fanpageUrls = [], groupUrls = [], profileDir: customProfileDir } = body;
+    if (action === '__removed_add_unified_facebook_account') {
+      const {
+        name,
+        profileUrl,
+        enableFanpage = true,
+        fanpageUrls,
+        fanpageUrlsText,
+        enableGroups = true,
+        groupUrls,
+        groupUrlsText,
+        profileDir: customProfileDir,
+      } = body;
       const targetProfileDir = customProfileDir?.trim() || 'n8n-fb-group-profile-1';
       const targetPort = 9223;
+      const parsedFanpageUrls = parseFacebookUrls(fanpageUrls ?? fanpageUrlsText);
+      const parsedGroupUrls = parseFacebookUrls(groupUrls ?? groupUrlsText);
+
+      if (!enableFanpage && !enableGroups) {
+        return NextResponse.json({ ok: false, error: 'Hãy chọn ít nhất một nơi để dùng tài khoản Facebook.' }, { status: 400 });
+      }
+
+      if (enableFanpage && parsedFanpageUrls.length === 0) {
+        return NextResponse.json({ ok: false, error: 'Hãy nhập ít nhất một link Fanpage khi bật đăng Fanpage.' }, { status: 400 });
+      }
 
       let createdFanpages = 0;
       let createdGroups = 0;
 
       // 1. Thêm vào Fanpage nếu có danh sách link fanpage
-      if (Array.isArray(fanpageUrls) && fanpageUrls.length > 0) {
+      if (enableFanpage) {
         const fpConfig = getFanpageConfig();
-        for (const fUrl of fanpageUrls) {
-          if (!fUrl || !String(fUrl).trim().startsWith('http')) continue;
-          const cleanFpUrl = String(fUrl).trim();
+        for (const cleanFpUrl of parsedFanpageUrls) {
           const nextId = fpConfig.accounts.length > 0 ? Math.max(...fpConfig.accounts.map(a => Number(a.id) || 0)) + 1 : 1;
           const fpTitle = await fetchFacebookTitle(cleanFpUrl);
           fpConfig.accounts.push({
@@ -350,27 +383,31 @@ export async function POST(req: NextRequest) {
         writeJsonFile(FANPAGE_CONFIG_PATH, fpConfig);
       }
 
-      // 2. Thêm vào Groups
-      const grpConfig = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] });
-      if (!Array.isArray(grpConfig.accounts)) grpConfig.accounts = [];
-      const nextGrpId = `acc_${grpConfig.accounts.length + 1}`;
-      const validGroupUrls = Array.isArray(groupUrls) ? groupUrls.filter(u => typeof u === 'string' && u.trim().startsWith('http')) : [];
-      
-      grpConfig.accounts.push({
-        id: nextGrpId,
-        name: name?.trim() || `Tài khoản FB ${grpConfig.accounts.length + 1}`,
-        profileUrl: profileUrl?.trim() || undefined,
-        profileDir: targetProfileDir,
-        port: targetPort,
-        enabled: true,
-        roleGroup: 'group_1',
-        originalRoleGroup: 'group_1',
-        groupUrls: validGroupUrls,
-        lastGroupIndex: -1,
-        lastPostedAt: null,
-      });
-      createdGroups++;
-      writeJsonFile(GROUPS_CONFIG_PATH, grpConfig);
+      // 2. Thêm vào Groups khi người dùng chọn kênh này.
+      if (enableGroups) {
+        const grpConfig = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] });
+        if (!Array.isArray(grpConfig.accounts)) grpConfig.accounts = [];
+        const nextGroupNumber = grpConfig.accounts.reduce((max, account) => {
+          const match = account.id.match(/(\d+)$/);
+          return Math.max(max, match ? Number(match[1]) : 0);
+        }, 0) + 1;
+
+        grpConfig.accounts.push({
+          id: `acc_${nextGroupNumber}`,
+          name: name?.trim() || `Tài khoản FB ${nextGroupNumber}`,
+          profileUrl: profileUrl?.trim() || undefined,
+          profileDir: targetProfileDir,
+          port: targetPort,
+          enabled: true,
+          roleGroup: 'group_1',
+          originalRoleGroup: 'group_1',
+          groupUrls: parsedGroupUrls,
+          lastGroupIndex: -1,
+          lastPostedAt: null,
+        });
+        createdGroups++;
+        writeJsonFile(GROUPS_CONFIG_PATH, grpConfig);
+      }
 
       return NextResponse.json({
         ok: true,

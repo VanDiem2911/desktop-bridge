@@ -92,7 +92,6 @@ interface AccountModalsProps {
   setEditingFanpage: React.Dispatch<React.SetStateAction<any>>;
   handleUpdateFanpage: (e: React.FormEvent) => Promise<void>;
 
-  // Unified FB Modal
   isAddUnifiedFbOpen?: boolean;
   setIsAddUnifiedFbOpen?: (open: boolean) => void;
   unifiedFbForm?: {

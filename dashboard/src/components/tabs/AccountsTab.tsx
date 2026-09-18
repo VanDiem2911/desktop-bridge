@@ -97,20 +97,6 @@ interface AccountsTabProps {
   setEditingPersonal: React.Dispatch<React.SetStateAction<any>>;
   handleUpdatePersonal: (e: React.FormEvent) => Promise<void>;
 
-  // Unified FB Modal
-  isAddUnifiedFbOpen?: boolean;
-  setIsAddUnifiedFbOpen?: (open: boolean) => void;
-  unifiedFbForm?: {
-    name: string;
-    profileUrl: string;
-    enableFanpage: boolean;
-    fanpageUrlsText: string;
-    enableGroups: boolean;
-    groupUrlsText: string;
-    profileDir: string;
-  };
-  setUnifiedFbForm?: React.Dispatch<React.SetStateAction<any>>;
-  handleCreateUnifiedFb?: (e: React.FormEvent) => Promise<void>;
 }
 
 export default function AccountsTab({
@@ -175,11 +161,6 @@ export default function AccountsTab({
   handleUpdatePersonal,
   isEditPersonalOpen,
   setIsEditPersonalOpen,
-  isAddUnifiedFbOpen,
-  setIsAddUnifiedFbOpen,
-  unifiedFbForm,
-  setUnifiedFbForm,
-  handleCreateUnifiedFb,
 }: AccountsTabProps) {
   const openEditChatGptModal = (acc: AccountItem) => {
     setEditingChatGpt({
@@ -234,28 +215,6 @@ export default function AccountsTab({
   return (
     <>
       <div className="space-y-8">
-        {/* Banner Quick Action: Thêm Tài Khoản FB Đăng Nhập 1 Lần Dùng Cho Cả Fanpage & Groups */}
-        <div className="p-6 rounded-3xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-5 border border-white/20">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
-              <h4 className="font-black text-base tracking-tight text-white">Tài Khoản Facebook Dùng Chung (Chỉ cần đăng nhập 1 lần)</h4>
-              <span className="px-2.5 py-0.5 text-[10px] font-black bg-amber-400 text-amber-950 rounded-full shadow-xs">Tiết kiệm công sức</span>
-            </div>
-            <p className="text-xs text-blue-100 max-w-2xl leading-relaxed">
-              Bạn có thể thêm 1 tài khoản Facebook và gán ngay cho cả <strong className="text-white underline decoration-amber-300">5+ Fanpage quản lý</strong> lẫn <strong className="text-white underline decoration-amber-300">Nhóm Facebook Groups</strong>. Tất cả tự động kết nối qua Profile Chrome <code className="bg-black/30 px-1.5 py-0.5 rounded font-mono text-amber-200">n8n-fb-group-profile-1 (Port 9223)</code> — Đăng nhập 1 lần là xuất bản bài và đăng group trơn tru!
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setIsAddUnifiedFbOpen && setIsAddUnifiedFbOpen(true)}
-            className="flex-shrink-0 flex items-center gap-2 px-5 py-3 text-xs font-black bg-white text-indigo-700 hover:bg-amber-300 hover:text-indigo-950 rounded-2xl shadow-lg hover:shadow-xl transition-all active:scale-95 cursor-pointer"
-          >
-            <UserPlus className="w-4 h-4 text-indigo-600" />
-            + Thêm FB Cả Fanpage & Groups (1 Lần Login)
-          </button>
-        </div>
-
             {accounts.map(category => (
               <div key={category.category} className="liquid-glass rounded-3xl p-7 space-y-5">
                 
@@ -278,14 +237,6 @@ export default function AccountsTab({
                     {category.category === 'fanpage' && (
                       <div className="flex items-center gap-2">
                         <button
-                          type="button"
-                          onClick={() => setIsAddUnifiedFbOpen && setIsAddUnifiedFbOpen(true)}
-                          className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-xl shadow-md transition-all cursor-pointer"
-                          title="Thêm nick Facebook dùng chung cho cả Fanpage và Groups mà chỉ cần đăng nhập 1 lần"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-slate-950" /> Thêm FB Dùng Cả Fanpage & Groups
-                        </button>
-                        <button
                           onClick={() => setIsAddFanpageOpen(true)}
                           className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-md shadow-blue-600/25 transition-all"
                         >
@@ -295,14 +246,6 @@ export default function AccountsTab({
                     )}
                     {category.category === 'groups' && (
                       <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setIsAddUnifiedFbOpen && setIsAddUnifiedFbOpen(true)}
-                          className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-xl shadow-md transition-all cursor-pointer"
-                          title="Thêm nick Facebook dùng chung cho cả Fanpage và Groups mà chỉ cần đăng nhập 1 lần"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-slate-950" /> Thêm FB Dùng Cả Fanpage & Groups
-                        </button>
                         <button
                           onClick={() => setIsAddAccountOpen(true)}
                           className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl shadow-md shadow-indigo-600/25 transition-all"
@@ -988,11 +931,6 @@ export default function AccountsTab({
         editingPersonal={editingPersonal}
         setEditingPersonal={setEditingPersonal}
         handleUpdatePersonal={handleUpdatePersonal}
-        isAddUnifiedFbOpen={isAddUnifiedFbOpen}
-        setIsAddUnifiedFbOpen={setIsAddUnifiedFbOpen}
-        unifiedFbForm={unifiedFbForm}
-        setUnifiedFbForm={setUnifiedFbForm}
-        handleCreateUnifiedFb={handleCreateUnifiedFb}
       />
     </>
   );

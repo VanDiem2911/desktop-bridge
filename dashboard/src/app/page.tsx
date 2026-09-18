@@ -367,18 +367,6 @@ export default function DashboardPage() {
   const [isDetectingName, setIsDetectingName] = useState<boolean>(false);
   const [detectedGroupName, setDetectedGroupName] = useState<string>('');
 
-  // Modals state - Unified Facebook Account (Fanpage & Groups 1 Login)
-  const [isAddUnifiedFbOpen, setIsAddUnifiedFbOpen] = useState(false);
-  const [unifiedFbForm, setUnifiedFbForm] = useState({
-    name: '',
-    profileUrl: '',
-    enableFanpage: true,
-    fanpageUrlsText: '',
-    enableGroups: true,
-    groupUrlsText: '',
-    profileDir: 'n8n-fb-group-profile-1',
-  });
-
   // Modals state - Personal Accounts
   const [isAddPersonalOpen, setIsAddPersonalOpen] = useState(false);
   const [newPersonalForm, setNewPersonalForm] = useState({
@@ -1624,59 +1612,6 @@ export default function DashboardPage() {
       }
     } catch {
       showToast('Lỗi kết nối máy chủ', 'error');
-    }
-  };
-
-  // Unified Facebook Account CRUD Handler
-  const handleCreateUnifiedFb = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      let finalName = unifiedFbForm.name?.trim();
-      if (!finalName && unifiedFbForm.profileUrl) {
-        try {
-          const lookupRes = await fetch(`/api/facebook/lookup-name?url=${encodeURIComponent(unifiedFbForm.profileUrl.trim())}`);
-          const lookupData = await lookupRes.json();
-          if (lookupData?.ok && lookupData.name) {
-            finalName = lookupData.name;
-          }
-        } catch {}
-      }
-
-      const res = await fetch('/api/accounts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'add_unified_facebook_account',
-          name: finalName || 'Tài khoản Facebook Chính',
-          profileUrl: unifiedFbForm.profileUrl,
-          enableFanpage: unifiedFbForm.enableFanpage,
-          fanpageUrlsText: unifiedFbForm.fanpageUrlsText,
-          enableGroups: unifiedFbForm.enableGroups,
-          groupUrlsText: unifiedFbForm.groupUrlsText,
-          profileDir: unifiedFbForm.profileDir || 'n8n-fb-group-profile-1',
-        }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        showToast(data.message || 'Đã thêm tài khoản Facebook dùng chung thành công!', 'success');
-        setIsAddUnifiedFbOpen(false);
-        setUnifiedFbForm({
-          name: '',
-          profileUrl: '',
-          enableFanpage: true,
-          fanpageUrlsText: '',
-          enableGroups: true,
-          groupUrlsText: '',
-          profileDir: 'n8n-fb-group-profile-1',
-        });
-        fetchAccounts();
-        fetchGroups();
-      } else {
-        showToast(data.error || 'Lỗi thêm tài khoản Facebook', 'error');
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      showToast(msg, 'error');
     }
   };
 
@@ -2945,11 +2880,6 @@ export default function DashboardPage() {
             editingPersonal={editingPersonal}
             setEditingPersonal={setEditingPersonal}
             handleUpdatePersonal={handleUpdatePersonal}
-            isAddUnifiedFbOpen={isAddUnifiedFbOpen}
-            setIsAddUnifiedFbOpen={setIsAddUnifiedFbOpen}
-            unifiedFbForm={unifiedFbForm}
-            setUnifiedFbForm={setUnifiedFbForm}
-            handleCreateUnifiedFb={handleCreateUnifiedFb}
           />
         )}
 
