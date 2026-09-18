@@ -1468,7 +1468,7 @@ export default function DashboardPage() {
   };
 
   // Tự động nhận diện tên Fanpage / Group / Profile từ link Facebook
-  const handleAutoDetectFbName = async (url: string, targetForm: 'newFanpage' | 'editFanpage' | 'newGroup' | 'newPersonal' | 'editPersonal' | 'newGroupAccount' | 'editGroupAccount') => {
+  const handleAutoDetectFbName = async (url: string, targetForm: 'newFanpage' | 'editFanpage' | 'newGroup' | 'newPersonal' | 'editPersonal' | 'newGroupAccount' | 'editGroupAccount' | 'unifiedFb') => {
     if (!url || !url.includes('facebook.com')) return;
     setIsDetectingName(true);
     try {
@@ -1496,6 +1496,9 @@ export default function DashboardPage() {
         } else if (targetForm === 'editGroupAccount') {
           setEditingAccount(prev => prev ? ({ ...prev, name: data.name }) : null);
           showToast(`Đã cập nhật tên: "${data.name}"`, 'success');
+        } else if (targetForm === 'unifiedFb') {
+          setUnifiedFbForm((prev) => ({ ...prev, name: data.name }));
+          showToast(`Đã tự động nhận diện tên: "${data.name}"`, 'success');
         }
       }
     } catch {

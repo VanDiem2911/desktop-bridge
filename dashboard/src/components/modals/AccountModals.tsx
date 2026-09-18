@@ -192,7 +192,6 @@ export default function AccountModals({
                   value={newChatGptForm.name}
                   onChange={(e) => setNewChatGptForm({ ...newChatGptForm, name: e.target.value })}
                   placeholder={`VD: ChatGPT Tài khoản ${(chatgptAccounts?.length || 0) + 1}`}
-                  required
                   className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-semibold"
                 />
               </div>
@@ -1395,7 +1394,6 @@ export default function AccountModals({
                   value={unifiedFbForm.name}
                   onChange={(e) => setUnifiedFbForm({ ...unifiedFbForm, name: e.target.value })}
                   placeholder="VD: Nick FB Chính (Tự động lấy khi dán link FB ở trên)..."
-                  required
                   className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-semibold"
                 />
               </div>
