@@ -18,11 +18,14 @@ import {
   Unlock,
   Bot,
   UserPlus,
+  KeyRound,
+  Sparkles,
 } from 'lucide-react';
 import { AccountCategory, AccountItem, GroupAccount, CentralPoolItem, RotationConfig } from '@/types/dashboard';
 import AccountModals from '@/components/modals/AccountModals';
 
 interface AccountsTabProps {
+  handleSyncAllProfiles?: () => Promise<void>;
   accounts: AccountCategory[];
   groupsData: {
     accounts?: GroupAccount[];
@@ -110,6 +113,7 @@ export default function AccountsTab({
   handleDeleteFanpage,
   handleDeletePersonal,
   handleToggleAccount,
+  handleSyncAllProfiles,
   setDetectedGroupName,
   isDetectingName,
   detectedGroupName,
@@ -324,6 +328,37 @@ export default function AccountsTab({
                       </div>
                     </div>
 
+                    {/* BANNER HƯỚNG DẪN ĐĂNG NHẬP 1 LẦN & ĐỒNG BỘ PHIÊN */}
+                    <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-slate-50 border border-blue-200/80 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                          <KeyRound className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                            <span>Quy trình đăng nhập 1 lần duy nhất</span>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                              Đang hoạt động
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 mt-0.5">
+                            Bạn chỉ cần đăng nhập Facebook <strong className="text-blue-700">1 lần duy nhất</strong> trên Tài khoản 1. Mọi tài khoản nhóm khác tự động dùng chung phiên đăng nhập này mà không cần nhập mật khẩu hay mã 2FA lại!
+                          </p>
+                        </div>
+                      </div>
+
+                      {handleSyncAllProfiles && (
+                        <button
+                          onClick={handleSyncAllProfiles}
+                          className="shrink-0 px-3.5 py-2 rounded-xl bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 text-xs font-bold shadow-2xs hover:shadow-xs transition-all flex items-center gap-1.5"
+                          title="Chuyển toàn bộ tài khoản nhóm sang dùng chung phiên đăng nhập của nick FB chính"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                          Đồng bộ toàn bộ tài khoản
+                        </button>
+                      )}
+                    </div>
+
                     {/* 3 Columns Kanban Board */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
                       {/* ================= CỘT 1: NHÓM 1 ================= */}
@@ -414,6 +449,9 @@ export default function AccountsTab({
                                           Profile sẵn sàng
                                         </span>
                                       )}
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-blue-50 text-blue-700 border border-blue-200" title={`Dùng chung phiên Facebook (${acc.profileDir || 'n8n-fb-group-profile-1'})`}>
+                                        <KeyRound className="w-3 h-3 text-blue-600" /> Phiên FB chung
+                                      </span>
                                     </div>
 
                                     {/* Action Buttons */}
@@ -554,6 +592,9 @@ export default function AccountsTab({
                                           Profile sẵn sàng
                                         </span>
                                       )}
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-blue-50 text-blue-700 border border-blue-200" title={`Dùng chung phiên Facebook (${acc.profileDir || 'n8n-fb-group-profile-1'})`}>
+                                        <KeyRound className="w-3 h-3 text-blue-600" /> Phiên FB chung
+                                      </span>
                                     </div>
 
                                     {/* Action Buttons */}

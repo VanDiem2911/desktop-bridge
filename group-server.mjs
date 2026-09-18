@@ -1192,11 +1192,11 @@ async function executeGroupPosting(body) {
     let browser = null;
     try {
       console.log(`\n======================================================`);
-      console.log(`[Group Server] BẮT ĐẦU TÀI KHOẢN: ${account.name} (${account.profileDir}) trên CỔNG ${accPort}`);
+      console.log(`[Group Server] BẮT ĐẦU TÀI KHOẢN: ${account.name} (${profileDir}) trên CỔNG ${accPort}`);
       console.log(`======================================================`);
 
       // Mở cửa sổ Chrome độc lập cho tài khoản này trên cổng riêng
-      await ensureChromeForAccount(account.profileDir, accPort);
+      await ensureChromeForAccount(profileDir, accPort);
       browser = await chromium.connectOverCDP(`http://127.0.0.1:${accPort}`);
       const context = browser.contexts()[0];
       if (!context) throw new Error('Không tìm thấy context trình duyệt Chrome');

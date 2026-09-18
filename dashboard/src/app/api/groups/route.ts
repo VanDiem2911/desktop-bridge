@@ -623,8 +623,23 @@ export async function POST(req: NextRequest) {
     }
 
     // ==========================================
-    // 5. CÁC ACTION QUẢN LÝ TÀI KHOẢN CŨ (GIỮ NGUYÊN & ĐỒNG BỘ)
+    // 5. CÁC ACTION QUẢN LÝ TÀI KHOẢN (ĐỒNG BỘ PHIÊN ĐĂNG NHẬP DÙNG CHUNG)
     // ==========================================
+    if (action === 'sync_all_profiles') {
+      const targetProfileDir = body.targetProfileDir || config.accounts[0]?.profileDir || 'n8n-fb-group-profile-1';
+      for (const acc of config.accounts) {
+        acc.profileDir = targetProfileDir;
+      }
+      writeJsonFile(GROUPS_CONFIG_PATH, config);
+      const { config: enriched, poolStats } = syncAndEnrichConfig(config);
+      return NextResponse.json({
+        ok: true,
+        message: `Đã đồng bộ toàn bộ tài khoản nhóm sang dùng chung phiên đăng nhập (${targetProfileDir})! Bạn chỉ cần đăng nhập Facebook 1 lần duy nhất.`,
+        data: enriched,
+        stats: poolStats,
+      });
+    }
+
     if (action === 'add_account') {
       const { name, profileUrl, profileDir, groupUrls = [], enabled = true } = body;
       const nextIndex = config.accounts.length + 1;

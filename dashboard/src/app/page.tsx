@@ -343,10 +343,12 @@ export default function DashboardPage() {
     profileDir: '',
     enabled: true,
     groupUrlsText: '',
+    useSharedProfile: true,
+    sharedProfileDir: 'n8n-fb-group-profile-1',
   });
 
   const [isEditAccountOpen, setIsEditAccountOpen] = useState(false);
-  const [editingAccount, setEditingAccount] = useState<{ id: string; name: string; profileUrl?: string; profileDir: string; enabled: boolean } | null>(null);
+  const [editingAccount, setEditingAccount] = useState<{ id: string; name: string; profileUrl?: string; profileDir: string; enabled: boolean; useSharedProfile?: boolean; sharedProfileDir?: string } | null>(null);
 
   // Modals state - Fanpage Accounts
   const [isAddFanpageOpen, setIsAddFanpageOpen] = useState(false);
@@ -1840,7 +1842,15 @@ export default function DashboardPage() {
         } catch {}
       }
       const name = finalName || `Tài khoản ${nextIndex}`;
-      const profileDir = newAccountForm.profileDir.trim() || `n8n-fb-group-profile-${nextIndex}`;
+
+      // XÁC ĐỊNH PROFILE DIR (DÙNG CHUNG PHIÊN FB ĐÃ CÓ HOẶC TẠO MỚI)
+      let profileDir = '';
+      if (newAccountForm.useSharedProfile !== false) {
+        profileDir = newAccountForm.sharedProfileDir || groupsData.accounts?.[0]?.profileDir || 'n8n-fb-group-profile-1';
+      } else {
+        profileDir = newAccountForm.profileDir.trim() || `n8n-fb-group-profile-${nextIndex}`;
+      }
+
       const groupUrls = newAccountForm.groupUrlsText
         .split('\n')
         .map(l => l.trim())
@@ -1863,11 +1873,44 @@ export default function DashboardPage() {
       if (data.ok) {
         showToast(data.message, 'success');
         setIsAddAccountOpen(false);
-        setNewAccountForm({ name: '', profileUrl: '', profileDir: '', enabled: true, groupUrlsText: '' });
+        setNewAccountForm({
+          name: '',
+          profileUrl: '',
+          profileDir: '',
+          enabled: true,
+          groupUrlsText: '',
+          useSharedProfile: true,
+          sharedProfileDir: 'n8n-fb-group-profile-1',
+        });
         fetchAccounts();
         fetchGroups();
       } else {
         showToast(data.error || 'Lỗi thêm tài khoản', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    }
+  };
+
+  // Đồng bộ toàn bộ tài khoản nhóm sang dùng chung phiên đăng nhập Facebook
+  const handleSyncAllProfiles = async () => {
+    const targetDir = groupsData.accounts?.[0]?.profileDir || 'n8n-fb-group-profile-1';
+    if (!confirm(`Bạn có muốn chuyển TẤT CẢ các tài khoản nhóm sang dùng chung phiên đăng nhập (${targetDir}) không?\n\nSau khi đồng bộ, bạn chỉ cần đăng nhập Facebook 1 lần duy nhất trên tài khoản chính là tất cả tài khoản nhóm đều dùng được ngay!`)) return;
+
+    try {
+      const res = await fetch('/api/groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sync_all_profiles', targetProfileDir: targetDir }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message, 'success');
+        fetchAccounts();
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi đồng bộ', 'error');
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1902,12 +1945,15 @@ export default function DashboardPage() {
   // Open Edit Group Account Modal
   const openEditAccountModal = (acc: AccountItem) => {
     const rawId = acc.rawId || acc.id;
+    const isShared = acc.profileDir === 'n8n-fb-group-profile-1' || (groupsData.accounts || []).some(a => a.id !== rawId && a.profileDir === acc.profileDir);
     setEditingAccount({
       id: rawId,
       name: acc.name,
       profileUrl: acc.url || '',
       profileDir: acc.profileDir,
       enabled: acc.enabled !== false,
+      useSharedProfile: isShared,
+      sharedProfileDir: acc.profileDir || 'n8n-fb-group-profile-1',
     });
     setIsEditAccountOpen(true);
   };
@@ -1916,6 +1962,11 @@ export default function DashboardPage() {
     e.preventDefault();
     if (!editingAccount) return;
     try {
+      let profileDir = editingAccount.profileDir;
+      if (editingAccount.useSharedProfile) {
+        profileDir = editingAccount.sharedProfileDir || 'n8n-fb-group-profile-1';
+      }
+
       const res = await fetch('/api/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1924,7 +1975,7 @@ export default function DashboardPage() {
           accountId: editingAccount.id,
           name: editingAccount.name,
           profileUrl: editingAccount.profileUrl,
-          profileDir: editingAccount.profileDir,
+          profileDir: profileDir,
           enabled: editingAccount.enabled,
         }),
       });
@@ -2755,6 +2806,7 @@ export default function DashboardPage() {
             handleDeleteFanpage={handleDeleteFanpage}
             handleDeletePersonal={handleDeletePersonal}
             handleToggleAccount={handleToggleAccount}
+            handleSyncAllProfiles={handleSyncAllProfiles}
             setDetectedGroupName={setDetectedGroupName}
             isAddChatGptOpen={isAddChatGptOpen}
             setIsAddChatGptOpen={setIsAddChatGptOpen}

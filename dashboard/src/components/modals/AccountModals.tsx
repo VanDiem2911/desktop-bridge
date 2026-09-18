@@ -5,6 +5,8 @@ import {
   UserPlus,
   RefreshCw,
   Edit3,
+  CheckCircle2,
+  KeyRound,
 } from 'lucide-react';
 
 interface AccountModalsProps {
@@ -23,7 +25,18 @@ interface AccountModalsProps {
 
   isAddAccountOpen: boolean;
   setIsAddAccountOpen: (open: boolean) => void;
-  newAccountForm: { id?: string; name: string; profileDir: string; port?: number | string; profileUrl: string; desc?: string; enabled?: boolean; groupUrlsText?: string };
+  newAccountForm: {
+    id?: string;
+    name: string;
+    profileDir: string;
+    port?: number | string;
+    profileUrl: string;
+    desc?: string;
+    enabled?: boolean;
+    groupUrlsText?: string;
+    useSharedProfile?: boolean;
+    sharedProfileDir?: string;
+  };
   setNewAccountForm: React.Dispatch<React.SetStateAction<any>>;
   handleCreateAccount: (e: React.FormEvent) => Promise<void>;
   handleAutoDetectFbName: (url: string, targetType?: any) => Promise<void>;
@@ -31,7 +44,17 @@ interface AccountModalsProps {
   detectedGroupName: string;
   isEditAccountOpen: boolean;
   setIsEditAccountOpen: (open: boolean) => void;
-  editingAccount: { id: string; name: string; profileUrl?: string; profileDir: string; port?: number | string; desc?: string; enabled?: boolean } | null;
+  editingAccount: {
+    id: string;
+    name: string;
+    profileUrl?: string;
+    profileDir: string;
+    port?: number | string;
+    desc?: string;
+    enabled?: boolean;
+    useSharedProfile?: boolean;
+    sharedProfileDir?: string;
+  } | null;
   setEditingAccount: React.Dispatch<React.SetStateAction<any>>;
   handleUpdateAccount: (e: React.FormEvent) => Promise<void>;
 
@@ -340,16 +363,73 @@ export default function AccountModals({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Tên thư mục Profile Chrome (UserData):</label>
-                <input
-                  type="text"
-                  value={newAccountForm.profileDir}
-                  onChange={(e) => setNewAccountForm({ ...newAccountForm, profileDir: e.target.value })}
-                  placeholder={`Mặc định: n8n-fb-group-profile-${(groupsData?.accounts?.length || 0) + 1}`}
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
-                />
-                <span className="text-[11px] text-slate-400 mt-1 block">Hệ thống sẽ tạo thư mục lưu cookie/đăng nhập riêng biệt trong AppData</span>
+              {/* CHẾ ĐỘ ĐĂNG NHẬP FACEBOOK: ĐĂNG NHẬP 1 LẦN DÙNG CHUNG HOẶC NICK RIÊNG */}
+              <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-extrabold text-blue-900 flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-blue-600" /> Phiên đăng nhập Facebook
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    Khuyên dùng: Đăng nhập 1 lần
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="flex items-start gap-2.5 cursor-pointer p-2.5 rounded-xl bg-white border border-blue-200/70 shadow-2xs hover:border-blue-400 transition-colors">
+                    <input
+                      type="radio"
+                      name="newAccProfileMode"
+                      checked={newAccountForm.useSharedProfile !== false}
+                      onChange={() => setNewAccountForm({ ...newAccountForm, useSharedProfile: true })}
+                      className="mt-0.5 w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-slate-800">
+                        Dùng chung phiên Facebook đã có (Đăng nhập 1 lần)
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Tự động dùng phiên đăng nhập của tài khoản Facebook chính. Bạn không cần đăng nhập lại!
+                      </div>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 cursor-pointer p-2.5 rounded-xl bg-white border border-slate-200 shadow-2xs hover:border-slate-300 transition-colors">
+                    <input
+                      type="radio"
+                      name="newAccProfileMode"
+                      checked={newAccountForm.useSharedProfile === false}
+                      onChange={() => setNewAccountForm({ ...newAccountForm, useSharedProfile: false })}
+                      className="mt-0.5 w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-slate-800">
+                        Dùng Nick Facebook khác (Tạo Profile Chrome riêng)
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Chỉ chọn khi bạn muốn đăng nhập một nick Facebook cá nhân hoàn toàn khác.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                {newAccountForm.useSharedProfile !== false ? (
+                  <div className="pt-1 text-[11px] text-emerald-700 font-bold flex items-center gap-1.5 bg-emerald-50/80 px-2.5 py-1.5 rounded-lg border border-emerald-200/70">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                    Đã liên kết với Profile: <span className="font-mono">{newAccountForm.sharedProfileDir || 'n8n-fb-group-profile-1'}</span> (Không cần nhập mật khẩu)
+                  </div>
+                ) : (
+                  <div className="pt-1.5 space-y-1">
+                    <label className="block text-[11px] font-bold text-slate-700">Tên thư mục Profile Chrome riêng:</label>
+                    <input
+                      type="text"
+                      value={newAccountForm.profileDir}
+                      onChange={(e) => setNewAccountForm({ ...newAccountForm, profileDir: e.target.value })}
+                      placeholder={`Mặc định: n8n-fb-group-profile-${(groupsData?.accounts?.length || 0) + 1}`}
+                      className="liquid-input w-full rounded-xl px-3 py-2 text-xs text-slate-900 font-mono"
+                    />
+                    <span className="text-[10px] text-slate-400 block">Sẽ mở cửa sổ Chrome mới để bạn đăng nhập nick FB riêng biệt này.</span>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -459,15 +539,72 @@ export default function AccountModals({
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Profile Chrome Folder:</label>
-                <input
-                  type="text"
-                  value={editingAccount.profileDir}
-                  onChange={(e) => setEditingAccount({ ...editingAccount, profileDir: e.target.value })}
-                  required
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
-                />
+              {/* CHẾ ĐỘ ĐĂNG NHẬP FACEBOOK: ĐĂNG NHẬP 1 LẦN DÙNG CHUNG HOẶC NICK RIÊNG */}
+              <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-extrabold text-blue-900 flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-blue-600" /> Phiên đăng nhập Facebook
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    Khuyên dùng
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="flex items-start gap-2.5 cursor-pointer p-2.5 rounded-xl bg-white border border-blue-200/70 shadow-2xs hover:border-blue-400 transition-colors">
+                    <input
+                      type="radio"
+                      name="editAccProfileMode"
+                      checked={editingAccount.useSharedProfile !== false}
+                      onChange={() => setEditingAccount({ ...editingAccount, useSharedProfile: true, profileDir: editingAccount.sharedProfileDir || 'n8n-fb-group-profile-1' })}
+                      className="mt-0.5 w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-slate-800">
+                        Dùng chung phiên Facebook đã có (Đăng nhập 1 lần)
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Dùng chung phiên đăng nhập của nick Facebook chính. Không cần đăng nhập lại!
+                      </div>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 cursor-pointer p-2.5 rounded-xl bg-white border border-slate-200 shadow-2xs hover:border-slate-300 transition-colors">
+                    <input
+                      type="radio"
+                      name="editAccProfileMode"
+                      checked={editingAccount.useSharedProfile === false}
+                      onChange={() => setEditingAccount({ ...editingAccount, useSharedProfile: false })}
+                      className="mt-0.5 w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-slate-800">
+                        Dùng Nick Facebook khác (Tạo Profile Chrome riêng)
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Chỉ chọn khi bạn muốn đăng nhập một nick Facebook cá nhân hoàn toàn khác.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                {editingAccount.useSharedProfile !== false ? (
+                  <div className="pt-1 text-[11px] text-emerald-700 font-bold flex items-center gap-1.5 bg-emerald-50/80 px-2.5 py-1.5 rounded-lg border border-emerald-200/70">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                    Đã liên kết với Profile: <span className="font-mono">{editingAccount.profileDir || 'n8n-fb-group-profile-1'}</span> (Không cần đăng nhập lại)
+                  </div>
+                ) : (
+                  <div className="pt-1.5 space-y-1">
+                    <label className="block text-[11px] font-bold text-slate-700">Tên thư mục Profile Chrome riêng:</label>
+                    <input
+                      type="text"
+                      value={editingAccount.profileDir}
+                      onChange={(e) => setEditingAccount({ ...editingAccount, profileDir: e.target.value })}
+                      required
+                      className="liquid-input w-full rounded-xl px-3 py-2 text-xs text-slate-900 font-mono"
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2 pt-1">
