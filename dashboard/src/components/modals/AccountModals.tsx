@@ -756,7 +756,7 @@ export default function AccountModals({
               </div>
 
               {/* CHẾ ĐỘ ĐĂNG NHẬP FACEBOOK CHO FANPAGE: ĐĂNG NHẬP 1 LẦN DÙNG CHUNG HOẶC NICK RIÊNG */}
-              <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 space-y-2.5">
+              <div className="hidden p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-extrabold text-blue-900 flex items-center gap-1.5">
                     <KeyRound className="w-3.5 h-3.5 text-blue-600" /> Phiên đăng nhập Facebook
@@ -943,7 +943,7 @@ export default function AccountModals({
               </div>
 
               {/* CHẾ ĐỘ ĐĂNG NHẬP FACEBOOK CHO FANPAGE: ĐĂNG NHẬP 1 LẦN DÙNG CHUNG HOẶC NICK RIÊNG */}
-              <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 space-y-2.5">
+              <div className="hidden p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-extrabold text-blue-900 flex items-center gap-1.5">
                     <KeyRound className="w-3.5 h-3.5 text-blue-600" /> Phiên đăng nhập Facebook
