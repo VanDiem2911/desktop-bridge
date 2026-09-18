@@ -355,15 +355,29 @@ export default function DashboardPage() {
   const [newFanpageForm, setNewFanpageForm] = useState({
     name: '',
     pageUrl: '',
-    profileDir: '',
-    port: '',
+    profileDir: 'n8n-fb-group-profile-1',
+    port: '9223',
     description: '',
     enabled: true,
+    useSharedProfile: true,
+    sharedProfileDir: 'n8n-fb-group-profile-1',
   });
   const [isEditFanpageOpen, setIsEditFanpageOpen] = useState(false);
-  const [editingFanpage, setEditingFanpage] = useState<{ id: string; name: string; pageUrl: string; profileDir: string; port: number; description: string; enabled: boolean } | null>(null);
+  const [editingFanpage, setEditingFanpage] = useState<{ id: string; name: string; pageUrl: string; profileDir: string; port: number; description: string; enabled: boolean; useSharedProfile?: boolean; sharedProfileDir?: string } | null>(null);
   const [isDetectingName, setIsDetectingName] = useState<boolean>(false);
   const [detectedGroupName, setDetectedGroupName] = useState<string>('');
+
+  // Modals state - Unified Facebook Account (Fanpage & Groups 1 Login)
+  const [isAddUnifiedFbOpen, setIsAddUnifiedFbOpen] = useState(false);
+  const [unifiedFbForm, setUnifiedFbForm] = useState({
+    name: '',
+    profileUrl: '',
+    enableFanpage: true,
+    fanpageUrlsText: '',
+    enableGroups: true,
+    groupUrlsText: '',
+    profileDir: 'n8n-fb-group-profile-1',
+  });
 
   // Modals state - Personal Accounts
   const [isAddPersonalOpen, setIsAddPersonalOpen] = useState(false);
@@ -1514,6 +1528,13 @@ export default function DashboardPage() {
         } catch {}
       }
 
+      const finalProfileDir = (newFanpageForm as any).useSharedProfile !== false
+        ? 'n8n-fb-group-profile-1'
+        : (newFanpageForm.profileDir || 'n8n-fb-group-profile-1');
+      const finalPort = (newFanpageForm as any).useSharedProfile !== false
+        ? 9223
+        : (newFanpageForm.port || 9223);
+
       const res = await fetch('/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1521,8 +1542,8 @@ export default function DashboardPage() {
           action: 'add_fanpage',
           name: finalName || '',
           pageUrl: newFanpageForm.pageUrl,
-          profileDir: newFanpageForm.profileDir,
-          port: newFanpageForm.port,
+          profileDir: finalProfileDir,
+          port: finalPort,
           description: newFanpageForm.description,
           enabled: newFanpageForm.enabled,
         }),
@@ -1531,7 +1552,16 @@ export default function DashboardPage() {
       if (data.ok) {
         showToast(data.message || 'Đã thêm Fanpage thành công!', 'success');
         setIsAddFanpageOpen(false);
-        setNewFanpageForm({ name: '', pageUrl: '', profileDir: '', port: '', description: '', enabled: true });
+        setNewFanpageForm({
+          name: '',
+          pageUrl: '',
+          profileDir: 'n8n-fb-group-profile-1',
+          port: '9223',
+          description: '',
+          enabled: true,
+          useSharedProfile: true,
+          sharedProfileDir: 'n8n-fb-group-profile-1',
+        });
         fetchAccounts();
       } else {
         showToast(data.error || 'Lỗi thêm Fanpage', 'error');
@@ -1552,6 +1582,8 @@ export default function DashboardPage() {
       port: acc.port,
       description: acc.desc || '',
       enabled: acc.enabled !== false,
+      useSharedProfile: acc.profileDir === 'n8n-fb-group-profile-1',
+      sharedProfileDir: 'n8n-fb-group-profile-1',
     });
     setIsEditFanpageOpen(true);
   };
@@ -1560,6 +1592,13 @@ export default function DashboardPage() {
     e.preventDefault();
     if (!editingFanpage) return;
     try {
+      const finalProfileDir = (editingFanpage as any).useSharedProfile !== false
+        ? 'n8n-fb-group-profile-1'
+        : (editingFanpage.profileDir || 'n8n-fb-group-profile-1');
+      const finalPort = (editingFanpage as any).useSharedProfile !== false
+        ? 9223
+        : (editingFanpage.port || 9223);
+
       const res = await fetch('/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1568,8 +1607,8 @@ export default function DashboardPage() {
           accountId: editingFanpage.id,
           name: editingFanpage.name,
           pageUrl: editingFanpage.pageUrl,
-          profileDir: editingFanpage.profileDir,
-          port: editingFanpage.port,
+          profileDir: finalProfileDir,
+          port: finalPort,
           description: editingFanpage.description,
           enabled: editingFanpage.enabled,
         }),
@@ -1585,6 +1624,59 @@ export default function DashboardPage() {
       }
     } catch {
       showToast('Lỗi kết nối máy chủ', 'error');
+    }
+  };
+
+  // Unified Facebook Account CRUD Handler
+  const handleCreateUnifiedFb = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      let finalName = unifiedFbForm.name?.trim();
+      if (!finalName && unifiedFbForm.profileUrl) {
+        try {
+          const lookupRes = await fetch(`/api/facebook/lookup-name?url=${encodeURIComponent(unifiedFbForm.profileUrl.trim())}`);
+          const lookupData = await lookupRes.json();
+          if (lookupData?.ok && lookupData.name) {
+            finalName = lookupData.name;
+          }
+        } catch {}
+      }
+
+      const res = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'add_unified_facebook_account',
+          name: finalName || 'Tài khoản Facebook Chính',
+          profileUrl: unifiedFbForm.profileUrl,
+          enableFanpage: unifiedFbForm.enableFanpage,
+          fanpageUrlsText: unifiedFbForm.fanpageUrlsText,
+          enableGroups: unifiedFbForm.enableGroups,
+          groupUrlsText: unifiedFbForm.groupUrlsText,
+          profileDir: unifiedFbForm.profileDir || 'n8n-fb-group-profile-1',
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message || 'Đã thêm tài khoản Facebook dùng chung thành công!', 'success');
+        setIsAddUnifiedFbOpen(false);
+        setUnifiedFbForm({
+          name: '',
+          profileUrl: '',
+          enableFanpage: true,
+          fanpageUrlsText: '',
+          enableGroups: true,
+          groupUrlsText: '',
+          profileDir: 'n8n-fb-group-profile-1',
+        });
+        fetchAccounts();
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi thêm tài khoản Facebook', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
     }
   };
 
@@ -2853,6 +2945,11 @@ export default function DashboardPage() {
             editingPersonal={editingPersonal}
             setEditingPersonal={setEditingPersonal}
             handleUpdatePersonal={handleUpdatePersonal}
+            isAddUnifiedFbOpen={isAddUnifiedFbOpen}
+            setIsAddUnifiedFbOpen={setIsAddUnifiedFbOpen}
+            unifiedFbForm={unifiedFbForm}
+            setUnifiedFbForm={setUnifiedFbForm}
+            handleCreateUnifiedFb={handleCreateUnifiedFb}
           />
         )}
 

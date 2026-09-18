@@ -60,15 +60,52 @@ interface AccountModalsProps {
 
   isAddFanpageOpen: boolean;
   setIsAddFanpageOpen: (open: boolean) => void;
-    newFanpageForm: { id?: string; name: string; pageUrl: string; profileDir: string; port: string | number; description?: string; desc?: string; enabled?: boolean };
+  newFanpageForm: {
+    id?: string;
+    name: string;
+    pageUrl: string;
+    profileDir: string;
+    port: string | number;
+    description?: string;
+    desc?: string;
+    enabled?: boolean;
+    useSharedProfile?: boolean;
+    sharedProfileDir?: string;
+  };
   setNewFanpageForm: React.Dispatch<React.SetStateAction<any>>;
   handleCreateFanpage: (e: React.FormEvent) => Promise<void>;
   handleAutoDetectPageName: (url: string, isEdit?: any) => Promise<void>;
   isEditFanpageOpen: boolean;
   setIsEditFanpageOpen: (open: boolean) => void;
-  editingFanpage: { id: string; name: string; pageUrl: string; profileDir: string; port: string | number; description?: string; desc?: string; enabled?: boolean } | null;
+  editingFanpage: {
+    id: string;
+    name: string;
+    pageUrl: string;
+    profileDir: string;
+    port: string | number;
+    description?: string;
+    desc?: string;
+    enabled?: boolean;
+    useSharedProfile?: boolean;
+    sharedProfileDir?: string;
+  } | null;
   setEditingFanpage: React.Dispatch<React.SetStateAction<any>>;
   handleUpdateFanpage: (e: React.FormEvent) => Promise<void>;
+
+  // Unified FB Modal
+  isAddUnifiedFbOpen?: boolean;
+  setIsAddUnifiedFbOpen?: (open: boolean) => void;
+  unifiedFbForm?: {
+    name: string;
+    profileUrl: string;
+    enableFanpage: boolean;
+    fanpageUrlsText: string;
+    enableGroups: boolean;
+    groupUrlsText: string;
+    profileDir: string;
+  };
+  setUnifiedFbForm?: React.Dispatch<React.SetStateAction<any>>;
+  handleCreateUnifiedFb?: (e: React.FormEvent) => Promise<void>;
 
   isAddPersonalOpen: boolean;
   setIsAddPersonalOpen: (open: boolean) => void;
@@ -120,6 +157,11 @@ export default function AccountModals({
   editingFanpage,
   setEditingFanpage,
   handleUpdateFanpage,
+  isAddUnifiedFbOpen,
+  setIsAddUnifiedFbOpen,
+  unifiedFbForm,
+  setUnifiedFbForm,
+  handleCreateUnifiedFb,
   isAddPersonalOpen,
   setIsAddPersonalOpen,
   newPersonalForm,
@@ -715,27 +757,84 @@ export default function AccountModals({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Thư mục Profile Chrome:</label>
-                  <input
-                    type="text"
-                    value={newFanpageForm.profileDir}
-                    onChange={(e) => setNewFanpageForm({ ...newFanpageForm, profileDir: e.target.value })}
-                    placeholder="VD: n8n-fanpage-profile-2"
-                    className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
-                  />
+              {/* CHẾ ĐỘ ĐĂNG NHẬP FACEBOOK CHO FANPAGE: ĐĂNG NHẬP 1 LẦN DÙNG CHUNG HOẶC NICK RIÊNG */}
+              <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-extrabold text-blue-900 flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-blue-600" /> Phiên đăng nhập Facebook
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    Khuyên dùng: Đăng nhập 1 lần
+                  </span>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Cổng Remote Port:</label>
-                  <input
-                    type="number"
-                    value={newFanpageForm.port}
-                    onChange={(e) => setNewFanpageForm({ ...newFanpageForm, port: e.target.value })}
-                    placeholder="Mặc định: 9251+"
-                    className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
-                  />
+
+                <div className="space-y-2">
+                  <label className="flex items-start gap-2.5 cursor-pointer p-2.5 rounded-xl bg-white border border-blue-200/70 shadow-2xs hover:border-blue-400 transition-colors">
+                    <input
+                      type="radio"
+                      name="newFanpageProfileMode"
+                      checked={newFanpageForm.useSharedProfile !== false}
+                      onChange={() => setNewFanpageForm({ ...newFanpageForm, useSharedProfile: true, profileDir: 'n8n-fb-group-profile-1', port: 9223 })}
+                      className="mt-0.5 w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-slate-800">
+                        Dùng chung phiên Facebook chính (Đăng nhập 1 lần)
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Dùng chung phiên của Nick Facebook chính (cùng phiên với Nhóm). Không cần đăng nhập lại!
+                      </div>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 cursor-pointer p-2.5 rounded-xl bg-white border border-slate-200 shadow-2xs hover:border-slate-300 transition-colors">
+                    <input
+                      type="radio"
+                      name="newFanpageProfileMode"
+                      checked={newFanpageForm.useSharedProfile === false}
+                      onChange={() => setNewFanpageForm({ ...newFanpageForm, useSharedProfile: false })}
+                      className="mt-0.5 w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-slate-800">
+                        Dùng Nick Facebook khác (Tạo Profile Chrome riêng)
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Chỉ chọn nếu Fanpage này thuộc quyền quản trị của một nick FB cá nhân khác.
+                      </div>
+                    </div>
+                  </label>
                 </div>
+
+                {newFanpageForm.useSharedProfile !== false ? (
+                  <div className="pt-1 text-[11px] text-emerald-700 font-bold flex items-center gap-1.5 bg-emerald-50/80 px-2.5 py-1.5 rounded-lg border border-emerald-200/70">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                    Đã liên kết với Profile FB chính (n8n-fb-group-profile-1 - Port 9223)
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 pt-1.5">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Thư mục Profile Chrome:</label>
+                      <input
+                        type="text"
+                        value={newFanpageForm.profileDir}
+                        onChange={(e) => setNewFanpageForm({ ...newFanpageForm, profileDir: e.target.value })}
+                        placeholder="VD: n8n-fanpage-profile-2"
+                        className="liquid-input w-full rounded-xl px-3 py-2 text-xs text-slate-900 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Cổng Remote Port:</label>
+                      <input
+                        type="number"
+                        value={newFanpageForm.port}
+                        onChange={(e) => setNewFanpageForm({ ...newFanpageForm, port: e.target.value })}
+                        placeholder="Mặc định: 9251+"
+                        className="liquid-input w-full rounded-xl px-3 py-2 text-xs text-slate-900 font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -845,27 +944,84 @@ export default function AccountModals({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Profile Chrome Folder:</label>
-                  <input
-                    type="text"
-                    value={editingFanpage.profileDir}
-                    onChange={(e) => setEditingFanpage({ ...editingFanpage, profileDir: e.target.value })}
-                    required
-                    className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
-                  />
+              {/* CHẾ ĐỘ ĐĂNG NHẬP FACEBOOK CHO FANPAGE: ĐĂNG NHẬP 1 LẦN DÙNG CHUNG HOẶC NICK RIÊNG */}
+              <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-extrabold text-blue-900 flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-blue-600" /> Phiên đăng nhập Facebook
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    Khuyên dùng
+                  </span>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Cổng Remote Port:</label>
-                  <input
-                    type="number"
-                    value={editingFanpage.port}
-                    onChange={(e) => setEditingFanpage({ ...editingFanpage, port: Number(e.target.value) })}
-                    required
-                    className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
-                  />
+
+                <div className="space-y-2">
+                  <label className="flex items-start gap-2.5 cursor-pointer p-2.5 rounded-xl bg-white border border-blue-200/70 shadow-2xs hover:border-blue-400 transition-colors">
+                    <input
+                      type="radio"
+                      name="editFanpageProfileMode"
+                      checked={editingFanpage.useSharedProfile !== false}
+                      onChange={() => setEditingFanpage({ ...editingFanpage, useSharedProfile: true, profileDir: 'n8n-fb-group-profile-1', port: 9223 })}
+                      className="mt-0.5 w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-slate-800">
+                        Dùng chung phiên Facebook chính (Đăng nhập 1 lần)
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Dùng chung phiên của Nick Facebook chính (cùng phiên với Nhóm). Không cần đăng nhập lại!
+                      </div>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 cursor-pointer p-2.5 rounded-xl bg-white border border-slate-200 shadow-2xs hover:border-slate-300 transition-colors">
+                    <input
+                      type="radio"
+                      name="editFanpageProfileMode"
+                      checked={editingFanpage.useSharedProfile === false}
+                      onChange={() => setEditingFanpage({ ...editingFanpage, useSharedProfile: false })}
+                      className="mt-0.5 w-4 h-4 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="text-xs font-bold text-slate-800">
+                        Dùng Nick Facebook khác (Tạo Profile Chrome riêng)
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Chỉ chọn nếu Fanpage này thuộc quyền quản trị của một nick FB cá nhân khác.
+                      </div>
+                    </div>
+                  </label>
                 </div>
+
+                {editingFanpage.useSharedProfile !== false ? (
+                  <div className="pt-1 text-[11px] text-emerald-700 font-bold flex items-center gap-1.5 bg-emerald-50/80 px-2.5 py-1.5 rounded-lg border border-emerald-200/70">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                    Đã liên kết với Profile FB chính (n8n-fb-group-profile-1 - Port 9223)
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 pt-1.5">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Profile Chrome Folder:</label>
+                      <input
+                        type="text"
+                        value={editingFanpage.profileDir}
+                        onChange={(e) => setEditingFanpage({ ...editingFanpage, profileDir: e.target.value })}
+                        required
+                        className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">Cổng Remote Port:</label>
+                      <input
+                        type="number"
+                        value={editingFanpage.port}
+                        onChange={(e) => setEditingFanpage({ ...editingFanpage, port: Number(e.target.value) })}
+                        required
+                        className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1177,6 +1333,172 @@ export default function AccountModals({
                   className="px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-xs font-bold text-white shadow-md shadow-teal-600/30"
                 >
                   Lưu thay đổi
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL THÊM TÀI KHOẢN FACEBOOK ĐA NĂNG (FANPAGE & GROUPS) ==================== */}
+      {isAddUnifiedFbOpen && unifiedFbForm && setUnifiedFbForm && handleCreateUnifiedFb && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="liquid-glass-modal rounded-3xl w-full max-w-xl p-7 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-extrabold text-lg text-slate-900 flex items-center gap-2">
+                  <span className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center text-xs font-black shadow-xs">
+                    FB
+                  </span>
+                  Thêm Tài Khoản Facebook (Cho Cả Fanpage & Groups)
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Chỉ cần <strong className="text-blue-700">đăng nhập đúng 1 lần</strong> trên Chrome. Tài khoản này sẽ dùng để xuất bản bài viết lên cả Fanpage lẫn các Nhóm Facebook!
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={(e) => { e.preventDefault(); if (handleCreateUnifiedFb) handleCreateUnifiedFb(e); }} className="space-y-4 pt-1">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700">Link Facebook cá nhân (Hoặc tên Nick):</label>
+                  {isDetectingName && (
+                    <span className="text-[11px] font-extrabold text-blue-600 flex items-center gap-1.5 animate-pulse">
+                      <RefreshCw className="w-3 h-3 animate-spin" /> Đang lấy tên Facebook...
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  value={unifiedFbForm.profileUrl || ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setUnifiedFbForm({ ...unifiedFbForm, profileUrl: val });
+                    if (val.includes('facebook.com') && val.length > 20) {
+                      handleAutoDetectFbName(val, 'unifiedFb');
+                    }
+                  }}
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData.getData('text');
+                    if (pasted && pasted.includes('facebook.com')) {
+                      handleAutoDetectFbName(pasted, 'unifiedFb');
+                    }
+                  }}
+                  placeholder="VD: https://www.facebook.com/tennick hoặc dán link cá nhân..."
+                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Tên tài khoản hiển thị:</label>
+                <input
+                  type="text"
+                  value={unifiedFbForm.name}
+                  onChange={(e) => setUnifiedFbForm({ ...unifiedFbForm, name: e.target.value })}
+                  placeholder="VD: Nick FB Chính (Tự động lấy khi dán link FB ở trên)..."
+                  required
+                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-semibold"
+                />
+              </div>
+
+              {/* MỤC 1: CHO VÀO FACEBOOK FANPAGE */}
+              <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={unifiedFbForm.enableFanpage}
+                      onChange={(e) => setUnifiedFbForm({ ...unifiedFbForm, enableFanpage: e.target.checked })}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-xs font-extrabold text-blue-950 flex items-center gap-1.5">
+                      📄 Cho vào Facebook Fanpage (Xuất bản Page)
+                    </span>
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800">
+                    Hỗ trợ 5+ Fanpage cùng lúc
+                  </span>
+                </div>
+
+                {unifiedFbForm.enableFanpage && (
+                  <div className="space-y-1 pt-1">
+                    <label className="block text-[11px] font-bold text-slate-700">
+                      Danh sách link Fanpage (Mỗi dòng 1 link, ví dụ 5 Fanpage mà nick này quản lý):
+                    </label>
+                    <textarea
+                      value={unifiedFbForm.fanpageUrlsText}
+                      onChange={(e) => setUnifiedFbForm({ ...unifiedFbForm, fanpageUrlsText: e.target.value })}
+                      rows={3}
+                      placeholder="https://www.facebook.com/fanpage-1&#10;https://www.facebook.com/fanpage-2&#10;https://www.facebook.com/fanpage-3"
+                      className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-mono"
+                    />
+                    <span className="text-[10px] text-slate-500 block">
+                      Hệ thống sẽ thêm các Fanpage này vào danh sách Fanpage và dùng chung phiên đăng nhập của nick FB này.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* MỤC 2: CHO VÀO FACEBOOK GROUPS */}
+              <div className="p-3.5 rounded-2xl bg-indigo-50/70 border border-indigo-200/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={unifiedFbForm.enableGroups}
+                      onChange={(e) => setUnifiedFbForm({ ...unifiedFbForm, enableGroups: e.target.checked })}
+                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5">
+                      👥 Cho vào Facebook Groups (Đăng bài Nhóm)
+                    </span>
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800">
+                    Xoay vòng bài đăng
+                  </span>
+                </div>
+
+                {unifiedFbForm.enableGroups && (
+                  <div className="space-y-1 pt-1">
+                    <label className="block text-[11px] font-bold text-slate-700">
+                      Danh sách link Nhóm Facebook ban đầu (Mỗi link 1 dòng, tùy chọn):
+                    </label>
+                    <textarea
+                      value={unifiedFbForm.groupUrlsText}
+                      onChange={(e) => setUnifiedFbForm({ ...unifiedFbForm, groupUrlsText: e.target.value })}
+                      rows={3}
+                      placeholder="https://www.facebook.com/groups/nhom-1&#10;https://www.facebook.com/groups/nhom-2"
+                      className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-mono"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* PHIÊN ĐĂNG NHẬP THỐNG NHẤT */}
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-medium space-y-1">
+                <div className="font-bold flex items-center gap-1.5 text-emerald-800">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  Đăng nhập 1 lần duy nhất:
+                </div>
+                <p className="text-[11px] text-emerald-700">
+                  Cả Fanpage và Group trên sẽ được gán chung vào Profile Chrome: <span className="font-mono font-bold">{unifiedFbForm.profileDir || 'n8n-fb-group-profile-1'}</span> (Port 9223). Bạn chỉ cần mở Chrome đăng nhập Facebook đúng 1 lần là xong!
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-200/80">
+                <button
+                  type="button"
+                  onClick={() => { if (setIsAddUnifiedFbOpen) setIsAddUnifiedFbOpen(false); }}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white shadow-md shadow-blue-600/30 flex items-center gap-1.5"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  Lưu và Liên kết ngay
                 </button>
               </div>
             </form>

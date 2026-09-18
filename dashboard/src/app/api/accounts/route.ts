@@ -23,6 +23,22 @@ interface FanpageAccount {
   desc?: string;
 }
 
+interface GroupAccount {
+  id: string;
+  name: string;
+  profileUrl?: string;
+  profileDir?: string;
+  port?: number;
+  enabled?: boolean;
+  roleGroup?: string;
+  originalRoleGroup?: string;
+  groupUrls?: string[];
+  lastGroupIndex?: number;
+  lastPostedAt?: string | null;
+  [key: string]: unknown;
+}
+
+
 function getFanpageConfig(): { accounts: FanpageAccount[] } {
   const raw = readJsonFile<Record<string, unknown>>(FANPAGE_CONFIG_PATH, {});
   if (Array.isArray(raw.accounts) && raw.accounts.length > 0) {
@@ -293,14 +309,73 @@ export async function POST(req: NextRequest) {
         id: nextId,
         name: finalName,
         pageUrl: cleanUrl,
-        profileDir: profileDir?.trim() || (nextId === 1 ? 'n8n-chatgpt-profile' : `n8n-fanpage-profile-${nextId}`),
-        port: port ? Number(port) : (nextId === 1 ? 9222 : 9250 + nextId),
+        profileDir: profileDir?.trim() || 'n8n-fb-group-profile-1',
+        port: port ? Number(port) : 9223,
         enabled: enabled !== false,
-        desc: description?.trim() || `Fanpage: ${cleanUrl} (Port ${port || (nextId === 1 ? 9222 : 9250 + nextId)})`,
+        desc: description?.trim() || `Fanpage: ${cleanUrl} (Dùng chung phiên FB: Port ${port || 9223})`,
       };
       config.accounts.push(newAcc);
       writeJsonFile(FANPAGE_CONFIG_PATH, config);
       return NextResponse.json({ ok: true, message: `Đã thêm Fanpage "${newAcc.name}" thành công!`, data: config });
+    }
+
+    // ================= TÀI KHOẢN FACEBOOK TOÀN NĂNG (CHO CẢ FANPAGE & GROUPS) =================
+    if (action === 'add_unified_facebook_account') {
+      const { name, profileUrl, fanpageUrls = [], groupUrls = [], profileDir: customProfileDir } = body;
+      const targetProfileDir = customProfileDir?.trim() || 'n8n-fb-group-profile-1';
+      const targetPort = 9223;
+
+      let createdFanpages = 0;
+      let createdGroups = 0;
+
+      // 1. Thêm vào Fanpage nếu có danh sách link fanpage
+      if (Array.isArray(fanpageUrls) && fanpageUrls.length > 0) {
+        const fpConfig = getFanpageConfig();
+        for (const fUrl of fanpageUrls) {
+          if (!fUrl || !String(fUrl).trim().startsWith('http')) continue;
+          const cleanFpUrl = String(fUrl).trim();
+          const nextId = fpConfig.accounts.length > 0 ? Math.max(...fpConfig.accounts.map(a => Number(a.id) || 0)) + 1 : 1;
+          const fpTitle = await fetchFacebookTitle(cleanFpUrl);
+          fpConfig.accounts.push({
+            id: nextId,
+            name: fpTitle || `Facebook Fanpage ${nextId}`,
+            pageUrl: cleanFpUrl,
+            profileDir: targetProfileDir,
+            port: targetPort,
+            enabled: true,
+            desc: `Liên kết với tài khoản Facebook: ${name || 'Chính'} (Port ${targetPort})`,
+          });
+          createdFanpages++;
+        }
+        writeJsonFile(FANPAGE_CONFIG_PATH, fpConfig);
+      }
+
+      // 2. Thêm vào Groups
+      const grpConfig = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] });
+      if (!Array.isArray(grpConfig.accounts)) grpConfig.accounts = [];
+      const nextGrpId = `acc_${grpConfig.accounts.length + 1}`;
+      const validGroupUrls = Array.isArray(groupUrls) ? groupUrls.filter(u => typeof u === 'string' && u.trim().startsWith('http')) : [];
+      
+      grpConfig.accounts.push({
+        id: nextGrpId,
+        name: name?.trim() || `Tài khoản FB ${grpConfig.accounts.length + 1}`,
+        profileUrl: profileUrl?.trim() || undefined,
+        profileDir: targetProfileDir,
+        port: targetPort,
+        enabled: true,
+        roleGroup: 'group_1',
+        originalRoleGroup: 'group_1',
+        groupUrls: validGroupUrls,
+        lastGroupIndex: -1,
+        lastPostedAt: null,
+      });
+      createdGroups++;
+      writeJsonFile(GROUPS_CONFIG_PATH, grpConfig);
+
+      return NextResponse.json({
+        ok: true,
+        message: `Đã thêm tài khoản Facebook thành công! (${createdFanpages} Fanpage, ${createdGroups} Tài khoản Group - Cùng dùng chung phiên đăng nhập: ${targetProfileDir})`,
+      });
     }
 
     if (action === 'delete_fanpage') {

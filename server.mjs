@@ -182,8 +182,8 @@ function loadFanpageAccounts() {
       id: 1,
       name: 'Facebook Fanpage Chính',
       pageUrl: 'https://www.facebook.com/',
-      profileDir: 'n8n-chatgpt-profile',
-      port: 9222,
+      profileDir: 'n8n-fb-group-profile-1',
+      port: 9223,
       enabled: true,
     },
   ];
@@ -352,8 +352,8 @@ async function openFacebookPage(account, pageUrl) {
   const targetUrl = pageUrl || account?.pageUrl || 'https://www.facebook.com/';
   const fbAccount = {
     name: account?.name || 'Facebook Fanpage',
-    profileDir: account?.profileDir || 'n8n-chatgpt-profile',
-    port: account?.port || 9222,
+    profileDir: account?.profileDir || 'n8n-fb-group-profile-1',
+    port: account?.port || 9223,
     pageUrl: targetUrl,
   };
   const cdpUrl = await ensureChromeForGpt(fbAccount, targetUrl);
