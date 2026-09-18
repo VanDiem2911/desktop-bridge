@@ -56,6 +56,7 @@ import {
   Lock,
   Unlock,
   ArrowLeftRight,
+  KeyRound,
 } from 'lucide-react';
 
 import {
@@ -70,19 +71,30 @@ import {
   PoolStats,
   ScheduleConfig,
   BotConfig,
+  CredentialsData,
 } from '@/types/dashboard';
 import { parseErrorMessage } from '@/lib/error-parser';
 
 import OverviewTab from '@/components/tabs/OverviewTab';
 import AnalyticsTab from '@/components/tabs/AnalyticsTab';
 import AccountsTab from '@/components/tabs/AccountsTab';
+import CredentialsTab from '@/components/tabs/CredentialsTab';
 import GroupsTab from '@/components/tabs/GroupsTab';
 import ScheduleTab from '@/components/tabs/ScheduleTab';
 import BotTab from '@/components/tabs/BotTab';
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'accounts' | 'groups' | 'schedule' | 'bot'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'accounts' | 'credentials' | 'groups' | 'schedule' | 'bot'>('overview');
   const [status, setStatus] = useState<ServerStatus | null>(null);
+
+  // Credentials State (ChatGPT & Facebook accounts and passwords)
+  const [credentialsData, setCredentialsData] = useState<CredentialsData | null>(null);
+  const [credentialsLoading, setCredentialsLoading] = useState(false);
+
+  // Analytics Date Filter State
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
+  const [filterDatePreset, setFilterDatePreset] = useState('all');
 
   // Telegram Bot & Watchdog State
   const [botConfig, setBotConfig] = useState({
@@ -436,14 +448,40 @@ export default function DashboardPage() {
   };
 
   // Load Analytics
-  const fetchAnalytics = async (page = 1) => {
+  const fetchAnalytics = async (
+    page = 1,
+    overrideFilters?: {
+      channel?: string;
+      status?: string;
+      gpt?: string;
+      search?: string;
+      startDate?: string;
+      endDate?: string;
+      datePreset?: string;
+    },
+  ) => {
     setAnalyticsLoading(true);
     try {
+      const channel = overrideFilters?.channel !== undefined ? overrideFilters.channel : filterChannel;
+      const status = overrideFilters?.status !== undefined ? overrideFilters.status : filterStatus;
+      const chatgpt = overrideFilters?.gpt !== undefined ? overrideFilters.gpt : filterGpt;
+      const search = overrideFilters?.search !== undefined ? overrideFilters.search : analyticsSearch;
+      const startDate = overrideFilters?.startDate !== undefined ? overrideFilters.startDate : filterStartDate;
+      const endDate = overrideFilters?.endDate !== undefined ? overrideFilters.endDate : filterEndDate;
+      const datePreset = overrideFilters?.datePreset !== undefined ? overrideFilters.datePreset : filterDatePreset;
+
+      if (overrideFilters?.startDate !== undefined) setFilterStartDate(overrideFilters.startDate);
+      if (overrideFilters?.endDate !== undefined) setFilterEndDate(overrideFilters.endDate);
+      if (overrideFilters?.datePreset !== undefined) setFilterDatePreset(overrideFilters.datePreset);
+
       const params = new URLSearchParams({
-        channel: filterChannel,
-        status: filterStatus,
-        chatgpt: filterGpt,
-        search: analyticsSearch,
+        channel,
+        status,
+        chatgpt,
+        search,
+        startDate,
+        endDate,
+        datePreset,
         page: String(page),
         limit: '25',
       });
@@ -514,6 +552,22 @@ export default function DashboardPage() {
     downloadAnchor.click();
     downloadAnchor.remove();
     showToast('Đã tải xuống file JSON thống kê!', 'success');
+  };
+
+  // Load Credentials (ChatGPT & FB Accounts/Passwords)
+  const fetchCredentials = async () => {
+    try {
+      setCredentialsLoading(true);
+      const res = await fetch('/api/credentials');
+      const data = await res.json();
+      if (data.ok) {
+        setCredentialsData(data.data);
+      }
+    } catch (err) {
+      console.error('Lỗi tải mật khẩu & tài khoản:', err);
+    } finally {
+      setCredentialsLoading(false);
+    }
   };
 
   // Load Telegram Bot Config
@@ -1298,6 +1352,7 @@ export default function DashboardPage() {
     fetchAnalytics(1);
     fetchBotConfig();
     fetchScheduleConfig();
+    fetchCredentials();
     const interval = setInterval(() => {
       fetchStatus();
       fetchAccounts();
@@ -2582,7 +2637,17 @@ export default function DashboardPage() {
                   : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
               }`}
             >
-              <Users className="w-4 h-4" /> Quản lý Tài khoản
+              <Users className="w-4 h-4" /> Quản lý Profile Chrome
+            </button>
+            <button
+              onClick={() => { setActiveTab('credentials'); fetchCredentials(); }}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 cursor-pointer ${
+                activeTab === 'credentials'
+                  ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-600/25 font-bold'
+                  : 'text-slate-600 hover:text-violet-700 hover:bg-white/60'
+              }`}
+            >
+              <KeyRound className="w-4 h-4" /> Mật khẩu & TK (FB/GPT)
             </button>
             <button
               onClick={() => setActiveTab('groups')}
@@ -2736,6 +2801,17 @@ export default function DashboardPage() {
             editingPersonal={editingPersonal}
             setEditingPersonal={setEditingPersonal}
             handleUpdatePersonal={handleUpdatePersonal}
+          />
+        )}
+
+        {/* ==================== TAB: QUẢN LÝ MẬT KHẨU & TÀI KHOẢN (CREDENTIALS) ==================== */}
+        {activeTab === 'credentials' && (
+          <CredentialsTab
+            credentialsData={credentialsData}
+            credentialsLoading={credentialsLoading}
+            fetchCredentials={fetchCredentials}
+            handleOpenChrome={handleOpenChrome}
+            showToast={showToast}
           />
         )}
 

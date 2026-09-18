@@ -16,6 +16,9 @@ import {
   Bot,
   Maximize2,
   Eye,
+  Calendar,
+  CalendarDays,
+  X,
 } from 'lucide-react';
 import { AnalyticsStats, HistoryEntry } from '@/types/dashboard';
 import { parseErrorMessage } from '@/lib/error-parser';
@@ -28,7 +31,15 @@ interface AnalyticsTabProps {
     pagination: { total?: number; totalEntries?: number; page: number; totalPages: number; limit?: number };
   } | null;
   analyticsLoading: boolean;
-  fetchAnalytics: (page?: number, overrideFilters?: { channel?: string; status?: string; gpt?: string; search?: string }) => Promise<void>;
+  fetchAnalytics: (page?: number, overrideFilters?: {
+    channel?: string;
+    status?: string;
+    gpt?: string;
+    search?: string;
+    startDate?: string;
+    endDate?: string;
+    datePreset?: string;
+  }) => Promise<void>;
   handleClearHistory: () => Promise<void>;
   handleDeleteHistoryEntry: (id: string) => Promise<void>;
   handleExportHistory: () => void;
@@ -52,18 +63,56 @@ export default function AnalyticsTab({
   const [analyticsSearch, setAnalyticsSearch] = useState('');
   const [analyticsPage, setAnalyticsPage] = useState(1);
 
+  // Bộ lọc thời gian (ngày, tháng, năm)
+  const [datePreset, setDatePreset] = useState<'all' | 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'custom'>('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<HistoryEntry | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [viewingErrorItem, setViewingErrorItem] = useState<HistoryEntry | null>(null);
 
-  const triggerFilter = (page = 1) => {
+  const triggerFilter = (
+    page = 1,
+    override?: {
+      preset?: typeof datePreset;
+      start?: string;
+      end?: string;
+      channel?: typeof filterChannel;
+      status?: typeof filterStatus;
+      gpt?: typeof filterGpt;
+      search?: string;
+    },
+  ) => {
     setAnalyticsPage(page);
     fetchAnalytics(page, {
-      channel: filterChannel,
-      status: filterStatus,
-      gpt: filterGpt,
-      search: analyticsSearch,
+      channel: override?.channel !== undefined ? override.channel : filterChannel,
+      status: override?.status !== undefined ? override.status : filterStatus,
+      gpt: override?.gpt !== undefined ? override.gpt : filterGpt,
+      search: override?.search !== undefined ? override.search : analyticsSearch,
+      startDate: override?.start !== undefined ? override.start : startDate,
+      endDate: override?.end !== undefined ? override.end : endDate,
+      datePreset: override?.preset !== undefined ? override.preset : datePreset,
     });
+  };
+
+  const handleSelectPreset = (preset: 'all' | 'today' | 'yesterday' | 'last7days' | 'thisMonth') => {
+    setDatePreset(preset);
+    setStartDate('');
+    setEndDate('');
+    triggerFilter(1, { preset, start: '', end: '' });
+  };
+
+  const handleApplyCustomDates = () => {
+    setDatePreset('custom');
+    triggerFilter(1, { preset: 'custom', start: startDate, end: endDate });
+  };
+
+  const handleResetDateFilter = () => {
+    setDatePreset('all');
+    setStartDate('');
+    setEndDate('');
+    triggerFilter(1, { preset: 'all', start: '', end: '' });
   };
 
   return (
@@ -116,7 +165,7 @@ export default function AnalyticsTab({
                     type="text"
                     value={analyticsSearch}
                     onChange={(e) => setAnalyticsSearch(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') fetchAnalytics(1); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') triggerFilter(1); }}
                     placeholder="Tìm theo Caption, Prompt, Lỗi..."
                     className="liquid-input w-full rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900"
                   />
@@ -126,7 +175,11 @@ export default function AnalyticsTab({
                 <div>
                   <select
                     value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value as any)}
+                    onChange={(e) => {
+                      const val = e.target.value as any;
+                      setFilterStatus(val);
+                      triggerFilter(1, { status: val });
+                    }}
                     className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
                   >
                     <option value="all">🎯 Tất cả trạng thái</option>
@@ -139,7 +192,11 @@ export default function AnalyticsTab({
                 <div>
                   <select
                     value={filterChannel}
-                    onChange={(e) => setFilterChannel(e.target.value as any)}
+                    onChange={(e) => {
+                      const val = e.target.value as any;
+                      setFilterChannel(val);
+                      triggerFilter(1, { channel: val });
+                    }}
                     className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
                   >
                     <option value="all">🌐 Tất cả kênh xuất bản</option>
@@ -154,7 +211,11 @@ export default function AnalyticsTab({
                 <div>
                   <select
                     value={filterGpt}
-                    onChange={(e) => setFilterGpt(e.target.value as any)}
+                    onChange={(e) => {
+                      const val = e.target.value as any;
+                      setFilterGpt(val);
+                      triggerFilter(1, { gpt: val });
+                    }}
                     className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-semibold text-slate-900"
                   >
                     <option value="all">🤖 Tất cả tài khoản ChatGPT</option>
@@ -163,6 +224,103 @@ export default function AnalyticsTab({
                   </select>
                 </div>
               </div>
+
+              {/* Date / Month / Year Filter Controls */}
+              <div className="pt-3 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5 mr-1">
+                    <CalendarDays className="w-4 h-4 text-blue-600" />
+                    Lọc thời gian:
+                  </span>
+                  {[
+                    { id: 'all', label: 'Tất cả' },
+                    { id: 'today', label: '⚡ Hôm nay' },
+                    { id: 'yesterday', label: '⏳ Hôm qua' },
+                    { id: 'last7days', label: '📅 7 ngày qua' },
+                    { id: 'thisMonth', label: '🗓️ Tháng này' },
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => handleSelectPreset(p.id as any)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                        datePreset === p.id
+                          ? 'bg-blue-600 text-white shadow-xs font-bold'
+                          : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200/80'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                    <span className="text-[11px] font-semibold text-slate-500">Từ ngày:</span>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => {
+                        setStartDate(e.target.value);
+                        setDatePreset('custom');
+                      }}
+                      className="bg-transparent text-xs font-medium text-slate-800 outline-hidden"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                    <span className="text-[11px] font-semibold text-slate-500">Đến ngày:</span>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => {
+                        setEndDate(e.target.value);
+                        setDatePreset('custom');
+                      }}
+                      className="bg-transparent text-xs font-medium text-slate-800 outline-hidden"
+                    />
+                  </div>
+                  <button
+                    onClick={handleApplyCustomDates}
+                    className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-all cursor-pointer"
+                  >
+                    Lọc
+                  </button>
+                  {(datePreset !== 'all' || startDate || endDate) && (
+                    <button
+                      onClick={handleResetDateFilter}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-200 hover:bg-slate-300 text-slate-700 transition-all cursor-pointer"
+                      title="Xóa bộ lọc thời gian"
+                    >
+                      <X className="w-3.5 h-3.5" /> Bỏ lọc
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Active Date Filter Notice */}
+              {(datePreset !== 'all' || startDate || endDate) && (
+                <div className="flex items-center justify-between px-3.5 py-2 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 text-blue-900 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>
+                      Đang xem thống kê & lịch sử:{' '}
+                      <strong className="font-bold text-blue-700">
+                        {datePreset === 'today'
+                          ? 'Hôm nay'
+                          : datePreset === 'yesterday'
+                          ? 'Hôm qua'
+                          : datePreset === 'last7days'
+                          ? '7 ngày gần nhất'
+                          : datePreset === 'thisMonth'
+                          ? 'Tháng này'
+                          : `Từ ${startDate || 'bắt đầu'} đến ${endDate || 'hiện tại'}`}
+                      </strong>
+                    </span>
+                  </div>
+                  <span className="font-bold bg-white/80 px-2.5 py-0.5 rounded-md border border-blue-200 text-blue-700 shadow-2xs">
+                    {analyticsData?.stats.total || 0} bài trong khoảng này
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* 5 KPI Stat Cards */}

@@ -229,3 +229,37 @@ export interface BotConfig {
     watchdogAlerts: boolean;
   };
 }
+
+export interface ChatGptCredential {
+  id: string;
+  name: string;
+  email: string;
+  password?: string;
+  plan?: 'Free' | 'Plus' | 'Team' | 'Enterprise';
+  status?: 'active' | 'expired' | 'rate_limit' | 'backup';
+  port?: number | string;
+  profileDir?: string;
+  notes?: string;
+  updatedAt?: string;
+}
+
+export interface FacebookCredential {
+  id: string;
+  name: string;
+  type?: 'personal' | 'fanpage' | 'via' | 'clone' | 'business';
+  account: string; // Email / SĐT / UID
+  password?: string;
+  twoFactorSecret?: string; // 2FA Key
+  profileUrl?: string;
+  port?: number | string;
+  profileDir?: string;
+  status?: 'active' | 'checkpoint' | 'restricted' | 'locked' | 'backup';
+  notes?: string;
+  updatedAt?: string;
+}
+
+export interface CredentialsData {
+  chatgpt: ChatGptCredential[];
+  facebook: FacebookCredential[];
+}
+

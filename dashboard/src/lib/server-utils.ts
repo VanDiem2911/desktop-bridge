@@ -51,6 +51,7 @@ export const FANPAGE_CONFIG_PATH = resolveConfigPath('fanpage-config.json', 'fan
 export const BOT_CONFIG_PATH = resolveConfigPath('bot-config.json', 'bot-config.example.json');
 export const SCHEDULE_CONFIG_PATH = path.join(BRIDGE_DIR, 'configs', 'schedule-config.json');
 export const POST_HISTORY_PATH = path.join(BRIDGE_DIR, 'configs', 'post-history.json');
+export const CREDENTIALS_CONFIG_PATH = path.join(BRIDGE_DIR, 'configs', 'credentials-config.json');
 
 /** Cổng mặc định cho các server nội bộ — có thể ghi đè qua serverPorts trong schedule-config.json */
 const DEFAULT_SERVER_PORTS = {

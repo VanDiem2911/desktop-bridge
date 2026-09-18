@@ -44,6 +44,22 @@ function saveHistoryData(entries: HistoryEntry[]): boolean {
   return true;
 }
 
+function parseDateBoundary(dateStr: string, isEnd = false): Date {
+  const parts = dateStr.trim().split('-').map(Number);
+  if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+    const [year, month, day] = parts;
+    if (isEnd) {
+      return new Date(year, month - 1, day, 23, 59, 59, 999);
+    } else {
+      return new Date(year, month - 1, day, 0, 0, 0, 0);
+    }
+  }
+  const d = new Date(dateStr);
+  if (isEnd) d.setHours(23, 59, 59, 999);
+  else d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -51,15 +67,56 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get('status');
     const search = (searchParams.get('search') || '').toLowerCase().trim();
     const chatgpt = searchParams.get('chatgpt');
+    const startDate = searchParams.get('startDate');
+    const endDate = searchParams.get('endDate');
+    const datePreset = searchParams.get('datePreset') || 'all';
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(10, parseInt(searchParams.get('limit') || '50', 10)));
 
     const allEntries = getHistoryData();
 
-    // 1. Tính toán thống kê tổng hợp (toàn diện trước khi lọc phân trang)
-    const total = allEntries.length;
-    const successCount = allEntries.filter((e) => e.status === 'success').length;
-    const failedCount = allEntries.filter((e) => e.status === 'failed').length;
+    // 0. Tính toán lọc ngày tháng năm
+    let filterStart: Date | null = null;
+    let filterEnd: Date | null = null;
+
+    const now = new Date();
+    if (datePreset === 'today') {
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      filterStart = parseDateBoundary(todayStr, false);
+      filterEnd = parseDateBoundary(todayStr, true);
+    } else if (datePreset === 'yesterday') {
+      const yest = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      const yestStr = `${yest.getFullYear()}-${String(yest.getMonth() + 1).padStart(2, '0')}-${String(yest.getDate()).padStart(2, '0')}`;
+      filterStart = parseDateBoundary(yestStr, false);
+      filterEnd = parseDateBoundary(yestStr, true);
+    } else if (datePreset === 'last7days') {
+      const p7 = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+      const p7Str = `${p7.getFullYear()}-${String(p7.getMonth() + 1).padStart(2, '0')}-${String(p7.getDate()).padStart(2, '0')}`;
+      filterStart = parseDateBoundary(p7Str, false);
+      filterEnd = new Date();
+    } else if (datePreset === 'thisMonth') {
+      filterStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      filterEnd = new Date();
+    } else if (startDate || endDate) {
+      if (startDate) filterStart = parseDateBoundary(startDate, false);
+      if (endDate) filterEnd = parseDateBoundary(endDate, true);
+    }
+
+    let dateFilteredEntries = allEntries;
+    if (filterStart || filterEnd) {
+      dateFilteredEntries = allEntries.filter((e) => {
+        if (!e.timestamp) return false;
+        const t = new Date(e.timestamp).getTime();
+        if (filterStart && t < filterStart.getTime()) return false;
+        if (filterEnd && t > filterEnd.getTime()) return false;
+        return true;
+      });
+    }
+
+    // 1. Tính toán thống kê theo khoảng thời gian đã lọc
+    const total = dateFilteredEntries.length;
+    const successCount = dateFilteredEntries.filter((e) => e.status === 'success').length;
+    const failedCount = dateFilteredEntries.filter((e) => e.status === 'failed').length;
     const successRate = total > 0 ? Math.round((successCount / total) * 100) : 100;
 
     const byChannel = {
@@ -79,7 +136,7 @@ export async function GET(req: NextRequest) {
     let totalDurationMs = 0;
     let durationCount = 0;
 
-    for (const e of allEntries) {
+    for (const e of dateFilteredEntries) {
       const ch = (e.channel || 'fanpage') as keyof typeof byChannel;
       if (byChannel[ch]) {
         byChannel[ch].total++;
@@ -147,7 +204,7 @@ export async function GET(req: NextRequest) {
     const lastRunAt = allEntries.length > 0 ? allEntries[0].timestamp : null;
 
     // 2. Lọc dữ liệu theo bộ lọc của người dùng
-    let filtered = allEntries;
+    let filtered = dateFilteredEntries;
 
     if (channel && channel !== 'all') {
       filtered = filtered.filter((e) => e.channel === channel);
@@ -188,6 +245,7 @@ export async function GET(req: NextRequest) {
       ok: true,
       stats: {
         total,
+        allTimeTotal: allEntries.length,
         successCount,
         failedCount,
         successRate,

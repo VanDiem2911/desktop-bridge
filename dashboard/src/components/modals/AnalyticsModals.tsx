@@ -36,12 +36,40 @@ export default function AnalyticsModals({
   copyToClipboard,
   handleDeleteHistoryEntry,
 }: AnalyticsModalsProps) {
+  // Lắng nghe phím Escape để tắt nhanh mọi modal
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isDetailModalOpen) {
+          setIsDetailModalOpen(false);
+          setSelectedHistoryItem(null);
+        }
+        if (viewingErrorItem) {
+          setViewingErrorItem(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isDetailModalOpen, viewingErrorItem, setIsDetailModalOpen, setSelectedHistoryItem, setViewingErrorItem]);
+
   return (
     <>
       {/* ==================== MODAL CHI TIẾT NHẬT KÝ BÀI ĐĂNG (ANALYTICS DETAIL) ==================== */}
       {isDetailModalOpen && selectedHistoryItem && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="liquid-glass-modal rounded-3xl w-full max-w-2xl p-7 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIsDetailModalOpen(false);
+              setSelectedHistoryItem(null);
+            }
+          }}
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-md flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="liquid-glass-modal rounded-3xl w-full max-w-2xl p-7 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto cursor-default"
+          >
             <div className="flex items-center justify-between border-b border-slate-200/80 pb-4">
               <div className="flex items-center gap-3">
                 <span
@@ -212,8 +240,16 @@ export default function AnalyticsModals({
             : parsed.technicalDetails;
 
           return (
-            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4">
-              <div className="liquid-glass-modal rounded-3xl w-full max-w-2xl p-6 md:p-7 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto border border-rose-200/80">
+            <div
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setViewingErrorItem(null);
+              }}
+              className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 cursor-pointer"
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="liquid-glass-modal rounded-3xl w-full max-w-2xl p-6 md:p-7 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto border border-rose-200/80 cursor-default"
+              >
                 {/* Header */}
                 <div className="flex items-center justify-between border-b border-rose-100 pb-4">
                   <div className="flex items-center gap-3">

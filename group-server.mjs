@@ -366,6 +366,134 @@ async function firstVisible(page, selectors, timeout = 15000) {
 }
 
 /**
+ * Tự động quét và tắt sạch mọi popup phiền hà (thông báo, chat tabs, cookie, tour, dialog)
+ * trước khi thực hiện chức năng chính.
+ */
+async function dismissAllPopups(page, service = 'facebook') {
+  if (!page) return;
+  try {
+    page.on('dialog', async (dialog) => {
+      try {
+        console.log(`[Popup Cleaner] Tự động chấp nhận dialog: "${dialog.message()}"`);
+        await dialog.accept();
+      } catch {}
+    });
+
+    if (service === 'facebook') {
+      try {
+        const chatCloseBtns = page.locator('[aria-label="Đóng cuộc trò chuyện"], [aria-label="Close chat"], [aria-label="Đóng tab trò chuyện"], [aria-label="Close chat tab"]');
+        const count = await chatCloseBtns.count();
+        for (let i = 0; i < count; i++) {
+          if (await chatCloseBtns.nth(i).isVisible()) {
+            await chatCloseBtns.nth(i).click({ force: true });
+            console.log('[Popup Cleaner] Đã đóng tab chat Facebook đang mở đè.');
+            await delay(300);
+          }
+        }
+      } catch {}
+
+      const dismissButtonTexts = [
+        'Lúc khác',
+        'Để sau',
+        'Không phải bây giờ',
+        'Không, cảm ơn',
+        'Bỏ qua',
+        'Bỏ',
+        'Hủy',
+        'Đóng',
+        'Hiểu rồi',
+        'Tôi hiểu',
+        'Not Now',
+        'Later',
+        'Skip',
+        'Close',
+        'Dismiss',
+        'Cancel',
+        'Decline',
+        'Got it',
+      ];
+
+      for (const text of dismissButtonTexts) {
+        try {
+          const btn = page.locator(`[role="dialog"] [role="button"]:has-text("${text}"), [role="button"]:has-text("${text}")`).first();
+          if (await btn.count() && await btn.isVisible()) {
+            const btnText = (await btn.innerText()).trim();
+            if (btnText.includes('Đăng') || btnText.includes('Post') || btnText.includes('Tạo bài') || btnText.includes('Tham gia')) continue;
+            await btn.click({ force: true });
+            console.log(`[Popup Cleaner] Đã bấm nút tắt popup Facebook: "${text}"`);
+            await delay(500);
+          }
+        } catch {}
+      }
+
+      try {
+        const dialogs = page.locator('[role="dialog"]');
+        const dCount = await dialogs.count();
+        for (let d = 0; d < dCount; d++) {
+          const currentDialog = dialogs.nth(d);
+          const ariaLabel = (await currentDialog.getAttribute('aria-label')) || '';
+          if (ariaLabel.includes('Tạo bài viết') || ariaLabel.includes('Create post') || ariaLabel.includes('Câu hỏi') || ariaLabel.includes('Tham gia')) {
+            continue;
+          }
+          const xBtn = currentDialog.locator('[aria-label="Đóng"], [aria-label="Close"], [aria-label*="close" i]').first();
+          if (await xBtn.count() && await xBtn.isVisible()) {
+            await xBtn.click({ force: true });
+            console.log('[Popup Cleaner] Đã bấm nút X đóng popup Facebook không cần thiết.');
+            await delay(500);
+          }
+        }
+      } catch {}
+
+      try {
+        await page.keyboard.press('Escape');
+      } catch {}
+    }
+
+    if (service === 'chatgpt') {
+      const gptDismissTexts = [
+        'Stay logged out',
+        'Stay signed out',
+        'Dismiss',
+        'Done',
+        'Next',
+        'Hoàn tất',
+        'Tiếp tục',
+        'Đã hiểu',
+        'Got it',
+        'Accept all',
+        'Chấp nhận tất cả',
+        'Close',
+        'Đóng',
+      ];
+
+      for (const text of gptDismissTexts) {
+        try {
+          const btn = page.locator(`button:has-text("${text}"), [role="button"]:has-text("${text}")`).first();
+          if (await btn.count() && await btn.isVisible()) {
+            await btn.click({ force: true });
+            console.log(`[Popup Cleaner] Đã tắt popup ChatGPT: "${text}"`);
+            await delay(500);
+          }
+        } catch {}
+      }
+
+      try {
+        const closeBtn = page.locator('[role="dialog"] button[aria-label="Close"], [role="dialog"] button[aria-label="Đóng"]').first();
+        if (await closeBtn.count() && await closeBtn.isVisible()) {
+          await closeBtn.click({ force: true });
+          console.log('[Popup Cleaner] Đã bấm nút X đóng dialog ChatGPT.');
+          await delay(500);
+        }
+      } catch {}
+
+      try {
+        await page.keyboard.press('Escape');
+      } catch {}
+    }
+  } catch {}
+}
+
+/**
  * Tự động xử lý popup trả lời câu hỏi / đồng ý quy tắc nhóm nếu Facebook hiện lên sau khi bấm "Tham gia nhóm"
  */
 async function handleMembershipQuestionsPopup(page) {
@@ -737,6 +865,7 @@ async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType 
   console.log(`[Group Post] Đang truy cập nhóm: ${groupUrl}...`);
   await page.goto(groupUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await delay(4000);
+  await dismissAllPopups(page, 'facebook');
 
   if (page.url().includes('/login')) {
     throw new Error('Tài khoản Facebook chưa đăng nhập trong profile này. Hãy chạy open-setup-chrome.ps1 để đăng nhập.');
@@ -753,6 +882,7 @@ async function postToSingleGroup(page, groupUrl, caption, imageBase64, mimeType 
   // BƯỚC 1: KIỂM TRA VÀ TỰ ĐỘNG THAM GIA NHÓM NẾU CHƯA THAM GIA
   const joinResult = await ensureJoinedGroup(page, groupUrl);
   await delay(2000);
+  await dismissAllPopups(page, 'facebook');
 
   const postCaption = cleanCaption(caption);
 
