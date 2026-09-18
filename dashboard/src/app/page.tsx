@@ -366,6 +366,10 @@ export default function DashboardPage() {
   const [editingFanpage, setEditingFanpage] = useState<{ id: string; name: string; pageUrl: string; profileDir: string; port: number; description: string; enabled: boolean; useSharedProfile?: boolean; sharedProfileDir?: string } | null>(null);
   const [isDetectingName, setIsDetectingName] = useState<boolean>(false);
   const [detectedGroupName, setDetectedGroupName] = useState<string>('');
+  const [isAddUnifiedFbOpen, setIsAddUnifiedFbOpen] = useState(false);
+  const [unifiedFbForm, setUnifiedFbForm] = useState({
+    name: '', profileUrl: '', enableFanpage: false, fanpageUrlsText: '', enableGroups: false, groupUrlsText: '', profileDir: '',
+  });
 
   // Modals state - Personal Accounts
   const [isAddPersonalOpen, setIsAddPersonalOpen] = useState(false);
@@ -1637,6 +1641,35 @@ export default function DashboardPage() {
     }
   };
 
+  const handleCreateUnifiedFb = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const splitUrls = (value: string) => value.split(/\r?\n/).map((url) => url.trim()).filter(Boolean);
+    try {
+      const res = await fetch('/api/accounts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'add_unified_facebook_account',
+          name: unifiedFbForm.name,
+          profileUrl: unifiedFbForm.profileUrl,
+          enableFanpage: unifiedFbForm.enableFanpage,
+          fanpageUrls: splitUrls(unifiedFbForm.fanpageUrlsText),
+          enableGroups: unifiedFbForm.enableGroups,
+          groupUrls: splitUrls(unifiedFbForm.groupUrlsText),
+          profileDir: unifiedFbForm.profileDir,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Không thể thêm tài khoản Facebook');
+      showToast(data.message, 'success');
+      setIsAddUnifiedFbOpen(false);
+      setUnifiedFbForm({ name: '', profileUrl: '', enableFanpage: false, fanpageUrlsText: '', enableGroups: false, groupUrlsText: '', profileDir: '' });
+      fetchAccounts();
+      fetchGroups();
+    } catch (error: unknown) {
+      showToast(error instanceof Error ? error.message : 'Không thể thêm tài khoản Facebook', 'error');
+    }
+  };
+
   // Personal (Cá Nhân) CRUD Handlers
   const handleCreatePersonal = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2880,6 +2913,11 @@ export default function DashboardPage() {
             editingPersonal={editingPersonal}
             setEditingPersonal={setEditingPersonal}
             handleUpdatePersonal={handleUpdatePersonal}
+            isAddUnifiedFbOpen={isAddUnifiedFbOpen}
+            setIsAddUnifiedFbOpen={setIsAddUnifiedFbOpen}
+            unifiedFbForm={unifiedFbForm}
+            setUnifiedFbForm={setUnifiedFbForm}
+            handleCreateUnifiedFb={handleCreateUnifiedFb}
           />
         )}
 

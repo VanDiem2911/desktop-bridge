@@ -96,6 +96,11 @@ interface AccountsTabProps {
   editingPersonal: { id: string; name: string; profileUrl: string; profileDir: string; port: string | number; description?: string; desc?: string; enabled?: boolean } | null;
   setEditingPersonal: React.Dispatch<React.SetStateAction<any>>;
   handleUpdatePersonal: (e: React.FormEvent) => Promise<void>;
+  isAddUnifiedFbOpen: boolean;
+  setIsAddUnifiedFbOpen: (open: boolean) => void;
+  unifiedFbForm: { name: string; profileUrl: string; enableFanpage: boolean; fanpageUrlsText: string; enableGroups: boolean; groupUrlsText: string; profileDir: string };
+  setUnifiedFbForm: React.Dispatch<React.SetStateAction<any>>;
+  handleCreateUnifiedFb: (e: React.FormEvent) => Promise<void>;
 
 }
 
@@ -161,6 +166,11 @@ export default function AccountsTab({
   handleUpdatePersonal,
   isEditPersonalOpen,
   setIsEditPersonalOpen,
+  isAddUnifiedFbOpen,
+  setIsAddUnifiedFbOpen,
+  unifiedFbForm,
+  setUnifiedFbForm,
+  handleCreateUnifiedFb,
 }: AccountsTabProps) {
   const openEditChatGptModal = (acc: AccountItem) => {
     setEditingChatGpt({
@@ -215,6 +225,9 @@ export default function AccountsTab({
   return (
     <>
       <div className="space-y-8">
+        <button onClick={() => setIsAddUnifiedFbOpen(true)} className="flex items-center gap-2 px-4 py-2.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-md">
+          <UserPlus className="w-4 h-4" /> Thêm tài khoản Facebook
+        </button>
             {accounts.map(category => (
               <div key={category.category} className="liquid-glass rounded-3xl p-7 space-y-5">
                 
@@ -236,22 +249,22 @@ export default function AccountsTab({
                     )}
                     {category.category === 'fanpage' && (
                       <div className="flex items-center gap-2">
-                        <button
+                        {false && <button
                           onClick={() => setIsAddFanpageOpen(true)}
                           className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-md shadow-blue-600/25 transition-all"
                         >
                           <UserPlus className="w-3.5 h-3.5" /> Thêm Fanpage
-                        </button>
+                        </button>}
                       </div>
                     )}
                     {category.category === 'groups' && (
                       <div className="flex items-center gap-2">
-                        <button
+                        {false && <button
                           onClick={() => setIsAddAccountOpen(true)}
                           className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl shadow-md shadow-indigo-600/25 transition-all"
                         >
                           <UserPlus className="w-3.5 h-3.5" /> Thêm tài khoản Group
-                        </button>
+                        </button>}
                       </div>
                     )}
                     {category.category === 'personal' && (
@@ -931,6 +944,11 @@ export default function AccountsTab({
         editingPersonal={editingPersonal}
         setEditingPersonal={setEditingPersonal}
         handleUpdatePersonal={handleUpdatePersonal}
+        isAddUnifiedFbOpen={isAddUnifiedFbOpen}
+        setIsAddUnifiedFbOpen={setIsAddUnifiedFbOpen}
+        unifiedFbForm={unifiedFbForm}
+        setUnifiedFbForm={setUnifiedFbForm}
+        handleCreateUnifiedFb={handleCreateUnifiedFb}
       />
     </>
   );

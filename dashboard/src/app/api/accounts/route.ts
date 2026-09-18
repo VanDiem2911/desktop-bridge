@@ -335,7 +335,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ================= TÀI KHOẢN FACEBOOK TOÀN NĂNG (CHO CẢ FANPAGE & GROUPS) =================
-    if (action === '__removed_add_unified_facebook_account') {
+    if (action === 'add_unified_facebook_account') {
       const {
         name,
         profileUrl,

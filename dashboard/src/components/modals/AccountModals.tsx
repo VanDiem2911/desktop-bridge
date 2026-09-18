@@ -1349,10 +1349,10 @@ export default function AccountModals({
                   <span className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center text-xs font-black shadow-xs">
                     FB
                   </span>
-                  Thêm Tài Khoản Facebook (Cho Cả Fanpage & Groups)
+                  Thêm tài khoản Facebook
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  Chỉ cần <strong className="text-blue-700">đăng nhập đúng 1 lần</strong> trên Chrome. Tài khoản này sẽ dùng để xuất bản bài viết lên cả Fanpage lẫn các Nhóm Facebook!
+                  Chọn nơi tài khoản này được dùng để đăng bài.
                 </p>
               </div>
             </div>
@@ -1411,7 +1411,7 @@ export default function AccountModals({
                       className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
                     />
                     <span className="text-xs font-extrabold text-blue-950 flex items-center gap-1.5">
-                      📄 Cho vào Facebook Fanpage (Xuất bản Page)
+                    📄 Dùng để đăng Fanpage
                     </span>
                   </label>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800">
@@ -1449,7 +1449,7 @@ export default function AccountModals({
                       className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
                     />
                     <span className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5">
-                      👥 Cho vào Facebook Groups (Đăng bài Nhóm)
+                    👥 Dùng để đăng Nhóm Facebook
                     </span>
                   </label>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800">
@@ -1471,17 +1471,6 @@ export default function AccountModals({
                     />
                   </div>
                 )}
-              </div>
-
-              {/* PHIÊN ĐĂNG NHẬP THỐNG NHẤT */}
-              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-medium space-y-1">
-                <div className="font-bold flex items-center gap-1.5 text-emerald-800">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  Đăng nhập 1 lần duy nhất:
-                </div>
-                <p className="text-[11px] text-emerald-700">
-                  Cả Fanpage và Group trên sẽ được gán chung vào Profile Chrome: <span className="font-mono font-bold">{unifiedFbForm.profileDir || 'n8n-fb-group-profile-1'}</span> (Port 9223). Bạn chỉ cần mở Chrome đăng nhập Facebook đúng 1 lần là xong!
-                </p>
               </div>
 
               <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-200/80">
