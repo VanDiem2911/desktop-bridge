@@ -39,11 +39,25 @@ export async function GET() {
       } catch {}
     }
 
+    let detectedGroup: { id: string; title: string; type: string; detectedAt: string } | null = null;
+    if (isBotRunning) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${botServer}/detected-group`, {
+          signal: AbortSignal.timeout(1500),
+        });
+        const d = await res.json();
+        if (d.ok && d.group) {
+          detectedGroup = d.group;
+        }
+      } catch {}
+    }
+
     return NextResponse.json({
       ok: true,
       config,
       isBotRunning,
       botInfo,
+      detectedGroup,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -100,18 +114,23 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: false, error: 'Chưa có Telegram Chat ID. Vui lòng nhập Chat ID trước!' }, { status: 400 });
       }
 
+      const isGroup = chatId.startsWith('-');
       const nowStr = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
       const text = [
-        '🚀 <b>DUDI Control Center - Kết Nối Telegram Thành Công!</b>',
+        isGroup
+          ? '🚀 <b>DUDI Control Center - Kết Nối NHÓM Telegram Thành Công!</b>'
+          : '🚀 <b>DUDI Control Center - Kết Nối Telegram Thành Công!</b>',
         '',
         `⏰ <b>Thời gian:</b> <code>${nowStr}</code>`,
-        '📱 <b>Trạng thái:</b> Bot Telegram đã sẵn sàng nhận cảnh báo và lệnh điều khiển từ xa.',
+        isGroup
+          ? '👥 <b>Đích nhận tin:</b> Đã chuyển toàn bộ thông báo hệ thống vào NHÓM này.'
+          : '📱 <b>Trạng thái:</b> Bot Telegram đã sẵn sàng nhận cảnh báo và lệnh điều khiển từ xa.',
         '',
-        '👉 <i>Bạn có thể gửi các lệnh sau để trải nghiệm:</i>',
+        '👉 <i>Các thành viên trong nhóm có thể dùng các lệnh sau:</i>',
         '• <code>/status</code>: Kiểm tra trạng thái hệ thống',
-        '• <code>/screenshot</code>: Chụp màn hình hiện tại',
-        '• <code>/restart</code>: Khởi động lại hệ thống',
-        '• <code>/post_now</code>: Kích hoạt duyệt đăng bài',
+        '• <code>/check_tin</code>: Quét tin nhắn khách hàng',
+        '• <code>/screenshot</code>: Chụp màn hình tab Chrome đang hoạt động',
+        '• <code>/post_now</code>: Kích hoạt chạy đăng bài ngay',
       ].join('\n');
 
       const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -129,7 +148,11 @@ export async function POST(req: Request) {
         let errorMsg = `Telegram API Error: ${data.description || 'Gửi thất bại'}`;
         const desc = (data.description || '').toLowerCase();
         if (desc.includes('chat not found')) {
-          errorMsg = 'Bạn chưa bấm "Start" với Bot trên Telegram! Hãy mở Telegram, tìm bot của bạn và ấn Start (Bắt đầu) trước khi test.';
+          errorMsg = isGroup
+            ? 'Không tìm thấy nhóm Telegram này! Hãy chắc chắn bạn đã THÊM BOT VÀO NHÓM đó và bot có quyền gửi tin nhắn.'
+            : 'Bạn chưa bấm "Start" với Bot trên Telegram! Hãy mở Telegram, tìm bot của bạn và ấn Start (Bắt đầu) trước khi test.';
+        } else if (desc.includes('bot was kicked') || desc.includes('bot is not a member')) {
+          errorMsg = 'Bot chưa được thêm vào nhóm hoặc đã bị xóa khỏi nhóm! Vui lòng thêm bot vào nhóm Telegram trước.';
         } else if (desc.includes('unauthorized') || desc.includes('not found')) {
           errorMsg = 'Telegram Bot Token không đúng hoặc đã bị thu hồi. Vui lòng kiểm tra lại Token từ @BotFather.';
         }
@@ -141,7 +164,9 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         ok: true,
-        message: 'Đã gửi tin nhắn thử nghiệm thành công tới Telegram của bạn!',
+        message: isGroup
+          ? 'Đã gửi tin nhắn thử nghiệm thành công vào NHÓM Telegram!'
+          : 'Đã gửi tin nhắn thử nghiệm thành công tới Telegram của bạn!',
       });
     }
 

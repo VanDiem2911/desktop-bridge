@@ -27,6 +27,7 @@ let lastDigestDate = '';
 let serverDownState = {}; // { '3001': true/false }
 let checkpointAlertState = {}; // { 'acc_id': true }
 let lastUnreadMessageCount = {}; // { 'acc_id': number }
+let lastDetectedGroup = null; // { id, title, type, detectedAt }
 
 function loadBotConfig() {
   try {
@@ -49,6 +50,18 @@ function loadBotConfig() {
     alertOnNewMessages: true,
     checkIntervalSeconds: 30,
   };
+}
+
+function saveBotConfig(cfg) {
+  try {
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf-8');
+    botConfig = cfg;
+    console.log('[Bot] Đã lưu cấu hình mới thành công, Chat ID đích:', cfg.chatId);
+    return true;
+  } catch (e) {
+    console.error('[Bot] Lỗi lưu cấu hình:', e.message);
+    return false;
+  }
 }
 
 function loadFacebookGroupCount() {
@@ -504,28 +517,104 @@ async function checkAllAccountsMessages() {
 // -------------------------------------------------------------
 // KIỂM TRA BẢO MẬT & XỬ LÝ LỆNH TELEGRAM
 // -------------------------------------------------------------
-function isAuthorizedChat(chatId) {
+function isAuthorizedChat(chatId, fromUserId = null) {
   const primary = String(botConfig.chatId || '').trim();
   const allowed = Array.isArray(botConfig.allowedChatIds) ? botConfig.allowedChatIds.map(String) : [];
   const senderId = String(chatId).trim();
-  return senderId === primary || allowed.includes(senderId);
+  const userId = fromUserId ? String(fromUserId).trim() : null;
+  return (
+    senderId === primary ||
+    allowed.includes(senderId) ||
+    (userId && (userId === primary || allowed.includes(userId)))
+  );
 }
 
 async function handleTelegramMessage(message) {
   const chatId = message.chat?.id;
+  const isGroup = message.chat?.type === 'group' || message.chat?.type === 'supergroup';
   const text = (message.text || '').trim();
   const fromName = message.from?.first_name || 'Bạn';
+  const fromUserId = message.from?.id;
 
-  if (!isAuthorizedChat(chatId)) {
-    console.warn(`[Bot Security] Chặn tin nhắn từ Chat ID lạ: ${chatId} (${fromName})`);
+  // Nếu là nhóm Telegram, ghi nhận lại thông tin nhóm
+  if (isGroup && chatId) {
+    lastDetectedGroup = {
+      id: String(chatId),
+      title: message.chat.title || 'Nhóm Telegram',
+      type: message.chat.type,
+      detectedAt: new Date().toISOString(),
+    };
+    console.log(`[Telegram Group] Tương tác từ nhóm "${lastDetectedGroup.title}" (ID: ${chatId})`);
+  }
+
+  // Khi bot vừa được thêm vào một nhóm mới
+  if (message.new_chat_members || message.group_chat_created || message.supergroup_chat_created) {
+    if (chatId) {
+      await sendTelegramMessage(
+        `🎉 <b>Xin chào nhóm "${message.chat?.title || 'này'}"!</b>\n` +
+        `Bot đã được thêm vào nhóm thành công.\n\n` +
+        `📍 <b>Group Chat ID:</b> <code>${chatId}</code>\n\n` +
+        `👉 <b>Để chuyển toàn bộ thông báo hệ thống DUDI vào nhóm này:</b>\n` +
+        `• Gõ lệnh <code>/set_group</code> ngay tại đây để bot tự động lưu nhóm này!\n` +
+        `• Hoặc copy mã <code>${chatId}</code> dán vào ô <b>Telegram Chat ID</b> trên Dashboard.`,
+        chatId
+      );
+    }
+    return;
+  }
+
+  // Tách lệnh (hỗ trợ cả dạng /command@botname)
+  const rawCmd = text.split(' ')[0].toLowerCase();
+  const cmd = rawCmd.split('@')[0];
+
+  // Lệnh kiểm tra ID (cho phép chạy công khai để người dùng lấy ID nhóm nhanh nhất)
+  if (cmd === '/id' || cmd === '/myid' || cmd === '/chatid' || cmd === '/getid') {
+    const reply = isGroup
+      ? `👥 <b>Thông Tin Nhóm Telegram:</b>\n• Tên nhóm: <b>${message.chat.title || 'Nhóm'}</b>\n• <b>Group Chat ID:</b> <code>${chatId}</code>\n\n👉 Gõ lệnh <code>/set_group</code> ngay tại đây để bot tự động chuyển toàn bộ thông báo về nhóm này, hoặc copy ID trên dán vào Dashboard!`
+      : `👤 <b>Thông Tin Cá Nhân:</b>\n• Tên: <b>${fromName}</b>\n• <b>User Chat ID:</b> <code>${chatId}</code>`;
+    await sendTelegramMessage(reply, chatId);
+    return;
+  }
+
+  // Lệnh cài đặt nhóm nhận thông báo trực tiếp từ Telegram
+  if (cmd === '/set_group' || cmd === '/setgroup' || cmd === '/set_chat') {
+    if (!isGroup) {
+      await sendTelegramMessage('⚠️ Lệnh <code>/set_group</code> chỉ dùng bên trong Nhóm Telegram để cấu hình nhóm nhận tin.', chatId);
+      return;
+    }
+
+    const previousId = String(botConfig.chatId || '').trim();
+    botConfig.chatId = String(chatId);
+
+    // Lưu người vừa gõ lệnh vào allowedChatIds để họ vẫn có quyền điều khiển các lệnh
+    if (fromUserId && !botConfig.allowedChatIds?.includes(String(fromUserId))) {
+      botConfig.allowedChatIds = [...(botConfig.allowedChatIds || []), String(fromUserId)];
+    }
+    if (previousId && previousId !== String(chatId) && !botConfig.allowedChatIds?.includes(previousId)) {
+      botConfig.allowedChatIds = [...(botConfig.allowedChatIds || []), previousId];
+    }
+
+    saveBotConfig(botConfig);
+
     await sendTelegramMessage(
-      `⛔ <b>Từ chối quyền truy cập</b>\nChat ID của bạn (<code>${chatId}</code>) chưa được cấp quyền điều khiển hệ thống này. Vui lòng thêm Chat ID vào Dashboard Control Center.`,
-      chatId,
+      `✅ <b>ĐÃ CÀI ĐẶT NHẬN THÔNG BÁO VÀO NHÓM THÀNH CÔNG!</b>\n` +
+      `Từ bây giờ toàn bộ thông báo bài đăng Fanpage & Group, cảnh báo checkpoint và báo cáo tổng kết 22h tối sẽ được gửi trực tiếp vào nhóm <b>${message.chat.title || 'này'}</b>.\n\n` +
+      `📌 <b>Group Chat ID đã lưu:</b> <code>${chatId}</code>`,
+      chatId
     );
     return;
   }
 
-  const cmd = text.split(' ')[0].toLowerCase();
+  if (!isAuthorizedChat(chatId, fromUserId)) {
+    console.warn(`[Bot Security] Chặn tin nhắn từ Chat ID lạ: ${chatId} (${fromName})`);
+    await sendTelegramMessage(
+      isGroup
+        ? `⛔ <b>Nhóm chưa được cấp quyền</b>\nGroup Chat ID (<code>${chatId}</code>) chưa được cấu hình nhận tin. Gõ <code>/set_group</code> tại nhóm này hoặc copy mã <code>${chatId}</code> dán vào Dashboard.`
+        : `⛔ <b>Từ chối quyền truy cập</b>\nChat ID của bạn (<code>${chatId}</code>) chưa được cấp quyền điều khiển hệ thống này. Vui lòng thêm Chat ID vào Dashboard Control Center.`,
+      chatId,
+    );
+    return;
+  }
 
   switch (cmd) {
     case '/start':
@@ -1013,6 +1102,10 @@ app.get('/health', async (req, res) => {
     enableAlerts: botConfig.enableAlerts,
     enableDailyDigest: botConfig.enableDailyDigest,
   });
+});
+
+app.get('/detected-group', (req, res) => {
+  res.json({ ok: true, group: lastDetectedGroup });
 });
 
 app.post('/reload-config', (req, res) => {

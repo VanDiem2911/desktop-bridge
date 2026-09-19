@@ -202,19 +202,57 @@ export default function BotTab({
                 </div>
 
                 {/* Chat ID */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700 block">Telegram Chat ID (Cá nhân hoặc Nhóm nhận tin):</label>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700 block">
+                      Telegram Chat ID (Nhóm hoặc Cá nhân nhận tin):
+                    </label>
+                    {botConfig.chatId ? (
+                      botConfig.chatId.startsWith('-') ? (
+                        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+                          👥 Đang nhận tin tại NHÓM
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                          👤 Đang nhận tin CÁ NHÂN
+                        </span>
+                      )
+                    ) : null}
+                  </div>
+
                   <input
                     type="text"
                     value={botConfig.chatId || ''}
-                    onChange={(e) => setBotConfig({ ...botConfig, chatId: e.target.value })}
-                    placeholder="VD: 123456789 (dạng số)"
+                    onChange={(e) => setBotConfig({ ...botConfig, chatId: e.target.value.trim() })}
+                    placeholder="VD nhóm: -1002345678901 hoặc cá nhân: 123456789"
                     className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs md:text-sm font-mono text-slate-900"
                   />
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 space-y-1">
-                    <p className="font-bold text-slate-800">💡 Cách lấy Chat ID của bạn:</p>
-                    <p>
-                      Mở Telegram, tìm bot <b>@userinfobot</b> và bấm <b>Start</b>. Bot sẽ gửi lại cho bạn một dãy số <code>Id: 123456789</code>. Hãy nhập dãy số đó vào ô này.
+
+                  {/* Hướng dẫn nhận tin vào NHÓM */}
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 text-xs text-slate-700 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="font-bold text-blue-900 flex items-center gap-1.5 text-xs">
+                        👥 <b>Cách chuyển tin nhắn &amp; cảnh báo vào NHÓM Telegram:</b>
+                      </p>
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-blue-600 text-white">
+                        Dễ nhất
+                      </span>
+                    </div>
+                    <ol className="list-decimal pl-4 space-y-1 text-slate-700 text-[11px] leading-relaxed">
+                      <li><b>Thêm Bot</b> vào nhóm Telegram của bạn.</li>
+                      <li>
+                        Gõ lệnh <code>/set_group</code> ngay trong nhóm &rarr; <b>Bot sẽ tự động lưu nhóm này</b> làm nơi nhận toàn bộ thông báo!
+                      </li>
+                      <li>
+                        Hoặc gõ <code>/id</code> trong nhóm &rarr; Bot sẽ gửi lại mã <b>Group Chat ID</b> (dãy số có dấu trừ <code>-</code> ở đầu, vd: <code>-1002345678901</code>) &rarr; Copy dán vào ô trên rồi bấm <b>Lưu Cấu Hình</b>.
+                      </li>
+                    </ol>
+                  </div>
+
+                  {/* Hướng dẫn nhận tin Cá nhân */}
+                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 space-y-1">
+                    <p className="font-semibold text-slate-700">
+                      💡 <b>Nếu muốn nhận tin Cá nhân (chat riêng):</b> Tìm bot <code>@userinfobot</code> trên Telegram, ấn <b>Start</b> để lấy ID cá nhân và dán vào ô trên.
                     </p>
                   </div>
                 </div>
