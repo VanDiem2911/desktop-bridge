@@ -63,70 +63,6 @@ function parseFacebookUrls(value: unknown): string[] {
   )];
 }
 
-function assignUniqueFacebookProfiles(
-  fanpages: FanpageAccount[],
-  groups: Array<Record<string, unknown>>,
-): boolean {
-  const usedPorts = new Set<number>();
-  const usedProfiles = new Set<string>();
-  const profilesByFacebookAccount = new Map<string, { port: number; profileDir: string }>();
-  let nextPort = 9223;
-  let changed = false;
-
-  for (const account of [...fanpages, ...groups]) {
-    const facebookAccountId = typeof account.facebookAccountId === 'string' ? account.facebookAccountId : '';
-    const linkedProfile = facebookAccountId ? profilesByFacebookAccount.get(facebookAccountId) : undefined;
-    if (linkedProfile) {
-      if (account.port !== linkedProfile.port || account.profileDir !== linkedProfile.profileDir) {
-        account.port = linkedProfile.port;
-        account.profileDir = linkedProfile.profileDir;
-        changed = true;
-      }
-      continue;
-    }
-
-    const description = typeof account.desc === 'string' ? account.desc : '';
-    const linkedPortMatch = description.match(/(?:Liên kết với tài khoản Facebook|Dùng chung phiên FB).*?Port\s+(\d+)/i);
-    if (linkedPortMatch) {
-      const linkedPort = Number(linkedPortMatch[1]);
-      const linkedProfile = `n8n-fb-profile-${linkedPort}`;
-      if (account.port !== linkedPort || account.profileDir !== linkedProfile) {
-        account.port = linkedPort;
-        account.profileDir = linkedProfile;
-        changed = true;
-      }
-      usedPorts.add(linkedPort);
-      usedProfiles.add(linkedProfile);
-      if (facebookAccountId) profilesByFacebookAccount.set(facebookAccountId, { port: linkedPort, profileDir: linkedProfile });
-      continue;
-    }
-
-    const currentPort = Number(account.port);
-    const currentProfile = typeof account.profileDir === 'string' ? account.profileDir : '';
-    const hasUniquePort = Number.isInteger(currentPort) && currentPort >= 9223 && !usedPorts.has(currentPort);
-    const hasUniqueProfile = Boolean(currentProfile) && !usedProfiles.has(currentProfile);
-
-    if (hasUniquePort && hasUniqueProfile) {
-      usedPorts.add(currentPort);
-      usedProfiles.add(currentProfile);
-      if (facebookAccountId) profilesByFacebookAccount.set(facebookAccountId, { port: currentPort, profileDir: currentProfile });
-      continue;
-    }
-
-    while (usedPorts.has(nextPort)) nextPort++;
-    account.port = nextPort;
-    account.profileDir = `n8n-fb-profile-${nextPort}`;
-    usedPorts.add(nextPort);
-    usedProfiles.add(`n8n-fb-profile-${nextPort}`);
-    if (facebookAccountId) profilesByFacebookAccount.set(facebookAccountId, { port: nextPort, profileDir: `n8n-fb-profile-${nextPort}` });
-    nextPort++;
-    changed = true;
-  }
-
-  return changed;
-}
-
-
 function getFanpageConfig(): { accounts: FanpageAccount[] } {
   const raw = readJsonFile<Record<string, unknown>>(FANPAGE_CONFIG_PATH, {});
   if (Array.isArray(raw.accounts) && raw.accounts.length > 0) {
@@ -139,8 +75,8 @@ function getFanpageConfig(): { accounts: FanpageAccount[] } {
           id: 1,
           name: (raw.name as string) || 'Facebook Fanpage Chính',
           pageUrl: (raw.pageUrl as string) || 'https://www.facebook.com/',
-          profileDir: (raw.profileDir as string) || 'n8n-chatgpt-profile',
-          port: (raw.port as number) || 9222,
+          profileDir: (raw.profileDir as string) || 'n8n-fb-profile-9223',
+          port: (raw.port as number) || 9223,
           enabled: raw.enabled !== false,
           desc: (raw.desc as string) || 'Profile Chrome xuất bản bài viết lên Fanpage chính',
         },
@@ -153,8 +89,8 @@ function getFanpageConfig(): { accounts: FanpageAccount[] } {
         id: 1,
         name: 'Facebook Fanpage Chính',
         pageUrl: 'https://www.facebook.com/',
-        profileDir: 'n8n-chatgpt-profile',
-        port: 9222,
+        profileDir: 'n8n-fb-profile-9223',
+        port: 9223,
         enabled: true,
         desc: 'Profile Chrome xuất bản bài viết lên Fanpage chính',
       },
@@ -174,13 +110,9 @@ export async function GET() {
       ],
     });
 
-    if (assignUniqueFacebookProfiles(fanpageConfig.accounts, groupsConfig.accounts || [])) {
-      writeJsonFile(FANPAGE_CONFIG_PATH, fanpageConfig);
-      writeJsonFile(GROUPS_CONFIG_PATH, groupsConfig);
-    }
-
     const localAppData = path.join(os.homedir(), 'AppData', 'Local');
 
+    // 1. ChatGPT Items
     const chatgptItems = (chatgptConfig.accounts || []).map((acc, index) => {
       const num = index + 1;
       const profileDir = (acc.profileDir as string) || (num === 1 ? 'n8n-chatgpt-profile' : `n8n-chatgpt-profile-${num}`);
@@ -199,112 +131,209 @@ export async function GET() {
         enabled: acc.enabled !== false,
         profileExists,
         isConfigured: profileExists,
+        originalCategory: 'chatgpt' as const,
       };
     });
 
-    const fanpageItems = (fanpageConfig.accounts || []).map((acc, index) => {
-      const num = index + 1;
-      const profileDir = (acc.profileDir as string) || (num === 1 ? 'n8n-chatgpt-profile' : `n8n-fanpage-profile-${num}`);
-      const profilePath = path.join(localAppData, profileDir);
-      const profileExists = fs.existsSync(profilePath);
-      const port = (acc.port as number) || (num === 1 ? 9222 : 9250 + num);
-      const pageUrl = (acc.pageUrl as string) || 'https://www.facebook.com/';
+    // 2. HỢP NHẤT TOÀN BỘ TÀI KHOẢN FACEBOOK (Fanpage, Groups, Personal) VÀO 1 NƠI
+    interface UnifiedFbItem {
+      id: string;
+      rawId?: string;
+      name: string;
+      port: number;
+      profileDir: string;
+      url: string;
+      pageUrl?: string;
+      profileUrl?: string;
+      canPostFanpage: boolean;
+      canPostGroup: boolean;
+      groupUrls: string[];
+      groupCount: number;
+      roleGroup?: string;
+      originalRoleGroup?: string;
+      enabled: boolean;
+      status: string;
+      checkpointReason: string;
+      checkpointUrl: string;
+      checkpointAt: string;
+      originalCategory: 'facebook' | 'fanpage' | 'groups' | 'personal';
+      desc?: string;
+      profileExists: boolean;
+      isConfigured: boolean;
+      loginStatus?: string;
+      isReady?: boolean;
+      currentUrl?: string;
+    }
 
-      return {
-        id: `fanpage_${acc.id || num}`,
-        rawId: String(acc.id || num),
-        name: (acc.name as string) || `Fanpage ${num}`,
-        port,
+    const unifiedMap = new Map<string, UnifiedFbItem>();
+
+    // A. Nạp từ fanpage-config.json
+    (fanpageConfig.accounts || []).forEach((fp, idx) => {
+      const p = Number(fp.port) || 0;
+      const key = p > 0 ? `port_${p}` : `fp_${fp.id || idx + 1}`;
+      const pageUrl = fp.pageUrl || 'https://www.facebook.com/';
+      const profileDir = fp.profileDir || (p > 0 ? `n8n-fb-profile-${p}` : `n8n-fb-profile-9223`);
+      const profilePath = path.join(localAppData, profileDir);
+
+      unifiedMap.set(key, {
+        id: `fb_acc_${fp.id || idx + 1}`,
+        rawId: String(fp.id || idx + 1),
+        name: fp.name || `Tài khoản Facebook ${idx + 1}`,
+        port: p,
         profileDir,
         url: pageUrl,
         pageUrl,
-        desc: (acc.desc as string) || `Link Fanpage: ${pageUrl} (Port ${port})`,
-        enabled: acc.enabled !== false,
-        status: (acc.status as string) || 'active',
-        checkpointReason: (acc.checkpointReason as string) || '',
-        checkpointUrl: (acc.checkpointUrl as string) || '',
-        checkpointAt: (acc.checkpointAt as string) || '',
-        originalCategory: 'fanpage' as const,
-        profileExists,
-        isConfigured: Boolean(pageUrl && pageUrl.startsWith('https://www.facebook.com/')),
-        loginStatus: undefined as string | undefined,
-        isReady: false,
-        currentUrl: undefined as string | undefined,
-      };
+        canPostFanpage: true,
+        canPostGroup: false,
+        groupUrls: [],
+        groupCount: 0,
+        roleGroup: 'group_1',
+        enabled: fp.enabled !== false,
+        status: (fp.status as string) || 'active',
+        checkpointReason: (fp.checkpointReason as string) || '',
+        checkpointUrl: (fp.checkpointUrl as string) || '',
+        checkpointAt: (fp.checkpointAt as string) || '',
+        originalCategory: 'facebook',
+        desc: fp.desc || `Port ${p}`,
+        profileExists: fs.existsSync(profilePath),
+        isConfigured: true,
+      });
     });
 
-    const groupItems = (groupsConfig.accounts || []).map((acc, index) => {
-      const num = index + 1;
-      const profileDir = (acc.profileDir as string) || `n8n-fb-group-profile-${num}`;
+    // B. Hợp nhất từ groups-config.json
+    (groupsConfig.accounts || []).forEach((grp, idx) => {
+      const p = Number(grp.port) || 0;
+      const grpUrls = Array.isArray(grp.groupUrls) ? (grp.groupUrls as string[]) : [];
+      const profileDir = (grp.profileDir as string) || (p > 0 ? `n8n-fb-profile-${p}` : `n8n-fb-group-profile-${idx + 1}`);
       const profilePath = path.join(localAppData, profileDir);
-      const profileExists = fs.existsSync(profilePath);
-      const groupUrls = Array.isArray(acc.groupUrls) ? acc.groupUrls : [];
-      const isConfigured = profileExists || groupUrls.length > 0;
+      const pUrl = (grp.profileUrl as string) || 'https://www.facebook.com/';
 
-      return {
-        id: (acc.id as string) || `acc_${num}`,
-        rawId: (acc.id as string) || `acc_${num}`,
-        accIndex: num,
-        name: (acc.name as string) || `Tài khoản Group ${num}`,
-        port: (acc.port as number) || (9222 + num),
-        profileDir,
-        url: 'https://www.facebook.com/',
-        groupCount: groupUrls.length,
-        enabled: acc.enabled !== false,
-        status: (acc.status as string) || (acc.roleGroup === 'quarantine' ? 'checkpoint' : 'active'),
-        checkpointReason: (acc.checkpointReason as string) || (acc.quarantineReason as string) || '',
-        checkpointUrl: (acc.checkpointUrl as string) || '',
-        checkpointAt: (acc.checkpointAt as string) || '',
-        originalCategory: 'groups' as const,
-        profileExists,
-        isConfigured,
-        desc: `Profile Chrome riêng biệt số ${num}`,
-        loginStatus: undefined as string | undefined,
-        isReady: false,
-        currentUrl: undefined as string | undefined,
-      };
+      // Tìm xem đã có nick nào cùng port hoặc cùng tên trong unifiedMap chưa
+      let matchedKey = p > 0 && unifiedMap.has(`port_${p}`) ? `port_${p}` : undefined;
+      if (!matchedKey) {
+        for (const [k, item] of unifiedMap.entries()) {
+          if (item.name.toLowerCase().trim() === String(grp.name || '').toLowerCase().trim()) {
+            matchedKey = k;
+            break;
+          }
+        }
+      }
+
+      if (matchedKey) {
+        const existing = unifiedMap.get(matchedKey)!;
+        existing.canPostGroup = true;
+        existing.groupUrls = grpUrls;
+        existing.groupCount = grpUrls.length;
+        existing.roleGroup = (grp.roleGroup as string) || existing.roleGroup || 'group_1';
+        existing.originalRoleGroup = (grp.originalRoleGroup as string) || existing.originalRoleGroup;
+        if (!existing.url || existing.url === 'https://www.facebook.com/') {
+          existing.url = pUrl;
+        }
+        if (grp.status === 'checkpoint' || grp.roleGroup === 'quarantine') {
+          existing.status = 'checkpoint';
+          existing.checkpointReason = (grp.checkpointReason as string) || (grp.quarantineReason as string) || existing.checkpointReason;
+        }
+      } else {
+        const key = p > 0 ? `port_${p}` : `grp_${grp.id || idx + 1}`;
+        unifiedMap.set(key, {
+          id: String(grp.id || `acc_${idx + 1}`),
+          rawId: String(grp.id || `acc_${idx + 1}`),
+          name: (grp.name as string) || `Tài khoản Nhóm ${idx + 1}`,
+          port: p,
+          profileDir,
+          url: pUrl,
+          canPostFanpage: false,
+          canPostGroup: true,
+          groupUrls: grpUrls,
+          groupCount: grpUrls.length,
+          roleGroup: (grp.roleGroup as string) || 'group_1',
+          originalRoleGroup: (grp.originalRoleGroup as string) || 'group_1',
+          enabled: grp.enabled !== false,
+          status: (grp.status as string) || (grp.roleGroup === 'quarantine' ? 'checkpoint' : 'active'),
+          checkpointReason: (grp.checkpointReason as string) || (grp.quarantineReason as string) || '',
+          checkpointUrl: (grp.checkpointUrl as string) || '',
+          checkpointAt: (grp.checkpointAt as string) || '',
+          originalCategory: 'facebook',
+          desc: `Tài khoản đăng nhóm`,
+          profileExists: fs.existsSync(profilePath),
+          isConfigured: true,
+        });
+      }
     });
 
-    const personalItems = (personalConfig.accounts || []).map((acc, index) => {
-      const num = index + 1;
-      const pDir = (acc.profileDir as string) || `n8n-personal-profile-${num}`;
-      const pExists = fs.existsSync(path.join(localAppData, pDir));
-      const pUrl = (acc.profileUrl as string) || 'https://www.facebook.com/';
-      const port = (acc.port as number) || (9230 + index);
-
-      return {
-        id: `personal_acc_${acc.id || num}`,
-        rawId: String(acc.id || num),
-        name: (acc.name as string) || `Facebook Cá nhân ${acc.id || num}`,
-        port,
-        profileDir: pDir,
-        url: pUrl,
-        profileUrl: pUrl,
-        desc: (acc.description as string) || `Trang cá nhân: ${pUrl} (Port ${port})`,
-        enabled: acc.enabled !== false,
-        status: (acc.status as string) || 'active',
-        checkpointReason: (acc.checkpointReason as string) || '',
-        checkpointUrl: (acc.checkpointUrl as string) || '',
-        checkpointAt: (acc.checkpointAt as string) || '',
-        originalCategory: 'personal' as const,
-        profileExists: pExists,
-        isConfigured: Boolean(pUrl && pUrl.startsWith('https://www.facebook.com/')),
-        loginStatus: undefined as string | undefined,
-        isReady: false,
-        currentUrl: undefined as string | undefined,
-      };
+    // C. Hợp nhất từ personal-config.json
+    (personalConfig.accounts || []).forEach((pers, idx) => {
+      const p = Number(pers.port) || 0;
+      let matchedKey = p > 0 && unifiedMap.has(`port_${p}`) ? `port_${p}` : undefined;
+      if (!matchedKey) {
+        for (const [k, item] of unifiedMap.entries()) {
+          if (item.name.toLowerCase().trim() === String(pers.name || '').toLowerCase().trim()) {
+            matchedKey = k;
+            break;
+          }
+        }
+      }
+      if (matchedKey) {
+        const existing = unifiedMap.get(matchedKey)!;
+        if (pers.profileUrl && (!existing.url || existing.url === 'https://www.facebook.com/')) {
+          existing.url = String(pers.profileUrl);
+        }
+      }
     });
 
-    // Kiểm tra trạng thái port online & trạng thái tab login qua CDP song song
-    const allFbAndGptItems = [...chatgptItems, ...fanpageItems, ...groupItems, ...personalItems];
+    // D. ĐẢM BẢO QUY TẮC: MỖI ACC FB LÀ 1 PORT KHÁC NHAU!
+    const allFbAccounts = Array.from(unifiedMap.values());
+    const usedPorts = new Set<number>();
+    let nextAvailablePort = 9223;
+    let portsAutoFixed = false;
+
+    for (const acc of allFbAccounts) {
+      if (!acc.port || acc.port < 9223 || usedPorts.has(acc.port)) {
+        while (usedPorts.has(nextAvailablePort)) {
+          nextAvailablePort++;
+        }
+        acc.port = nextAvailablePort;
+        acc.profileDir = `n8n-fb-profile-${nextAvailablePort}`;
+        usedPorts.add(nextAvailablePort);
+        nextAvailablePort++;
+        portsAutoFixed = true;
+      } else {
+        usedPorts.add(acc.port);
+      }
+    }
+
+    // Nếu có tài khoản bị trùng port được cấp lại port độc lập, lưu ngay vào file config
+    if (portsAutoFixed) {
+      for (const acc of allFbAccounts) {
+        if (acc.canPostFanpage) {
+          const fpTarget = fanpageConfig.accounts.find(a => String(a.id) === String(acc.rawId) || a.name === acc.name);
+          if (fpTarget) {
+            fpTarget.port = acc.port;
+            fpTarget.profileDir = acc.profileDir;
+          }
+        }
+        if (acc.canPostGroup) {
+          const grpTarget = (groupsConfig.accounts as Array<Record<string, unknown>>).find(a => String(a.id) === String(acc.rawId) || a.name === acc.name);
+          if (grpTarget) {
+            grpTarget.port = acc.port;
+            grpTarget.profileDir = acc.profileDir;
+          }
+        }
+      }
+      writeJsonFile(FANPAGE_CONFIG_PATH, fanpageConfig);
+      writeJsonFile(GROUPS_CONFIG_PATH, groupsConfig);
+    }
+
+    // 3. Kiểm tra trạng thái kết nối qua CDP song song
+    const allItemsToCheck = [...chatgptItems, ...allFbAccounts];
     const checkPromises: Promise<void>[] = [];
-    for (const item of allFbAndGptItems) {
+    for (const item of allItemsToCheck) {
       const isGpt = item.id.startsWith('gpt_');
       const service = isGpt ? 'chatgpt' : 'facebook';
       checkPromises.push(
         (async () => {
           const status = await checkChromeTabStatus(item.port, service);
-          const itemObj = item as Record<string, unknown>;
+          const itemObj = item as Record<string, any>;
           itemObj.isReady = status.isReady;
           itemObj.loginStatus = status.loginStatus;
           itemObj.currentUrl = status.currentUrl;
@@ -321,71 +350,48 @@ export async function GET() {
     }
     await Promise.all(checkPromises);
 
-    // Tách riêng các tài khoản bị checkpoint ra khỏi Fanpage & Nhóm
-    const checkpointItems: Record<string, unknown>[] = [];
-    const activeFanpages: Record<string, unknown>[] = [];
-    const activeGroups: Record<string, unknown>[] = [];
-    const activePersonals: Record<string, unknown>[] = [];
+    // 4. Phân nhóm: Checkpoint vs Hoạt động bình thường
+    const checkpointItems: any[] = [];
+    const activeFacebookItems: any[] = [];
 
-    for (const item of fanpageItems) {
-      if (item.status === 'checkpoint' || item.loginStatus === 'checkpoint') {
-        checkpointItems.push({ ...item, originalCategory: 'fanpage' });
+    for (const item of allFbAccounts) {
+      if (item.status === 'checkpoint' || item.loginStatus === 'checkpoint' || item.roleGroup === 'quarantine') {
+        checkpointItems.push({
+          ...item,
+          originalCategory: item.canPostFanpage && !item.canPostGroup ? 'fanpage' : item.canPostGroup && !item.canPostFanpage ? 'groups' : 'facebook',
+        });
       } else {
-        activeFanpages.push(item);
+        activeFacebookItems.push(item);
       }
     }
 
-    for (const item of groupItems) {
-      if (item.status === 'checkpoint' || item.loginStatus === 'checkpoint') {
-        checkpointItems.push({ ...item, originalCategory: 'groups' });
-      } else {
-        activeGroups.push(item);
-      }
-    }
+    const categories = [];
 
-    for (const item of personalItems) {
-      if (item.status === 'checkpoint' || item.loginStatus === 'checkpoint') {
-        checkpointItems.push({ ...item, originalCategory: 'personal' });
-      } else {
-        activePersonals.push(item);
-      }
-    }
-
-    const categories = [
-      {
+    // Khối cảnh báo checkpoint (chỉ hiện khi có nick dính checkpoint)
+    if (checkpointItems.length > 0) {
+      categories.push({
         category: 'checkpoint',
         categoryName: `🛡️ Acc Yêu Cầu Xác Thực (${checkpointItems.length} Tài khoản dính Checkpoint)`,
-        description: 'Các tài khoản Facebook bị văng vào trang xác minh danh tính/người thật. Đã đưa ra khỏi danh sách đăng bài Fanpage & Nhóm để đảm bảo an toàn.',
+        description: 'Các tài khoản Facebook bị Facebook yêu cầu xác minh người thật. Đã đưa ra khỏi danh sách đăng bài để tránh bị khóa vĩnh viễn.',
         items: checkpointItems,
-      },
-      {
-        category: 'chatgpt',
-        categoryName: `🤖 Tài khoản ChatGPT (${chatgptItems.length} Tài khoản Xen Kẽ)`,
-        description: 'Các tài khoản ChatGPT tự động luân phiên xen kẽ và dự phòng khi hết token',
-        items: chatgptItems,
-      },
-      {
-        category: 'fanpage',
-        categoryName: `📄 Facebook Fanpage (${activeFanpages.length} Tài khoản sẵn sàng đăng)`,
-        description: 'Profile Chrome xuất bản bài viết lên Fanpage (Đã lọc bỏ các nick bị checkpoint)',
-        items: activeFanpages,
-      },
-      {
-        category: 'groups',
-        categoryName: `👥 Facebook Groups (${activeGroups.length} Tài khoản sẵn sàng đăng nhóm)`,
-        description: 'Các Profile Chrome riêng biệt để xoay vòng đăng bài nhóm (Đã lọc bỏ nick checkpoint)',
-        items: activeGroups,
-      },
-    ];
-
-    if (activePersonals.length > 0) {
-      categories.push({
-        category: 'personal',
-        categoryName: `👤 Facebook Cá nhân (${activePersonals.length} Tài khoản)`,
-        description: 'Trang cá nhân Facebook',
-        items: activePersonals,
       });
     }
+
+    // Khối tài khoản Facebook duy nhất tập trung
+    categories.push({
+      category: 'facebook',
+      categoryName: `👤 Tài khoản Facebook (${activeFacebookItems.length} Tài khoản hoạt động)`,
+      description: 'Quản lý toàn bộ tài khoản Facebook tập trung. Chọn quyền Đăng Fanpage hoặc Đăng Nhóm cho từng tài khoản. Mỗi tài khoản có Port và Profile Chrome riêng biệt.',
+      items: activeFacebookItems,
+    });
+
+    // Khối ChatGPT
+    categories.push({
+      category: 'chatgpt',
+      categoryName: `🤖 Tài khoản ChatGPT (${chatgptItems.length} Tài khoản Xen Kẽ)`,
+      description: 'Các tài khoản ChatGPT tự động luân phiên xen kẽ tạo ảnh AI',
+      items: chatgptItems,
+    });
 
     return NextResponse.json({ ok: true, categories });
   } catch (error: unknown) {
@@ -398,6 +404,203 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { action, accountId, enabled, name, profileDir, port, pageUrl, profileUrl, description, groupUrlsText } = body;
+
+    // ================= TẬP TRUNG: LƯU TÀI KHOẢN FACEBOOK TOÀN DIỆN (THÊM / SỬA) =================
+    if (action === 'save_unified_fb_account') {
+      const {
+        id,
+        name: accName,
+        url: accUrl,
+        port: accPort,
+        profileDir: accProfileDir,
+        canPostFanpage = true,
+        fanpageUrl,
+        canPostGroup = true,
+        groupUrls,
+        groupUrlsText: grpUrlsText,
+        roleGroup = 'group_1',
+        enabled: accEnabled = true,
+      } = body;
+
+      const fpConfig = getFanpageConfig();
+      const grpConfig = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] });
+      if (!Array.isArray(grpConfig.accounts)) grpConfig.accounts = [];
+
+      // Tính port riêng biệt không trùng
+      const allExistingPorts = new Set<number>();
+      fpConfig.accounts.forEach(a => { if (a.port) allExistingPorts.add(Number(a.port)); });
+      grpConfig.accounts.forEach(a => { if (a.port) allExistingPorts.add(Number(a.port)); });
+
+      let targetPort = Number(accPort) || 0;
+      if (!targetPort) {
+        targetPort = 9223;
+        while (allExistingPorts.has(targetPort)) targetPort++;
+      }
+      const targetProfileDir = accProfileDir?.trim() || `n8n-fb-profile-${targetPort}`;
+      const finalName = accName?.trim() || `Tài khoản Facebook (Port ${targetPort})`;
+      const cleanMainUrl = (accUrl || '').trim() || 'https://www.facebook.com/';
+      const cleanFanpageUrl = (fanpageUrl || '').trim() || cleanMainUrl;
+
+      const parsedGroupUrls = parseFacebookUrls(groupUrls ?? grpUrlsText);
+
+      // 1. Xử lý Fanpage Config
+      const existingFpIdx = fpConfig.accounts.findIndex(a => 
+        (id && (String(a.id) === String(id) || `fb_acc_${a.id}` === String(id))) || 
+        Number(a.port) === targetPort || 
+        a.name.toLowerCase().trim() === finalName.toLowerCase()
+      );
+
+      if (canPostFanpage) {
+        if (existingFpIdx >= 0) {
+          fpConfig.accounts[existingFpIdx] = {
+            ...fpConfig.accounts[existingFpIdx],
+            name: finalName,
+            pageUrl: cleanFanpageUrl,
+            port: targetPort,
+            profileDir: targetProfileDir,
+            enabled: accEnabled,
+            status: 'active',
+          };
+        } else {
+          const nextFpId = fpConfig.accounts.length > 0 ? Math.max(...fpConfig.accounts.map(a => Number(a.id) || 0)) + 1 : 1;
+          fpConfig.accounts.push({
+            id: nextFpId,
+            name: finalName,
+            pageUrl: cleanFanpageUrl,
+            port: targetPort,
+            profileDir: targetProfileDir,
+            enabled: accEnabled,
+            status: 'active',
+            desc: `Port ${targetPort}`,
+          });
+        }
+      } else if (existingFpIdx >= 0) {
+        fpConfig.accounts.splice(existingFpIdx, 1);
+      }
+      writeJsonFile(FANPAGE_CONFIG_PATH, fpConfig);
+
+      // 2. Xử lý Groups Config
+      const existingGrpIdx = grpConfig.accounts.findIndex(a => 
+        (id && (a.id === String(id) || `fb_acc_${a.id}` === String(id))) || 
+        Number(a.port) === targetPort || 
+        a.name.toLowerCase().trim() === finalName.toLowerCase()
+      );
+
+      if (canPostGroup) {
+        if (existingGrpIdx >= 0) {
+          grpConfig.accounts[existingGrpIdx] = {
+            ...grpConfig.accounts[existingGrpIdx],
+            name: finalName,
+            profileUrl: cleanMainUrl,
+            port: targetPort,
+            profileDir: targetProfileDir,
+            roleGroup: roleGroup || 'group_1',
+            groupUrls: parsedGroupUrls.length > 0 ? parsedGroupUrls : (grpConfig.accounts[existingGrpIdx].groupUrls || []),
+            enabled: accEnabled,
+            status: 'active',
+          };
+        } else {
+          const nextGrpNum = grpConfig.accounts.reduce((max, a) => {
+            const m = String(a.id).match(/\d+/);
+            return Math.max(max, m ? Number(m[0]) : 0);
+          }, 0) + 1;
+          grpConfig.accounts.push({
+            id: `acc_${nextGrpNum}`,
+            name: finalName,
+            profileUrl: cleanMainUrl,
+            port: targetPort,
+            profileDir: targetProfileDir,
+            roleGroup: roleGroup || 'group_1',
+            originalRoleGroup: roleGroup || 'group_1',
+            groupUrls: parsedGroupUrls,
+            lastGroupIndex: -1,
+            enabled: accEnabled,
+            status: 'active',
+          });
+        }
+      } else if (existingGrpIdx >= 0) {
+        grpConfig.accounts.splice(existingGrpIdx, 1);
+      }
+      writeJsonFile(GROUPS_CONFIG_PATH, grpConfig);
+
+      return NextResponse.json({
+        ok: true,
+        message: `Đã lưu tài khoản "${finalName}" (Port ${targetPort}) thành công!`,
+      });
+    }
+
+    // ================= XÓA TÀI KHOẢN FACEBOOK TOÀN DIỆN =================
+    if (action === 'delete_unified_fb_account') {
+      const { id, port: accPort, name: accName } = body;
+      const p = Number(accPort) || 0;
+      let deleted = false;
+
+      // Xóa khỏi fanpage-config
+      const fpConfig = getFanpageConfig();
+      const fpIdx = fpConfig.accounts.findIndex(a => 
+        (id && (String(a.id) === String(id) || `fb_acc_${a.id}` === String(id))) || 
+        (p > 0 && Number(a.port) === p) || 
+        (accName && a.name.toLowerCase().trim() === String(accName).toLowerCase().trim())
+      );
+      if (fpIdx >= 0) {
+        fpConfig.accounts.splice(fpIdx, 1);
+        writeJsonFile(FANPAGE_CONFIG_PATH, fpConfig);
+        deleted = true;
+      }
+
+      // Xóa khỏi groups-config
+      const grpConfig = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] });
+      if (Array.isArray(grpConfig.accounts)) {
+        const grpIdx = grpConfig.accounts.findIndex(a => 
+          (id && (a.id === String(id) || `fb_acc_${a.id}` === String(id))) || 
+          (p > 0 && Number(a.port) === p) || 
+          (accName && a.name.toLowerCase().trim() === String(accName).toLowerCase().trim())
+        );
+        if (grpIdx >= 0) {
+          grpConfig.accounts.splice(grpIdx, 1);
+          writeJsonFile(GROUPS_CONFIG_PATH, grpConfig);
+          deleted = true;
+        }
+      }
+
+      return NextResponse.json({
+        ok: true,
+        message: deleted ? `Đã xóa tài khoản Facebook "${accName || id || p}" thành công!` : 'Đã xóa tài khoản.',
+      });
+    }
+
+    // ================= BẬT / TẮT TÀI KHOẢN FACEBOOK TOÀN DIỆN =================
+    if (action === 'toggle_unified_fb_account') {
+      const { id, port: accPort, enabled: nextState } = body;
+      const p = Number(accPort) || 0;
+
+      const fpConfig = getFanpageConfig();
+      const fpTarget = fpConfig.accounts.find(a => 
+        (id && (String(a.id) === String(id) || `fb_acc_${a.id}` === String(id))) || 
+        (p > 0 && Number(a.port) === p)
+      );
+      if (fpTarget) {
+        fpTarget.enabled = Boolean(nextState);
+        writeJsonFile(FANPAGE_CONFIG_PATH, fpConfig);
+      }
+
+      const grpConfig = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] });
+      if (Array.isArray(grpConfig.accounts)) {
+        const grpTarget = grpConfig.accounts.find(a => 
+          (id && (a.id === String(id) || `fb_acc_${a.id}` === String(id))) || 
+          (p > 0 && Number(a.port) === p)
+        );
+        if (grpTarget) {
+          grpTarget.enabled = Boolean(nextState);
+          writeJsonFile(GROUPS_CONFIG_PATH, grpConfig);
+        }
+      }
+
+      return NextResponse.json({
+        ok: true,
+        message: `Đã ${nextState ? 'bật' : 'tắt'} tài khoản Facebook!`,
+      });
+    }
 
     // ================= CHATGPT CRUD =================
     if (action === 'toggle_chatgpt') {

@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Users,
   RefreshCw,
@@ -22,9 +22,11 @@ import {
   Sparkles,
   ShieldAlert,
   AlertTriangle,
+  FileText,
+  Power,
 } from 'lucide-react';
 import { AccountCategory, AccountItem, GroupAccount, CentralPoolItem, RotationConfig } from '@/types/dashboard';
-import AccountModals from '@/components/modals/AccountModals';
+import AccountModals, { FbModalFormData } from '@/components/modals/AccountModals';
 
 interface AccountsTabProps {
   handleMarkCheckpoint?: (accountId: string, category: string, reason?: string) => Promise<void>;
@@ -43,14 +45,24 @@ interface AccountsTabProps {
 
   fetchAccounts: () => Promise<void>;
   handleOpenChrome: (profileDir: string, port: number, url?: string) => Promise<void>;
-  handleDeleteAccount: (id: string, name: string) => Promise<void>;
   handleDeleteChatGpt: (id: string, name: string) => Promise<void>;
-  handleDeleteFanpage: (id: string, name: string) => Promise<void>;
-  handleDeletePersonal: (id: string, name: string) => Promise<void>;
   handleToggleAccount: (category: string, accountId: string, currentEnabled: boolean) => Promise<void>;
-  setDetectedGroupName: (val: string) => void;
 
+  // Unified Facebook Account Props
+  isFbModalOpen: boolean;
+  setIsFbModalOpen: (open: boolean) => void;
+  isFbModalEditing: boolean;
+  fbModalForm: FbModalFormData;
+  setFbModalForm: React.Dispatch<React.SetStateAction<FbModalFormData>>;
+  handleSaveFbAccount: (e: React.FormEvent) => Promise<void>;
+  handleDeleteFbAccount: (id: string, port: number, name: string) => Promise<void>;
+  handleToggleFbAccount: (id: string, port: number, currentEnabled: boolean) => Promise<void>;
+  openAddFbModal: () => void;
+  openEditFbModal: (acc: AccountItem) => void;
+  handleAutoDetectFbName: (url: string, targetType?: any) => Promise<void>;
+  isDetectingName: boolean;
 
+  // ChatGPT Props
   isAddChatGptOpen: boolean;
   setIsAddChatGptOpen: (open: boolean) => void;
   newChatGptForm: { id?: string; name: string; port?: number | string; profileDir: string; desc?: string; enabled?: boolean };
@@ -61,50 +73,6 @@ interface AccountsTabProps {
   editingChatGpt: { id: string; name: string; profileDir: string; port: number; desc?: string; enabled?: boolean } | null;
   setEditingChatGpt: React.Dispatch<React.SetStateAction<any>>;
   handleUpdateChatGpt: (e: React.FormEvent) => Promise<void>;
-
-  isAddAccountOpen: boolean;
-  setIsAddAccountOpen: (open: boolean) => void;
-  newAccountForm: { id?: string; name: string; profileDir: string; port?: number | string; profileUrl: string; desc?: string; enabled?: boolean; groupUrlsText?: string };
-  setNewAccountForm: React.Dispatch<React.SetStateAction<any>>;
-  handleCreateAccount: (e: React.FormEvent) => Promise<void>;
-  handleAutoDetectFbName: (url: string, targetType?: any) => Promise<void>;
-  isDetectingName: boolean;
-  detectedGroupName: string;
-  isEditAccountOpen: boolean;
-  setIsEditAccountOpen: (open: boolean) => void;
-  editingAccount: { id: string; name: string; profileUrl?: string; profileDir: string; port?: number | string; desc?: string; enabled?: boolean } | null;
-  setEditingAccount: React.Dispatch<React.SetStateAction<any>>;
-  handleUpdateAccount: (e: React.FormEvent) => Promise<void>;
-
-  isAddFanpageOpen: boolean;
-  setIsAddFanpageOpen: (open: boolean) => void;
-    newFanpageForm: { id?: string; name: string; pageUrl: string; profileDir: string; port: string | number; description?: string; desc?: string; enabled?: boolean };
-  setNewFanpageForm: React.Dispatch<React.SetStateAction<any>>;
-  handleCreateFanpage: (e: React.FormEvent) => Promise<void>;
-  handleAutoDetectPageName: (url: string, isEdit?: any) => Promise<void>;
-  isEditFanpageOpen: boolean;
-  setIsEditFanpageOpen: (open: boolean) => void;
-  editingFanpage: { id: string; name: string; pageUrl: string; profileDir: string; port: string | number; description?: string; desc?: string; enabled?: boolean } | null;
-  setEditingFanpage: React.Dispatch<React.SetStateAction<any>>;
-  handleUpdateFanpage: (e: React.FormEvent) => Promise<void>;
-
-  isAddPersonalOpen: boolean;
-  setIsAddPersonalOpen: (open: boolean) => void;
-  newPersonalForm: { id?: string; name: string; profileUrl: string; profileDir: string; port: string | number; description?: string; desc?: string; enabled?: boolean };
-  setNewPersonalForm: React.Dispatch<React.SetStateAction<any>>;
-  handleCreatePersonal: (e: React.FormEvent) => Promise<void>;
-  handleAutoDetectPersonalName: (url: string, isEdit?: any) => Promise<void>;
-  isEditPersonalOpen: boolean;
-  setIsEditPersonalOpen: (open: boolean) => void;
-  editingPersonal: { id: string; name: string; profileUrl: string; profileDir: string; port: string | number; description?: string; desc?: string; enabled?: boolean } | null;
-  setEditingPersonal: React.Dispatch<React.SetStateAction<any>>;
-  handleUpdatePersonal: (e: React.FormEvent) => Promise<void>;
-  isAddUnifiedFbOpen: boolean;
-  setIsAddUnifiedFbOpen: (open: boolean) => void;
-  unifiedFbForm: { name: string; profileUrl: string; enableFanpage: boolean; fanpageUrlsText: string; enableGroups: boolean; groupUrlsText: string; profileDir: string };
-  setUnifiedFbForm: React.Dispatch<React.SetStateAction<any>>;
-  handleCreateUnifiedFb: (e: React.FormEvent) => Promise<void>;
-
 }
 
 export default function AccountsTab({
@@ -117,16 +85,23 @@ export default function AccountsTab({
   handleToggleRotation,
   fetchAccounts,
   handleOpenChrome,
-  handleDeleteAccount,
   handleDeleteChatGpt,
-  handleDeleteFanpage,
-  handleDeletePersonal,
   handleToggleAccount,
-  handleMarkCheckpoint,
   handleResolveCheckpoint,
-  setDetectedGroupName,
+
+  isFbModalOpen,
+  setIsFbModalOpen,
+  isFbModalEditing,
+  fbModalForm,
+  setFbModalForm,
+  handleSaveFbAccount,
+  handleDeleteFbAccount,
+  handleToggleFbAccount,
+  openAddFbModal,
+  openEditFbModal,
+  handleAutoDetectFbName,
   isDetectingName,
-  detectedGroupName,
+
   newChatGptForm,
   setNewChatGptForm,
   handleCreateChatGpt,
@@ -137,44 +112,6 @@ export default function AccountsTab({
   handleUpdateChatGpt,
   isEditChatGptOpen,
   setIsEditChatGptOpen,
-  newAccountForm,
-  setNewAccountForm,
-  handleCreateAccount,
-  handleAutoDetectFbName,
-  isAddAccountOpen,
-  setIsAddAccountOpen,
-  editingAccount,
-  setEditingAccount,
-  handleUpdateAccount,
-  isEditAccountOpen,
-  setIsEditAccountOpen,
-  newFanpageForm,
-  setNewFanpageForm,
-  handleCreateFanpage,
-  handleAutoDetectPageName,
-  isAddFanpageOpen,
-  setIsAddFanpageOpen,
-  editingFanpage,
-  setEditingFanpage,
-  handleUpdateFanpage,
-  isEditFanpageOpen,
-  setIsEditFanpageOpen,
-  newPersonalForm,
-  setNewPersonalForm,
-  handleCreatePersonal,
-  handleAutoDetectPersonalName,
-  isAddPersonalOpen,
-  setIsAddPersonalOpen,
-  editingPersonal,
-  setEditingPersonal,
-  handleUpdatePersonal,
-  isEditPersonalOpen,
-  setIsEditPersonalOpen,
-  isAddUnifiedFbOpen,
-  setIsAddUnifiedFbOpen,
-  unifiedFbForm,
-  setUnifiedFbForm,
-  handleCreateUnifiedFb,
 }: AccountsTabProps) {
   const openEditChatGptModal = (acc: AccountItem) => {
     setEditingChatGpt({
@@ -187,814 +124,464 @@ export default function AccountsTab({
     setIsEditChatGptOpen(true);
   };
 
-  const openEditFanpageModal = (acc: AccountItem) => {
-    setEditingFanpage({
-      id: acc.id,
-      name: acc.name,
-      pageUrl: acc.pageUrl || acc.url || '',
-      profileDir: acc.profileDir,
-      port: acc.port,
-      desc: acc.desc || '',
-    });
-    setDetectedGroupName('');
-    setIsEditFanpageOpen(true);
-  };
-
-  const openEditPersonalModal = (acc: AccountItem) => {
-    setEditingPersonal({
-      id: acc.id,
-      name: acc.name,
-      profileUrl: acc.profileUrl || acc.url || '',
-      profileDir: acc.profileDir,
-      port: acc.port,
-      desc: acc.desc || '',
-    });
-    setDetectedGroupName('');
-    setIsEditPersonalOpen(true);
-  };
-
-  const openEditAccountModal = (acc: AccountItem) => {
-    setEditingAccount({
-      id: acc.id,
-      name: acc.name,
-      profileUrl: acc.profileUrl || acc.url || '',
-      profileDir: acc.profileDir,
-      port: acc.port,
-      desc: acc.desc || '',
-    });
-    setDetectedGroupName('');
-    setIsEditAccountOpen(true);
-  };
+  const checkpointCategory = accounts.find((c) => c.category === 'checkpoint');
+  const facebookCategory = accounts.find((c) => c.category === 'facebook');
+  const chatgptCategory = accounts.find((c) => c.category === 'chatgpt');
 
   return (
     <>
       <div className="space-y-8">
-        <button onClick={() => setIsAddUnifiedFbOpen(true)} className="flex items-center gap-2 px-4 py-2.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-md">
-          <UserPlus className="w-4 h-4" /> Thêm tài khoản Facebook
-        </button>
-            {accounts.map(category => (
-              <div key={category.category} className="liquid-glass rounded-3xl p-7 space-y-5">
-                
-                {/* Category Header */}
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-4">
-                  <div>
-                    <h3 className="font-extrabold text-lg text-slate-900 tracking-tight">{category.categoryName}</h3>
-                    <p className="text-xs text-slate-500 font-medium">{category.description}</p>
-                  </div>
-                  
-                  <div className="flex items-center gap-2.5">
-                    {category.category === 'chatgpt' && (
-                      <button
-                        onClick={() => setIsAddChatGptOpen(true)}
-                        className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white rounded-xl shadow-md shadow-violet-600/25 transition-all"
-                      >
-                        <UserPlus className="w-3.5 h-3.5" /> Thêm tài khoản ChatGPT
-                      </button>
-                    )}
-                    {category.category === 'fanpage' && (
-                      <div className="flex items-center gap-2">
-                        {false && <button
-                          onClick={() => setIsAddFanpageOpen(true)}
-                          className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-md shadow-blue-600/25 transition-all"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" /> Thêm Fanpage
-                        </button>}
-                      </div>
-                    )}
-                    {category.category === 'groups' && (
-                      <div className="flex items-center gap-2">
-                        {false && <button
-                          onClick={() => setIsAddAccountOpen(true)}
-                          className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl shadow-md shadow-indigo-600/25 transition-all"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" /> Thêm tài khoản Group
-                        </button>}
-                      </div>
-                    )}
-                    {category.category === 'personal' && (
-                      <button
-                        onClick={() => setIsAddPersonalOpen(true)}
-                        className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-teal-600 hover:bg-teal-500 text-white rounded-xl shadow-md shadow-teal-600/25 transition-all"
-                      >
-                        <UserPlus className="w-3.5 h-3.5" /> Thêm tài khoản Cá nhân
-                      </button>
-                    )}
-                    <span className="text-xs font-bold px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-full text-slate-700 shadow-2xs">
-                      {category.items.length} Tài khoản
-                    </span>
-                  </div>
-                </div>
+        {/* ==================== HEADER BANNER & ACTION BUTTONS ==================== */}
+        <div className="p-6 sm:p-7 rounded-3xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 text-white shadow-xl shadow-blue-500/10 flex flex-col md:flex-row items-start md:items-center justify-between gap-5">
+          <div className="space-y-1.5 max-w-2xl">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-xs font-extrabold text-blue-50 border border-white/20">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
+              QUẢN LÝ TẬP TRUNG TÀI KHOẢN FACEBOOK
+            </div>
+            <h3 className="text-xl sm:text-2xl font-black tracking-tight">
+              Tất Cả Tài Khoản Facebook Tại Một Nơi Duy Nhất
+            </h3>
+            <p className="text-xs sm:text-sm text-blue-100 font-medium leading-relaxed">
+              Mỗi tài khoản được cấp riêng <b>1 Cổng Remote Port</b> và <b>1 Thư mục Profile Chrome</b> (Độc lập 100% - Chống checkpoint chéo). Tùy chọn quyền Đăng Fanpage hoặc Đăng Nhóm cho từng tài khoản một cách dễ dàng.
+            </p>
+          </div>
 
-                {/* Account Cards Grid OR 3-Group Rotation Kanban for Groups OR Acc Yêu Cầu Xác Thực */}
-                {category.category === 'checkpoint' ? (
-                  category.items.length === 0 ? (
-                    <div className="p-6 rounded-2xl bg-emerald-50/80 border border-emerald-200/90 flex flex-col sm:flex-row items-center justify-between gap-4">
-                      <div className="flex items-center gap-3.5">
-                        <div className="w-11 h-11 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 shadow-2xs">
-                          <ShieldCheck className="w-6 h-6" />
-                        </div>
-                        <div>
-                          <h4 className="text-sm font-extrabold text-emerald-900">Tất cả tài khoản Facebook đang an toàn!</h4>
-                          <p className="text-xs text-emerald-700 mt-0.5">Không có tài khoản nào dính checkpoint hay bị Facebook yêu cầu xác minh người thật.</p>
-                        </div>
-                      </div>
-                      <span className="px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-extrabold rounded-full border border-emerald-300 shrink-0">
-                        🟢 0 Checkpoint
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
+            <button
+              onClick={openAddFbModal}
+              className="flex items-center gap-2 px-5 py-3 text-xs sm:text-sm font-extrabold bg-white text-blue-700 hover:bg-blue-50 rounded-2xl shadow-lg transition-all transform hover:-translate-y-0.5 cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4 text-blue-600" />
+              Thêm tài khoản Facebook
+            </button>
+            <button
+              onClick={() => setIsAddChatGptOpen(true)}
+              className="flex items-center gap-2 px-4 py-3 text-xs sm:text-sm font-extrabold bg-white/15 hover:bg-white/25 border border-white/30 text-white rounded-2xl transition-all cursor-pointer backdrop-blur-md"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              Thêm tài khoản ChatGPT
+            </button>
+          </div>
+        </div>
+
+        {/* ==================== KHỐI 1: TÀI KHOẢN YÊU CẦU XÁC THỰC (CHECKPOINT) ==================== */}
+        {checkpointCategory && checkpointCategory.items.length > 0 && (
+          <div className="liquid-glass rounded-3xl p-7 space-y-5 border-2 border-amber-300/90 bg-amber-50/30">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-200/80 pb-4">
+              <div>
+                <h3 className="font-extrabold text-lg text-amber-950 flex items-center gap-2">
+                  <ShieldAlert className="w-5 h-5 text-rose-600 animate-bounce" />
+                  {checkpointCategory.categoryName}
+                </h3>
+                <p className="text-xs text-amber-800 font-medium mt-0.5">
+                  {checkpointCategory.description}
+                </p>
+              </div>
+              <span className="px-3 py-1 bg-rose-100 text-rose-800 text-xs font-black rounded-full border border-rose-300">
+                🔴 {checkpointCategory.items.length} Cần xác thực
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {checkpointCategory.items.map((acc: AccountItem) => (
+                <div
+                  key={acc.id}
+                  className="rounded-2xl p-5 border-2 border-amber-300/90 bg-white/95 shadow-md flex flex-col justify-between gap-4"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
+                        Port: {acc.port}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
+                        CẦN XÁC THỰC
                       </span>
                     </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                      {category.items.map((acc: AccountItem) => {
-                        return (
-                          <div
-                            key={acc.id}
-                            className="rounded-2xl p-5 border-2 border-amber-300/90 bg-gradient-to-br from-amber-50/90 via-orange-50/50 to-rose-50/60 shadow-lg shadow-amber-500/10 flex flex-col justify-between gap-4 relative overflow-hidden"
-                          >
-                            {/* Top warning ribbon */}
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-200/90 text-amber-900 border border-amber-300 flex items-center gap-1 shadow-2xs">
-                                <AlertTriangle className="w-3 h-3 text-amber-700" />
-                                {acc.originalCategory === 'fanpage' ? '📄 FANPAGE' : acc.originalCategory === 'groups' ? '👥 NHÓM FACEBOOK' : '👤 CÁ NHÂN'}
-                              </span>
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
-                                <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping"></span>
-                                CẦN XÁC THỰC
-                              </span>
-                            </div>
-
-                            <div className="space-y-2.5">
-                              <div>
-                                <h4 className="font-extrabold text-base text-slate-900 flex items-center gap-1.5 truncate" title={acc.name}>
-                                  {acc.name}
-                                </h4>
-                                <span className="text-[11px] text-slate-500 font-mono block mt-0.5">
-                                  📁 Profile: <b className="text-slate-800">{acc.profileDir}</b> (Port: <b>{acc.port}</b>)
-                                </span>
-                              </div>
-
-                              <div className="p-3 rounded-xl bg-white/90 border border-amber-200/90 text-xs text-amber-950 space-y-1.5 shadow-2xs">
-                                <div className="font-extrabold text-rose-800 flex items-start gap-1.5">
-                                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                                  <span>{acc.checkpointReason || 'Facebook yêu cầu: "Hãy xác nhận bạn là người thật để sử dụng trang cá nhân"'}</span>
-                                </div>
-                                <p className="text-[11px] text-slate-600">
-                                  Tài khoản đã được <b>rút khỏi danh sách đăng bài</b> để tránh bị khóa vĩnh viễn. Vui lòng mở Chrome để bấm xác minh theo yêu cầu của Facebook.
-                                </p>
-                              </div>
-                            </div>
-
-                            {/* Action Buttons */}
-                            <div className="space-y-2 pt-2 border-t border-amber-200/80">
-                              <button
-                                onClick={() => handleOpenChrome(acc.profileDir, acc.port, acc.checkpointUrl || acc.currentUrl || 'https://www.facebook.com/')}
-                                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-extrabold shadow-md shadow-blue-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                              >
-                                <ExternalLink className="w-4 h-4" /> Mở Chrome để xác thực ngay
-                              </button>
-
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => handleResolveCheckpoint?.(acc.id, acc.originalCategory || 'fanpage')}
-                                  className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                                  title="Bấm sau khi đã xác thực người thật xong trên Chrome để đưa tài khoản trở lại chỗ đăng Fanpage & Nhóm"
-                                >
-                                  <Unlock className="w-3.5 h-3.5" /> Đã xác thực (Khôi phục)
-                                </button>
-
-                                <button
-                                  onClick={() => {
-                                    if (acc.originalCategory === 'fanpage') handleDeleteFanpage(acc.id, acc.name);
-                                    else if (acc.originalCategory === 'groups') handleDeleteAccount(acc.id, acc.name);
-                                    else if (acc.originalCategory === 'personal') handleDeletePersonal(acc.id, acc.name);
-                                  }}
-                                  className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-all border border-rose-200/70"
-                                  title="Xóa vĩnh viễn tài khoản này nếu không muốn dùng nữa"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <h4 className="font-extrabold text-base text-slate-900 truncate" title={acc.name}>
+                      {acc.name}
+                    </h4>
+                    <span className="text-xs text-slate-500 font-mono block">
+                      📁 Profile: <b>{acc.profileDir}</b>
+                    </span>
+                    <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-100 text-xs text-rose-900 flex items-start gap-1.5">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      <span>{acc.checkpointReason || 'Facebook yêu cầu xác nhận danh tính người thật.'}</span>
                     </div>
-                  )
-                ) : category.category === 'groups' ? (
-                  <div className="space-y-6">
-                    {/* Header: Thanh điều khiển Chiến thuật 3 Nhóm */}
-                    <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-slate-50 via-indigo-50/40 to-slate-50 border border-slate-200 shadow-2xs">
-                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-200/80 flex items-center gap-1.5">
-                              <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
-                              CHIẾN THUẬT AN TOÀN 3 NHÓM
-                            </span>
-                            <span className="text-xs text-slate-500 font-medium">
-                              Luân phiên 24h & Cách ly phục hồi 7 ngày (168 giờ)
-                            </span>
-                          </div>
-                          <h4 className="text-base font-extrabold text-slate-900 tracking-tight">
-                            Phân Bổ Ca Đăng Bài & Khu Vực Cách Ly Phục Hồi Trust Score
-                          </h4>
-                          <p className="text-xs text-slate-600 leading-relaxed max-w-3xl">
-                            Tự động đổi ca xen kẽ mỗi ngày giữa <b>🟢 Nhóm 1</b> và <b>🟡 Nhóm 2</b> để Facebook nhận diện hoạt động tự nhiên như người dùng thật. Khi tài khoản gặp cảnh báo checkpoint, bot tự động giam vào <b>🔴 Nhóm 3 (168 giờ)</b> để xóa vi phạm spam và phục hồi độ uy tín.
-                          </p>
-                        </div>
+                  </div>
 
-                        {/* Controls: Ca trực & Đổi ca */}
-                        <div className="flex flex-wrap items-center gap-3 p-2.5 bg-white rounded-xl border border-slate-200/90 shadow-2xs shrink-0">
-                          <div className="px-2 border-r border-slate-200 text-left">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Ca chạy hôm nay</span>
-                            <span className="text-xs font-extrabold flex items-center gap-1.5 mt-0.5">
-                              {groupsData.rotation?.activeGroupToday === 'group_1' ? (
-                                <span className="text-emerald-700 flex items-center gap-1">
-                                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                                  🟢 Nhóm 1 (Đang chạy)
-                                </span>
-                              ) : (
-                                <span className="text-amber-700 flex items-center gap-1">
-                                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-                                  🟡 Nhóm 2 (Đang chạy)
-                                </span>
-                              )}
-                            </span>
-                          </div>
-
-                          <button
-                            onClick={() => handleSwitchActiveGroup()}
-                            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-xs"
-                            title="Đổi phiên trực chiến ngay lập tức giữa Nhóm 1 và Nhóm 2"
-                          >
-                            <ArrowLeftRight className="w-3.5 h-3.5" />
-                            Đổi ca trực ngay
-                          </button>
-
-                          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none pl-1">
-                            <input
-                              type="checkbox"
-                              checked={groupsData.rotation?.enabled !== false}
-                              onChange={(e) => handleToggleRotation(e.target.checked)}
-                              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
-                            />
-                            <span>Tự xoay ca mỗi ngày</span>
-                          </label>
-                        </div>
-                      </div>
+                  <div className="space-y-2 pt-2 border-t border-amber-100">
+                    <button
+                      onClick={() => handleOpenChrome(acc.profileDir, acc.port, acc.checkpointUrl || acc.url || 'https://www.facebook.com/')}
+                      className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" /> Mở Chrome để xác minh
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleResolveCheckpoint?.(acc.id, 'facebook')}
+                        className="flex-1 py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Unlock className="w-3.5 h-3.5" /> Đã xác thực xong
+                      </button>
+                      <button
+                        onClick={() => handleDeleteFbAccount(acc.id, acc.port, acc.name)}
+                        className="p-1.5 rounded-xl text-rose-500 hover:bg-rose-50 border border-rose-200 transition-colors"
+                        title="Xóa tài khoản này"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-                    {/* BANNER HƯỚNG DẪN DÀN PROFILE ĐỘC LẬP CHỐNG CHECKPOINT CHÉO */}
-                    <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50/90 via-teal-50/70 to-slate-50 border border-emerald-200/80 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                      <div className="flex items-start gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                          <ShieldCheck className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
-                            <span>Mỗi tài khoản hoạt động trên Profile Chrome riêng biệt</span>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                              Độc lập 100%
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-slate-600 mt-0.5">
-                            Mỗi nick Facebook sử dụng 1 thư mục Profile Chrome và 1 Cổng Port riêng biệt. Tuyệt đối không dùng chung phiên để tránh Checkpoint chéo giữa các nick!
-                          </p>
-                        </div>
+        {/* ==================== KHỐI 2: DANH SÁCH TÀI KHOẢN FACEBOOK TẬP TRUNG ==================== */}
+        {facebookCategory && (
+          <div className="liquid-glass rounded-3xl p-7 space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-4">
+              <div>
+                <h3 className="font-extrabold text-lg text-slate-900 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-blue-600" />
+                  {facebookCategory.categoryName}
+                </h3>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  {facebookCategory.description}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={openAddFbModal}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-md shadow-blue-600/25 transition-all cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" /> Thêm tài khoản Facebook
+                </button>
+                <span className="text-xs font-bold px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-full text-slate-700">
+                  {facebookCategory.items.length} Tài khoản
+                </span>
+              </div>
+            </div>
+
+            {/* Grid Thẻ Tài khoản Facebook */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {facebookCategory.items.map((acc: AccountItem) => {
+                const isEnabled = acc.enabled !== false;
+                const isOnline = acc.isReady;
+
+                return (
+                  <div
+                    key={acc.id}
+                    className={`rounded-2xl p-5 border transition-all flex flex-col justify-between gap-4 relative overflow-hidden ${
+                      !isEnabled
+                        ? 'opacity-65 bg-slate-50/70 border-slate-200'
+                        : 'bg-white/95 border-slate-200/90 shadow-sm hover:shadow-md'
+                    }`}
+                  >
+                    {/* Top Bar: Port & Status */}
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        {/* Port Badge */}
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-extrabold bg-blue-50 text-blue-800 border border-blue-200">
+                          <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+                          Port: <b className="font-mono">{acc.port}</b>
+                        </span>
+
+                        {/* Online / Login Status Badge */}
+                        {acc.loginStatus === 'logged_in' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            Đã đăng nhập
+                          </span>
+                        ) : isOnline ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            Chưa đăng nhập
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
+                            Chrome tắt
+                          </span>
+                        )}
                       </div>
+
+                      {/* Name & Profile Dir */}
+                      <div>
+                        <h4 className="font-extrabold text-base text-slate-900 truncate" title={acc.name}>
+                          {acc.name}
+                        </h4>
+                        <span className="text-[11px] text-slate-500 font-mono block mt-0.5">
+                          📁 Profile: <b className="text-slate-800">{acc.profileDir}</b>
+                        </span>
+                      </div>
+
+                      {/* Role & Permissions Badges */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        {acc.canPostFanpage && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200/80">
+                            <FileText className="w-3 h-3 text-blue-600" />
+                            Đăng Fanpage
+                          </span>
+                        )}
+                        {acc.canPostGroup && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200/80">
+                            <Users className="w-3 h-3 text-indigo-600" />
+                            Đăng Nhóm ({acc.groupCount || 0} link)
+                            <span className="ml-1 text-[10px] px-1 rounded bg-indigo-200/70 text-indigo-950 font-extrabold">
+                              {acc.roleGroup === 'group_2' ? '🟡 N2' : '🟢 N1'}
+                            </span>
+                          </span>
+                        )}
+                        {!acc.canPostFanpage && !acc.canPostGroup && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-600">
+                            Chưa gán vai trò
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Link FB */}
+                      {acc.url && (
+                        <a
+                          href={acc.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-blue-600 truncate max-w-full font-mono hover:underline"
+                        >
+                          <ExternalLink className="w-3 h-3 shrink-0" />
+                          <span className="truncate">{acc.url}</span>
+                        </a>
+                      )}
                     </div>
 
-                    {/* 3 Columns Kanban Board */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
-                      {/* ================= CỘT 1: NHÓM 1 ================= */}
-                      <div className={`rounded-2xl p-4 sm:p-5 border transition-all flex flex-col min-h-[460px] ${
-                        groupsData.rotation?.activeGroupToday === 'group_1'
-                          ? 'bg-emerald-50/30 border-emerald-300 ring-2 ring-emerald-500/20 shadow-sm'
-                          : 'bg-slate-50/50 border-slate-200/90 shadow-2xs'
-                      }`}>
-                        {/* Column Header */}
-                        <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-200/80">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="w-3 h-3 rounded-full bg-emerald-500 shadow-xs" />
-                              <h4 className="font-extrabold text-slate-900 text-sm">🟢 NHÓM 1: ĐỘI CHÍNH</h4>
-                            </div>
-                            <p className="text-[11px] text-slate-500 mt-0.5">Đăng bài ngày lẻ / Phiên A luân phiên</p>
-                          </div>
-                          {groupsData.rotation?.activeGroupToday === 'group_1' ? (
-                            <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 animate-pulse flex items-center gap-1">
-                              🔥 ĐANG CHẠY
-                            </span>
-                          ) : (
-                            <span className="px-2.5 py-1 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                              💤 Nghỉ ngơi
-                            </span>
-                          )}
-                        </div>
+                    {/* Action Buttons */}
+                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                      <button
+                        onClick={() => handleOpenChrome(acc.profileDir, acc.port, acc.url || 'https://www.facebook.com/')}
+                        className="w-full py-2 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 border border-blue-200/80 cursor-pointer"
+                        title="Khởi động trình duyệt Chrome của nick này để đăng nhập hoặc kiểm tra"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" /> Mở Chrome Profile (Port {acc.port})
+                      </button>
 
-                        {/* Stats Summary Badge */}
-                        <div className="my-3 px-3 py-1.5 rounded-xl bg-white border border-slate-200/80 shadow-2xs flex items-center justify-between text-xs">
-                          <span className="font-bold text-slate-700">
-                            👤 {(groupsData.accounts || []).filter((a) => a.roleGroup === 'group_1').length} tài khoản
-                          </span>
-                          <span className="font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/60">
-                            🔗 {(groupsData.accounts || [])
-                              .filter((a) => a.roleGroup === 'group_1')
-                              .reduce((sum, a) => sum + (a.groupUrls?.length || 0), 0)} link nhóm
-                          </span>
-                        </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => openEditFbModal(acc)}
+                          className="flex-1 py-1.5 px-3 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all flex items-center justify-center gap-1 cursor-pointer"
+                          title="Chỉnh sửa thông tin nick, quyền đăng hoặc link nhóm"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" /> Sửa
+                        </button>
 
-                        {/* Account Cards List */}
-                        <div className="space-y-3 flex-1">
-                          {(groupsData.accounts || []).filter((a) => a.roleGroup === 'group_1').length === 0 ? (
-                            <div className="text-center py-10 text-xs text-slate-400 italic bg-white/70 rounded-xl border border-dashed border-slate-200">
-                              Chưa có tài khoản nào trong Nhóm 1
-                            </div>
-                          ) : (
-                            (groupsData.accounts || [])
-                              .filter((a) => a.roleGroup === 'group_1')
-                              .map((acc) => {
-                                const catItem = category.items.find((it) => it.id === acc.id || it.id === `group_${acc.id}` || it.profileDir === acc.profileDir);
-                                const isOnline = catItem?.isReady;
-                                const loginStatus = catItem?.loginStatus;
+                        <button
+                          onClick={() => handleToggleFbAccount(acc.id, acc.port, isEnabled)}
+                          className={`py-1.5 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                            isEnabled
+                              ? 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
+                              : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                          }`}
+                          title={isEnabled ? 'Tạm dừng hoạt động tài khoản này' : 'Kích hoạt lại tài khoản này'}
+                        >
+                          <Power className="w-3.5 h-3.5" />
+                          {isEnabled ? 'Tắt' : 'Bật'}
+                        </button>
 
-                                return (
-                                  <div key={acc.id} className="p-3.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs hover:shadow-xs transition-all space-y-3">
-                                    <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 min-w-0">
-                                        <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 font-extrabold text-xs flex items-center justify-center shrink-0">
-                                          {acc.name.slice(0, 2).toUpperCase()}
-                                        </div>
-                                        <div className="min-w-0">
-                                          <div className="font-extrabold text-slate-900 text-sm truncate">{acc.name}</div>
-                                          <span className="text-[10px] text-slate-400 font-mono block truncate">
-                                            {acc.profileDir}
-                                          </span>
-                                        </div>
-                                      </div>
-                                      <span className="px-2 py-0.5 rounded-md text-xs font-extrabold bg-blue-50 text-blue-700 border border-blue-200 shrink-0">
-                                        {acc.groupUrls?.length || 0} link
-                                      </span>
-                                    </div>
-
-                                    {/* Chrome & FB Status */}
-                                    <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold ${
-                                        isOnline ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200'
-                                      }`}>
-                                        <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-                                        Port 3002 {isOnline ? 'Online' : 'Chưa bật'}
-                                      </span>
-                                      {loginStatus === 'logged_in' ? (
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                          <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Đã login FB
-                                        </span>
-                                      ) : (
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                                          Profile sẵn sàng
-                                        </span>
-                                      )}
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-slate-50 text-slate-600 border border-slate-200" title={`Profile Chrome riêng: ${acc.profileDir || 'n8n-fb-group-profile'}`}>
-                                        <ShieldCheck className="w-3 h-3 text-emerald-600" /> Profile riêng
-                                      </span>
-                                    </div>
-
-                                    {/* Action Buttons */}
-                                    <div className="space-y-2 pt-2 border-t border-slate-100">
-                                      <button
-                                        onClick={() => handleOpenChrome(acc.profileDir || '', 3002, 'https://www.facebook.com/')}
-                                        className="w-full py-1.5 px-3 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-all flex items-center justify-center gap-1.5 border border-indigo-200/70"
-                                      >
-                                        <ExternalLink className="w-3.5 h-3.5" /> Mở Chrome Profile
-                                      </button>
-                                      <div className="flex items-center gap-1.5">
-                                        <button
-                                          onClick={() => handleChangeRoleGroup(acc.id, 'group_2')}
-                                          className="flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 transition-all flex items-center justify-center gap-1"
-                                          title="Chuyển sang Nhóm 2 (Đội dự phòng)"
-                                        >
-                                          <ArrowRight className="w-3 h-3" /> Sang Nhóm 2
-                                        </button>
-                                        <button
-                                          onClick={() => handleChangeRoleGroup(acc.id, 'quarantine')}
-                                          className="py-1.5 px-2 rounded-lg text-[11px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 transition-all flex items-center justify-center gap-1"
-                                          title="Cách ly 7 ngày"
-                                        >
-                                          <Lock className="w-3 h-3" /> Cách ly 7N
-                                        </button>
-                                        {catItem && (
-                                          <>
-                                            <button
-                                              onClick={() => openEditAccountModal(catItem)}
-                                              className="p-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 transition-all"
-                                              title="Sửa tài khoản"
-                                            >
-                                              <Edit3 className="w-3.5 h-3.5" />
-                                            </button>
-                                            <button
-                                              onClick={() => handleDeleteAccount(acc.id, acc.name)}
-                                              className="p-1.5 rounded-lg bg-slate-50 hover:bg-rose-50 text-rose-600 border border-slate-200 transition-all"
-                                              title="Xóa tài khoản"
-                                            >
-                                              <Trash2 className="w-3.5 h-3.5" />
-                                            </button>
-                                          </>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })
-                          )}
-                        </div>
-                      </div>
-
-                      {/* ================= CỘT 2: NHÓM 2 ================= */}
-                      <div className={`rounded-2xl p-4 sm:p-5 border transition-all flex flex-col min-h-[460px] ${
-                        groupsData.rotation?.activeGroupToday === 'group_2'
-                          ? 'bg-amber-50/30 border-amber-300 ring-2 ring-amber-500/20 shadow-sm'
-                          : 'bg-slate-50/50 border-slate-200/90 shadow-2xs'
-                      }`}>
-                        {/* Column Header */}
-                        <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-200/80">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="w-3 h-3 rounded-full bg-amber-500 shadow-xs" />
-                              <h4 className="font-extrabold text-slate-900 text-sm">🟡 NHÓM 2: ĐỘI DỰ PHÒNG</h4>
-                            </div>
-                            <p className="text-[11px] text-slate-500 mt-0.5">Nghỉ ngơi hồi trust / Trực nhật ngày mai</p>
-                          </div>
-                          {groupsData.rotation?.activeGroupToday === 'group_2' ? (
-                            <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300 animate-pulse flex items-center gap-1">
-                              🔥 ĐANG CHẠY
-                            </span>
-                          ) : (
-                            <span className="px-2.5 py-1 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
-                              💤 Nghỉ ngơi hồi phục
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Stats Summary Badge */}
-                        <div className="my-3 px-3 py-1.5 rounded-xl bg-white border border-slate-200/80 shadow-2xs flex items-center justify-between text-xs">
-                          <span className="font-bold text-slate-700">
-                            👤 {(groupsData.accounts || []).filter((a) => a.roleGroup === 'group_2').length} tài khoản
-                          </span>
-                          <span className="font-extrabold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/60">
-                            🔗 {(groupsData.accounts || [])
-                              .filter((a) => a.roleGroup === 'group_2')
-                              .reduce((sum, a) => sum + (a.groupUrls?.length || 0), 0)} link nhóm
-                          </span>
-                        </div>
-
-                        {/* Account Cards List */}
-                        <div className="space-y-3 flex-1">
-                          {(groupsData.accounts || []).filter((a) => a.roleGroup === 'group_2').length === 0 ? (
-                            <div className="text-center py-10 text-xs text-slate-400 italic bg-white/70 rounded-xl border border-dashed border-slate-200">
-                              Chưa có tài khoản nào trong Nhóm 2
-                            </div>
-                          ) : (
-                            (groupsData.accounts || [])
-                              .filter((a) => a.roleGroup === 'group_2')
-                              .map((acc) => {
-                                const catItem = category.items.find((it) => it.id === acc.id || it.id === `group_${acc.id}` || it.profileDir === acc.profileDir);
-                                const isOnline = catItem?.isReady;
-                                const loginStatus = catItem?.loginStatus;
-
-                                return (
-                                  <div key={acc.id} className="p-3.5 rounded-xl bg-white border border-slate-200/90 shadow-2xs hover:shadow-xs transition-all space-y-3">
-                                    <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2.5 min-w-0">
-                                        <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 font-extrabold text-xs flex items-center justify-center shrink-0">
-                                          {acc.name.slice(0, 2).toUpperCase()}
-                                        </div>
-                                        <div className="min-w-0">
-                                          <div className="font-extrabold text-slate-900 text-sm truncate">{acc.name}</div>
-                                          <span className="text-[10px] text-slate-400 font-mono block truncate">
-                                            {acc.profileDir}
-                                          </span>
-                                        </div>
-                                      </div>
-                                      <span className="px-2 py-0.5 rounded-md text-xs font-extrabold bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
-                                        {acc.groupUrls?.length || 0} link
-                                      </span>
-                                    </div>
-
-                                    {/* Chrome & FB Status */}
-                                    <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold ${
-                                        isOnline ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200'
-                                      }`}>
-                                        <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-                                        Port 3002 {isOnline ? 'Online' : 'Chưa bật'}
-                                      </span>
-                                      {loginStatus === 'logged_in' ? (
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                          <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Đã login FB
-                                        </span>
-                                      ) : (
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                                          Profile sẵn sàng
-                                        </span>
-                                      )}
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-slate-50 text-slate-600 border border-slate-200" title={`Profile Chrome riêng: ${acc.profileDir || 'n8n-fb-group-profile'}`}>
-                                        <ShieldCheck className="w-3 h-3 text-emerald-600" /> Profile riêng
-                                      </span>
-                                    </div>
-
-                                    {/* Action Buttons */}
-                                    <div className="space-y-2 pt-2 border-t border-slate-100">
-                                      <button
-                                        onClick={() => handleOpenChrome(acc.profileDir || '', 3002, 'https://www.facebook.com/')}
-                                        className="w-full py-1.5 px-3 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-all flex items-center justify-center gap-1.5 border border-indigo-200/70"
-                                      >
-                                        <ExternalLink className="w-3.5 h-3.5" /> Mở Chrome Profile
-                                      </button>
-                                      <div className="flex items-center gap-1.5">
-                                        <button
-                                          onClick={() => handleChangeRoleGroup(acc.id, 'group_1')}
-                                          className="flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 transition-all flex items-center justify-center gap-1"
-                                          title="Chuyển sang Nhóm 1 (Đội chính)"
-                                        >
-                                          <ArrowRight className="w-3 h-3" /> Sang Nhóm 1
-                                        </button>
-                                        <button
-                                          onClick={() => handleChangeRoleGroup(acc.id, 'quarantine')}
-                                          className="py-1.5 px-2 rounded-lg text-[11px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 transition-all flex items-center justify-center gap-1"
-                                          title="Cách ly 7 ngày"
-                                        >
-                                          <Lock className="w-3 h-3" /> Cách ly 7N
-                                        </button>
-                                        {catItem && (
-                                          <>
-                                            <button
-                                              onClick={() => openEditAccountModal(catItem)}
-                                              className="p-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 transition-all"
-                                              title="Sửa tài khoản"
-                                            >
-                                              <Edit3 className="w-3.5 h-3.5" />
-                                            </button>
-                                            <button
-                                              onClick={() => handleDeleteAccount(acc.id, acc.name)}
-                                              className="p-1.5 rounded-lg bg-slate-50 hover:bg-rose-50 text-rose-600 border border-slate-200 transition-all"
-                                              title="Xóa tài khoản"
-                                            >
-                                              <Trash2 className="w-3.5 h-3.5" />
-                                            </button>
-                                          </>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })
-                          )}
-                        </div>
-                      </div>
-
-                      {/* ================= CỘT 3: NHÓM 3 (KHU CÁCH LY 7 NGÀY) ================= */}
-                      <div className="rounded-2xl p-4 sm:p-5 bg-gradient-to-b from-rose-50/40 via-white to-white border border-rose-200/90 shadow-2xs flex flex-col min-h-[460px]">
-                        {/* Column Header */}
-                        <div className="flex items-start justify-between gap-2 pb-3 border-b border-rose-200/70">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="w-3 h-3 rounded-full bg-rose-600 animate-pulse" />
-                              <h4 className="font-extrabold text-rose-900 text-sm">🔴 NHÓM 3: KHU CÁCH LY 7 NGÀY</h4>
-                            </div>
-                            <p className="text-[11px] text-rose-600/80 mt-0.5">Đóng băng 168 giờ, tuyệt đối không đụng vào</p>
-                          </div>
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
-                            {(groupsData.accounts || []).filter((a) => a.roleGroup === 'quarantine').length} bị phạt
-                          </span>
-                        </div>
-
-                        {/* Notice Box */}
-                        <div className="p-3 my-3 rounded-xl bg-rose-50/70 border border-rose-200/60 text-[11px] text-rose-800 leading-relaxed">
-                          💡 <b>Nguyên tắc:</b> Tài khoản khi gặp cảnh báo của Facebook sẽ tự động bị giam ở đây trong <b>7 ngày (168 giờ)</b> để xóa cờ vi phạm spam. Sau 7 ngày bot sẽ tự động đưa về nhóm ban đầu.
-                        </div>
-
-                        {/* Quarantined List */}
-                        <div className="space-y-3 flex-1">
-                          {(groupsData.accounts || []).filter((a) => a.roleGroup === 'quarantine').length === 0 ? (
-                            <div className="text-center py-10 px-4 bg-emerald-50/30 rounded-xl border border-dashed border-emerald-200/80 text-slate-500 space-y-2">
-                              <ShieldCheck className="w-8 h-8 text-emerald-500 mx-auto" />
-                              <div className="text-sm font-extrabold text-emerald-800">Tất cả tài khoản đều an toàn!</div>
-                              <p className="text-[11px] text-slate-400">Không có tài khoản nào bị cảnh báo hoặc đang cách ly.</p>
-                            </div>
-                          ) : (
-                            (groupsData.accounts || [])
-                              .filter((a) => a.roleGroup === 'quarantine')
-                              .map((acc) => {
-                                return (
-                                  <div key={acc.id} className="p-3.5 rounded-xl bg-white border border-rose-200 shadow-2xs space-y-3">
-                                    <div className="flex items-start justify-between">
-                                      <div>
-                                        <div className="flex items-center gap-1.5">
-                                          <span className="font-extrabold text-slate-900 text-sm">{acc.name}</span>
-                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 font-mono font-bold">
-                                            CÁCH LY
-                                          </span>
-                                        </div>
-                                        <span className="text-[11px] text-slate-500 font-mono block mt-0.5">
-                                          📁 {acc.profileDir}
-                                        </span>
-                                      </div>
-                                      <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-bold">
-                                        Gốc: {acc.originalRoleGroup === 'group_2' ? '🟡 Nhóm 2' : '🟢 Nhóm 1'}
-                                      </span>
-                                    </div>
-
-                                    <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-100 text-[11px] text-rose-700 space-y-1">
-                                      <div className="font-bold flex items-center gap-1">
-                                        <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                                        Lý do: {acc.quarantineReason || acc.disabledReason || 'Bị cảnh báo kiểm tra checkpoint'}
-                                      </div>
-                                      <div className="font-medium text-slate-600">
-                                        ⏳ Còn lại: <b className="text-rose-900 font-bold">{formatCountdown(acc.quarantineUntil || acc.cooldownUntil)}</b>
-                                      </div>
-                                    </div>
-
-                                    <div className="space-y-1.5 pt-1">
-                                      <button
-                                        onClick={() => handleOpenChrome(acc.profileDir || '', 3002, 'https://www.facebook.com/')}
-                                        className="w-full py-1.5 px-3 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all flex items-center justify-center gap-1.5 border border-slate-200"
-                                      >
-                                        <ExternalLink className="w-3 h-3" /> Mở Chrome gỡ checkpoint
-                                      </button>
-                                      <button
-                                        onClick={() => handleReleaseQuarantine(acc.id)}
-                                        className="w-full py-2 px-3 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-xs flex items-center justify-center gap-1.5"
-                                      >
-                                        <Unlock className="w-3.5 h-3.5" /> 🔓 Mở khóa sớm (Đã giải checkpoint)
-                                      </button>
-                                    </div>
-                                  </div>
-                                );
-                              })
-                          )}
-                        </div>
+                        <button
+                          onClick={() => handleDeleteFbAccount(acc.id, acc.port, acc.name)}
+                          className="p-2 rounded-xl text-rose-500 hover:bg-rose-50 hover:text-rose-700 border border-slate-200 transition-colors cursor-pointer"
+                          title="Xóa tài khoản này khỏi hệ thống"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   </div>
-                ) : (
-                  /* Account Cards Grid for ChatGPT, Fanpage, Personal */
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                    {category.items.map((acc: AccountItem) => {
-                      const isEnabled = acc.enabled !== false;
-                      const isOnline = acc.isReady;
-                      const isConfigured = acc.isConfigured || acc.profileExists;
+                );
+              })}
+            </div>
 
-                      return (
-                        <div
-                          key={acc.id}
-                          className={`liquid-glass-subtle liquid-glass-interactive rounded-2xl p-5 flex flex-col justify-between gap-4 border transition-all ${
-                            !isEnabled ? 'opacity-70 bg-slate-50/50 border-slate-200' : 'border-slate-200/80'
+            {/* Thanh điều khiển Chiến thuật 3 Nhóm cho các tài khoản đăng nhóm */}
+            <div className="mt-4 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-slate-50 via-indigo-50/40 to-slate-50 border border-slate-200 shadow-2xs">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-200/80 flex items-center gap-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                      CHIẾN THUẬT LUÂN PHIÊN ĐĂNG NHÓM
+                    </span>
+                    <span className="text-xs text-slate-500 font-medium">
+                      Tự động đổi ca mỗi ngày & Cách ly bảo vệ an toàn
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600">
+                    Hệ thống sẽ luân phiên đăng bài giữa <b>🟢 Nhóm 1</b> và <b>🟡 Nhóm 2</b> theo ca mỗi ngày để Facebook không đánh dấu hành vi bất thường.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 p-2.5 bg-white rounded-xl border border-slate-200 shadow-2xs shrink-0">
+                  <div className="px-2 border-r border-slate-200 text-left">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Ca chạy hôm nay</span>
+                    <span className="text-xs font-extrabold flex items-center gap-1.5 mt-0.5">
+                      {groupsData.rotation?.activeGroupToday === 'group_1' ? (
+                        <span className="text-emerald-700 flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                          🟢 Nhóm 1 (Đang chạy)
+                        </span>
+                      ) : (
+                        <span className="text-amber-700 flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                          🟡 Nhóm 2 (Đang chạy)
+                        </span>
+                      )}
+                    </span>
+                  </div>
+
+                  <button
+                    onClick={() => handleSwitchActiveGroup()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-xs cursor-pointer"
+                    title="Đổi ca trực ngay lập tức"
+                  >
+                    <ArrowLeftRight className="w-3.5 h-3.5" />
+                    Đổi ca trực
+                  </button>
+
+                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none pl-1">
+                    <input
+                      type="checkbox"
+                      checked={groupsData.rotation?.enabled !== false}
+                      onChange={(e) => handleToggleRotation(e.target.checked)}
+                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>Tự xoay ca mỗi ngày</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================== KHỐI 3: TÀI KHOẢN CHATGPT (TẠO ẢNH AI) ==================== */}
+        {chatgptCategory && (
+          <div className="liquid-glass rounded-3xl p-7 space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-4">
+              <div>
+                <h3 className="font-extrabold text-lg text-slate-900 flex items-center gap-2">
+                  <Bot className="w-5 h-5 text-violet-600" />
+                  {chatgptCategory.categoryName}
+                </h3>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  {chatgptCategory.description}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={() => setIsAddChatGptOpen(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white rounded-xl shadow-md shadow-violet-600/25 transition-all cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" /> Thêm tài khoản ChatGPT
+                </button>
+                <span className="text-xs font-bold px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-full text-slate-700">
+                  {chatgptCategory.items.length} Tài khoản
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {chatgptCategory.items.map((acc: AccountItem) => {
+                const isEnabled = acc.enabled !== false;
+                const isOnline = acc.isReady;
+
+                return (
+                  <div
+                    key={acc.id}
+                    className={`rounded-2xl p-5 border transition-all flex flex-col justify-between gap-4 ${
+                      !isEnabled
+                        ? 'opacity-65 bg-slate-50/70 border-slate-200'
+                        : 'bg-white/95 border-slate-200/90 shadow-sm hover:shadow-md'
+                    }`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[11px] font-extrabold bg-violet-50 text-violet-800 border border-violet-200">
+                          Port: <b className="font-mono">{acc.port}</b>
+                        </span>
+                        {isOnline ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            Online
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
+                            Offline
+                          </span>
+                        )}
+                      </div>
+
+                      <h4 className="font-extrabold text-base text-slate-900 truncate" title={acc.name}>
+                        {acc.name}
+                      </h4>
+                      <span className="text-[11px] text-slate-500 font-mono block">
+                        📁 Profile: <b className="text-slate-800">{acc.profileDir}</b>
+                      </span>
+                      {acc.desc && <p className="text-xs text-slate-500">{acc.desc}</p>}
+                    </div>
+
+                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                      <button
+                        onClick={() => handleOpenChrome(acc.profileDir, acc.port, 'https://chatgpt.com/')}
+                        className="w-full py-2 px-3 rounded-xl bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 border border-violet-200/80 cursor-pointer"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" /> Mở Chrome ChatGPT
+                      </button>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => openEditChatGptModal(acc)}
+                          className="flex-1 py-1.5 px-3 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" /> Sửa
+                        </button>
+                        <button
+                          onClick={() => handleToggleAccount('chatgpt', acc.id, isEnabled)}
+                          className={`py-1.5 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                            isEnabled
+                              ? 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
+                              : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
                           }`}
                         >
-                          <div>
-                            {/* Card Header: Name & Enable Toggle Switch */}
-                            <div className="flex items-center justify-between gap-2 mb-2">
-                              <h4 className="font-extrabold text-sm text-slate-900 flex items-center gap-1.5 truncate" title={acc.name}>
-                                {acc.name}
-                              </h4>
-                              
-                              {/* Toggle Switch */}
-                              <button
-                                onClick={() => handleToggleAccount(category.category, acc.id, isEnabled)}
-                                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold transition-all shadow-2xs flex-shrink-0 whitespace-nowrap ${
-                                  isEnabled 
-                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100' 
-                                    : 'bg-slate-200/70 text-slate-600 border border-slate-300 hover:bg-slate-200'
-                                }`}
-                                title={isEnabled ? 'Bấm để Tắt tài khoản này' : 'Bấm để Bật tài khoản này'}
-                              >
-                                {isEnabled ? (
-                                  <>
-                                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                                    <span>Đang Bật</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                                    <span>Đã Tắt</span>
-                                  </>
-                                )}
-                              </button>
-                            </div>
-
-                            {/* Status Badges: Đăng nhập / Profile / Online */}
-                            <div className="flex flex-wrap gap-1.5 mb-3">
-                              {/* Online / Port Status */}
-                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold ${
-                                isOnline 
-                                  ? 'bg-emerald-100/90 text-emerald-800 border border-emerald-300' 
-                                  : 'bg-slate-100 text-slate-500 border border-slate-200'
-                              }`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-600 animate-pulse' : 'bg-slate-400'}`}></span>
-                                {isOnline ? `Online (Port ${acc.port})` : `Chưa bật (Port ${acc.port})`}
-                              </span>
-
-                              {/* Real-time Login & Profile Status */}
-                              {isOnline ? (
-                                acc.loginStatus === 'logged_in' ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Đã đăng nhập
-                                  </span>
-                                ) : acc.loginStatus === 'not_logged_in' ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 animate-pulse">
-                                    <AlertCircle className="w-3 h-3 text-rose-600" /> Chưa đăng nhập
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                                    <ShieldCheck className="w-3 h-3 text-blue-600" /> Chrome đang mở
-                                  </span>
-                                )
-                              ) : (
-                                acc.profileExists ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200" title="Profile đã lưu trên máy. Bấm 'Mở Chrome Đăng nhập' để kiểm tra tài khoản">
-                                    <ShieldCheck className="w-3 h-3 text-slate-500" /> Profile đã tạo
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200" title="Chưa tạo profile. Bấm 'Mở Chrome Đăng nhập' để tạo và đăng nhập">
-                                    <AlertCircle className="w-3 h-3 text-amber-600" /> Chưa tạo Profile
-                                  </span>
-                                )
-                              )}
-                            </div>
-
-                            <p className="text-xs text-slate-500 mb-3 line-clamp-2">{acc.desc}</p>
-                            
-                            <div className="flex flex-wrap gap-1.5 text-[11px]">
-                              <span className="bg-slate-100/90 text-slate-700 px-2.5 py-0.5 rounded-lg border border-slate-200/80 font-medium">
-                                Port: <b className="font-bold text-slate-900">{acc.port}</b>
-                              </span>
-                              <span className="bg-slate-100/90 text-slate-700 px-2.5 py-0.5 rounded-lg border border-slate-200/80 truncate max-w-[150px] font-medium" title={acc.profileDir}>
-                                Profile: <b className="font-bold text-slate-900">{acc.profileDir}</b>
-                              </span>
-                              {acc.groupCount !== undefined && (
-                                <span className="bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-lg border border-blue-200 font-bold">
-                                  📁 {acc.groupCount} nhóm
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Action Buttons */}
-                          <div className="space-y-2 pt-2 border-t border-slate-100">
-                            <button
-                              onClick={() => handleOpenChrome(acc.profileDir, acc.port, acc.url || 'https://chatgpt.com/')}
-                              className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-blue-500/20 hover:shadow-lg transition-all flex items-center justify-center gap-2"
-                            >
-                              <ExternalLink className="w-3.5 h-3.5" /> Mở Chrome Đăng nhập
-                            </button>
-
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => {
-                                  if (category.category === 'chatgpt') openEditChatGptModal(acc);
-                                  else if (category.category === 'fanpage') openEditFanpageModal(acc);
-                                  else if (category.category === 'personal') openEditPersonalModal(acc);
-                                  else if (category.category === 'groups') openEditAccountModal(acc);
-                                }}
-                                className="flex-1 py-1.5 px-3 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-xs font-bold text-slate-600 transition-all flex items-center justify-center gap-1 shadow-2xs hover:text-blue-600"
-                              >
-                                <Edit3 className="w-3 h-3 text-slate-500" /> Sửa
-                              </button>
-                              {category.category !== 'chatgpt' && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleMarkCheckpoint?.(acc.id, category.category)}
-                                  className="py-1.5 px-2.5 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-bold text-amber-800 transition-all flex items-center gap-1"
-                                  title="Đưa tài khoản này vào mục 'Acc yêu cầu xác thực' và tạm dừng đăng bài"
-                                >
-                                  <ShieldAlert className="w-3.5 h-3.5 text-amber-600" /> Báo checkpoint
-                                </button>
-                              )}
-                              <button
-                                onClick={() => {
-                                  if (category.category === 'chatgpt') handleDeleteChatGpt(acc.id, acc.name);
-                                  else if (category.category === 'fanpage') handleDeleteFanpage(acc.id, acc.name);
-                                  else if (category.category === 'personal') handleDeletePersonal(acc.id, acc.name);
-                                  else if (category.category === 'groups') handleDeleteAccount(acc.id, acc.name);
-                                }}
-                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-all"
-                                title="Xóa tài khoản này"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                          <Power className="w-3.5 h-3.5" />
+                          {isEnabled ? 'Tắt' : 'Bật'}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteChatGpt(acc.id, acc.name)}
+                          className="p-2 rounded-xl text-rose-500 hover:bg-rose-50 hover:text-rose-700 border border-slate-200 transition-colors cursor-pointer"
+                          title="Xóa tài khoản này"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                )}
-
-              </div>
-            ))}
+                );
+              })}
+            </div>
           </div>
+        )}
+      </div>
+
+      {/* ==================== TẤT CẢ CÁC MODAL THÊM / SỬA ==================== */}
       <AccountModals
-        groupsData={groupsData}
-        chatgptAccounts={accounts.find((c) => c.category === 'chatgpt')?.items || []}
+        isFbModalOpen={isFbModalOpen}
+        setIsFbModalOpen={setIsFbModalOpen}
+        isFbModalEditing={isFbModalEditing}
+        fbModalForm={fbModalForm}
+        setFbModalForm={setFbModalForm}
+        handleSaveFbAccount={handleSaveFbAccount}
+        handleAutoDetectFbName={handleAutoDetectFbName}
+        isDetectingName={isDetectingName}
+
         isAddChatGptOpen={isAddChatGptOpen}
         setIsAddChatGptOpen={setIsAddChatGptOpen}
         newChatGptForm={newChatGptForm}
@@ -1005,46 +592,6 @@ export default function AccountsTab({
         editingChatGpt={editingChatGpt}
         setEditingChatGpt={setEditingChatGpt}
         handleUpdateChatGpt={handleUpdateChatGpt}
-        isAddAccountOpen={isAddAccountOpen}
-        setIsAddAccountOpen={setIsAddAccountOpen}
-        newAccountForm={newAccountForm}
-        setNewAccountForm={setNewAccountForm}
-        handleCreateAccount={handleCreateAccount}
-        handleAutoDetectFbName={handleAutoDetectFbName}
-        isDetectingName={isDetectingName}
-        detectedGroupName={detectedGroupName}
-        isEditAccountOpen={isEditAccountOpen}
-        setIsEditAccountOpen={setIsEditAccountOpen}
-        editingAccount={editingAccount}
-        setEditingAccount={setEditingAccount}
-        handleUpdateAccount={handleUpdateAccount}
-        isAddFanpageOpen={isAddFanpageOpen}
-        setIsAddFanpageOpen={setIsAddFanpageOpen}
-        newFanpageForm={newFanpageForm}
-        setNewFanpageForm={setNewFanpageForm}
-        handleCreateFanpage={handleCreateFanpage}
-        handleAutoDetectPageName={handleAutoDetectPageName}
-        isEditFanpageOpen={isEditFanpageOpen}
-        setIsEditFanpageOpen={setIsEditFanpageOpen}
-        editingFanpage={editingFanpage}
-        setEditingFanpage={setEditingFanpage}
-        handleUpdateFanpage={handleUpdateFanpage}
-        isAddPersonalOpen={isAddPersonalOpen}
-        setIsAddPersonalOpen={setIsAddPersonalOpen}
-        newPersonalForm={newPersonalForm}
-        setNewPersonalForm={setNewPersonalForm}
-        handleCreatePersonal={handleCreatePersonal}
-        handleAutoDetectPersonalName={handleAutoDetectPersonalName}
-        isEditPersonalOpen={isEditPersonalOpen}
-        setIsEditPersonalOpen={setIsEditPersonalOpen}
-        editingPersonal={editingPersonal}
-        setEditingPersonal={setEditingPersonal}
-        handleUpdatePersonal={handleUpdatePersonal}
-        isAddUnifiedFbOpen={isAddUnifiedFbOpen}
-        setIsAddUnifiedFbOpen={setIsAddUnifiedFbOpen}
-        unifiedFbForm={unifiedFbForm}
-        setUnifiedFbForm={setUnifiedFbForm}
-        handleCreateUnifiedFb={handleCreateUnifiedFb}
       />
     </>
   );

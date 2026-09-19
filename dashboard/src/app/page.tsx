@@ -78,6 +78,7 @@ import { parseErrorMessage } from '@/lib/error-parser';
 import OverviewTab from '@/components/tabs/OverviewTab';
 import AnalyticsTab from '@/components/tabs/AnalyticsTab';
 import AccountsTab from '@/components/tabs/AccountsTab';
+import { FbModalFormData } from '@/components/modals/AccountModals';
 import CredentialsTab from '@/components/tabs/CredentialsTab';
 import GroupsTab from '@/components/tabs/GroupsTab';
 import ScheduleTab from '@/components/tabs/ScheduleTab';
@@ -362,9 +363,22 @@ export default function DashboardPage() {
   const [editingFanpage, setEditingFanpage] = useState<{ id: string; name: string; pageUrl: string; profileDir: string; port: number; description: string; enabled: boolean } | null>(null);
   const [isDetectingName, setIsDetectingName] = useState<boolean>(false);
   const [detectedGroupName, setDetectedGroupName] = useState<string>('');
-  const [isAddUnifiedFbOpen, setIsAddUnifiedFbOpen] = useState(false);
-  const [unifiedFbForm, setUnifiedFbForm] = useState({
-    name: '', profileUrl: '', enableFanpage: false, fanpageUrlsText: '', enableGroups: false, groupUrlsText: '', profileDir: '',
+
+  // Unified Facebook Account Modal State
+  const [isFbModalOpen, setIsFbModalOpen] = useState(false);
+  const [isFbModalEditing, setIsFbModalEditing] = useState(false);
+  const [fbModalForm, setFbModalForm] = useState<FbModalFormData>({
+    id: '',
+    name: '',
+    url: '',
+    port: 9223,
+    profileDir: 'n8n-fb-profile-9223',
+    canPostFanpage: true,
+    fanpageUrl: '',
+    canPostGroup: true,
+    groupUrlsText: '',
+    roleGroup: 'group_1',
+    enabled: true,
   });
 
   // Modals state - Personal Accounts
@@ -1493,7 +1507,7 @@ export default function DashboardPage() {
           setEditingAccount(prev => prev ? ({ ...prev, name: data.name }) : null);
           showToast(`Đã cập nhật tên: "${data.name}"`, 'success');
         } else if (targetForm === 'unifiedFb') {
-          setUnifiedFbForm((prev) => ({ ...prev, name: data.name }));
+          setFbModalForm((prev) => ({ ...prev, name: data.name }));
           showToast(`Đã tự động nhận diện tên: "${data.name}"`, 'success');
         }
       }
@@ -1501,6 +1515,135 @@ export default function DashboardPage() {
       // ignore
     } finally {
       setIsDetectingName(false);
+    }
+  };
+
+  // Unified Facebook Account Handlers
+  const openAddFbModal = () => {
+    const usedPorts = new Set<number>();
+    (accounts || []).forEach(cat => {
+      (cat.items || []).forEach(it => {
+        if (it.port) usedPorts.add(Number(it.port));
+      });
+    });
+    let nextPort = 9223;
+    while (usedPorts.has(nextPort)) nextPort++;
+
+    setFbModalForm({
+      id: '',
+      name: '',
+      url: '',
+      port: nextPort,
+      profileDir: `n8n-fb-profile-${nextPort}`,
+      canPostFanpage: true,
+      fanpageUrl: '',
+      canPostGroup: true,
+      groupUrlsText: '',
+      roleGroup: 'group_1',
+      enabled: true,
+    });
+    setIsFbModalEditing(false);
+    setIsFbModalOpen(true);
+  };
+
+  const openEditFbModal = (acc: AccountItem) => {
+    const grpAcc = (groupsData.accounts || []).find(a => String(a.id) === String(acc.rawId || acc.id) || a.name === acc.name);
+    const grpUrlsText = grpAcc?.groupUrls ? grpAcc.groupUrls.join('\n') : (acc.groupUrls ? acc.groupUrls.join('\n') : '');
+
+    setFbModalForm({
+      id: acc.rawId || acc.id,
+      name: acc.name,
+      url: acc.pageUrl || acc.profileUrl || acc.url || 'https://www.facebook.com/',
+      port: acc.port,
+      profileDir: acc.profileDir || `n8n-fb-profile-${acc.port}`,
+      canPostFanpage: acc.canPostFanpage !== false,
+      fanpageUrl: acc.pageUrl || '',
+      canPostGroup: acc.canPostGroup !== false,
+      groupUrlsText: grpUrlsText,
+      roleGroup: acc.roleGroup || grpAcc?.roleGroup || 'group_1',
+      enabled: acc.enabled !== false,
+    });
+    setIsFbModalEditing(true);
+    setIsFbModalOpen(true);
+  };
+
+  const handleSaveFbAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save_unified_fb_account',
+          ...fbModalForm,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message || 'Đã lưu tài khoản Facebook thành công!', 'success');
+        setIsFbModalOpen(false);
+        fetchAccounts();
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi lưu tài khoản Facebook', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    }
+  };
+
+  const handleDeleteFbAccount = async (id: string, port: number, name: string) => {
+    if (!confirm(`Bạn có chắc chắn muốn xóa tài khoản Facebook "${name}" (Port ${port})?`)) return;
+    try {
+      const res = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete_unified_fb_account',
+          id,
+          port,
+          name,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message || 'Đã xóa tài khoản Facebook', 'success');
+        fetchAccounts();
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi xóa tài khoản', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    }
+  };
+
+  const handleToggleFbAccount = async (id: string, port: number, currentEnabled: boolean) => {
+    const nextEnabled = !currentEnabled;
+    try {
+      const res = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'toggle_unified_fb_account',
+          id,
+          port,
+          enabled: nextEnabled,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message || `Đã ${nextEnabled ? 'bật' : 'tắt'} tài khoản Facebook`, 'success');
+        fetchAccounts();
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi cập nhật', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
     }
   };
 
@@ -1647,35 +1790,6 @@ export default function DashboardPage() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       showToast(msg, 'error');
-    }
-  };
-
-  const handleCreateUnifiedFb = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const splitUrls = (value: string) => value.split(/\r?\n/).map((url) => url.trim()).filter(Boolean);
-    try {
-      const res = await fetch('/api/accounts', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'add_unified_facebook_account',
-          name: unifiedFbForm.name,
-          profileUrl: unifiedFbForm.profileUrl,
-          enableFanpage: unifiedFbForm.enableFanpage,
-          fanpageUrls: splitUrls(unifiedFbForm.fanpageUrlsText),
-          enableGroups: unifiedFbForm.enableGroups,
-          groupUrls: splitUrls(unifiedFbForm.groupUrlsText),
-          profileDir: unifiedFbForm.profileDir,
-        }),
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'Không thể thêm tài khoản Facebook');
-      showToast(data.message, 'success');
-      setIsAddUnifiedFbOpen(false);
-      setUnifiedFbForm({ name: '', profileUrl: '', enableFanpage: false, fanpageUrlsText: '', enableGroups: false, groupUrlsText: '', profileDir: '' });
-      fetchAccounts();
-      fetchGroups();
-    } catch (error: unknown) {
-      showToast(error instanceof Error ? error.message : 'Không thể thêm tài khoản Facebook', 'error');
     }
   };
 
@@ -2875,14 +2989,23 @@ export default function DashboardPage() {
             handleToggleRotation={handleToggleRotation}
             fetchAccounts={fetchAccounts}
             handleOpenChrome={handleOpenChrome}
-            handleDeleteAccount={handleDeleteAccount}
             handleDeleteChatGpt={handleDeleteChatGpt}
-            handleDeleteFanpage={handleDeleteFanpage}
-            handleDeletePersonal={handleDeletePersonal}
             handleToggleAccount={handleToggleAccount}
-            handleMarkCheckpoint={handleMarkCheckpoint}
             handleResolveCheckpoint={handleResolveCheckpoint}
-            setDetectedGroupName={setDetectedGroupName}
+
+            isFbModalOpen={isFbModalOpen}
+            setIsFbModalOpen={setIsFbModalOpen}
+            isFbModalEditing={isFbModalEditing}
+            fbModalForm={fbModalForm}
+            setFbModalForm={setFbModalForm}
+            handleSaveFbAccount={handleSaveFbAccount}
+            handleDeleteFbAccount={handleDeleteFbAccount}
+            handleToggleFbAccount={handleToggleFbAccount}
+            openAddFbModal={openAddFbModal}
+            openEditFbModal={openEditFbModal}
+            handleAutoDetectFbName={handleAutoDetectFbName}
+            isDetectingName={isDetectingName}
+
             isAddChatGptOpen={isAddChatGptOpen}
             setIsAddChatGptOpen={setIsAddChatGptOpen}
             newChatGptForm={newChatGptForm}
@@ -2893,49 +3016,6 @@ export default function DashboardPage() {
             editingChatGpt={editingChatGpt}
             setEditingChatGpt={setEditingChatGpt}
             handleUpdateChatGpt={handleUpdateChatGpt}
-            isAddAccountOpen={isAddAccountOpen}
-            setIsAddAccountOpen={setIsAddAccountOpen}
-            newAccountForm={newAccountForm}
-            setNewAccountForm={setNewAccountForm}
-            handleCreateAccount={handleCreateAccount}
-            handleAutoDetectFbName={handleAutoDetectFbName}
-            isDetectingName={isDetectingName}
-            detectedGroupName={detectedGroupName}
-            isEditAccountOpen={isEditAccountOpen}
-            setIsEditAccountOpen={setIsEditAccountOpen}
-            editingAccount={editingAccount}
-            setEditingAccount={setEditingAccount}
-            handleUpdateAccount={handleUpdateAccount}
-            isAddFanpageOpen={isAddFanpageOpen}
-            setIsAddFanpageOpen={(open: boolean) => {
-              if (open) openAddFanpageModal();
-              else setIsAddFanpageOpen(false);
-            }}
-            newFanpageForm={newFanpageForm}
-            setNewFanpageForm={setNewFanpageForm}
-            handleCreateFanpage={handleCreateFanpage}
-            handleAutoDetectPageName={(url, isEdit) => handleAutoDetectFbName(url, isEdit ? 'editFanpage' : 'newFanpage')}
-            isEditFanpageOpen={isEditFanpageOpen}
-            setIsEditFanpageOpen={setIsEditFanpageOpen}
-            editingFanpage={editingFanpage}
-            setEditingFanpage={setEditingFanpage}
-            handleUpdateFanpage={handleUpdateFanpage}
-            isAddPersonalOpen={isAddPersonalOpen}
-            setIsAddPersonalOpen={setIsAddPersonalOpen}
-            newPersonalForm={newPersonalForm}
-            setNewPersonalForm={setNewPersonalForm}
-            handleCreatePersonal={handleCreatePersonal}
-            handleAutoDetectPersonalName={(url, isEdit) => handleAutoDetectFbName(url, isEdit ? 'editPersonal' : 'newPersonal')}
-            isEditPersonalOpen={isEditPersonalOpen}
-            setIsEditPersonalOpen={setIsEditPersonalOpen}
-            editingPersonal={editingPersonal}
-            setEditingPersonal={setEditingPersonal}
-            handleUpdatePersonal={handleUpdatePersonal}
-            isAddUnifiedFbOpen={isAddUnifiedFbOpen}
-            setIsAddUnifiedFbOpen={setIsAddUnifiedFbOpen}
-            unifiedFbForm={unifiedFbForm}
-            setUnifiedFbForm={setUnifiedFbForm}
-            handleCreateUnifiedFb={handleCreateUnifiedFb}
           />
         )}
 

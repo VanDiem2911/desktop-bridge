@@ -73,7 +73,11 @@ export interface AccountItem {
   checkpointReason?: string;
   checkpointUrl?: string;
   checkpointAt?: string;
-  originalCategory?: 'fanpage' | 'groups' | 'personal' | 'chatgpt';
+  originalCategory?: 'facebook' | 'fanpage' | 'groups' | 'personal' | 'chatgpt';
+  canPostFanpage?: boolean;
+  canPostGroup?: boolean;
+  groupUrls?: string[];
+  roleGroup?: string;
 }
 
 export interface AccountCategory {
