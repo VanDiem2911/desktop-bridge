@@ -129,9 +129,9 @@ export default function DashboardPage() {
     groqModel: 'llama-3.3-70b-versatile',
     scheduleTimes: ['08:00', '16:00'],
     channelSchedules: {
-      fanpage: { enabled: true, times: ['08:00', '16:00'], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string>([]) },
-      groups: { enabled: true, times: ['09:30', '14:00', '20:00'], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string>([]) },
-      personal: { enabled: false, times: [] as string[], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string>([]) },
+      fanpage: { enabled: true, times: ['08:00', '16:00'], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string | string[]>([]), accountsByTime: Object.fromEntries<string[]>([]) },
+      groups: { enabled: true, times: ['09:30', '14:00', '20:00'], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string | string[]>([]), accountsByTime: Object.fromEntries<string[]>([]) },
+      personal: { enabled: false, times: [] as string[], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string | string[]>([]), accountsByTime: Object.fromEntries<string[]>([]) },
     },
     channels: { fanpage: true, groups: true, personal: false },
     aspectRatio: '4:5',
@@ -1075,22 +1075,94 @@ export default function DashboardPage() {
 
   const handleSlotAccountChange = (channelKey: 'fanpage' | 'groups' | 'personal', time: string, accountId: string) => {
     const channel = scheduleConfig.channelSchedules?.[channelKey] || { enabled: true, times: [] };
+    const newAccountVal = accountId ? [accountId] : [];
     const newCfg = {
       ...scheduleConfig,
       channelSchedules: {
         ...scheduleConfig.channelSchedules,
         [channelKey]: {
           ...channel,
+          accountsByTime: {
+            ...(channel.accountsByTime || {}),
+            [time]: newAccountVal,
+          },
           accountByTime: {
             ...(channel.accountByTime || {}),
-            [time]: accountId,
+            [time]: newAccountVal,
           },
         },
       },
     };
     setScheduleConfig(newCfg);
     handleSaveScheduleConfig(newCfg);
-    showToast(`Đã lưu tài khoản đăng bài cho khung giờ ${time}!`, 'success');
+  };
+
+  const handleSlotAccountsToggle = (
+    channelKey: 'fanpage' | 'groups' | 'personal',
+    time: string,
+    accountId: string
+  ) => {
+    const channel = scheduleConfig.channelSchedules?.[channelKey] || { enabled: true, times: [] };
+    const rawSetting = channel.accountsByTime?.[time] ?? channel.accountByTime?.[time];
+    const currentList: string[] = Array.isArray(rawSetting)
+      ? [...rawSetting]
+      : (rawSetting ? [String(rawSetting)] : []);
+
+    let updatedList: string[];
+    if (currentList.includes(accountId)) {
+      updatedList = currentList.filter((id) => id !== accountId);
+    } else {
+      updatedList = [...currentList, accountId];
+    }
+
+    const newCfg = {
+      ...scheduleConfig,
+      channelSchedules: {
+        ...scheduleConfig.channelSchedules,
+        [channelKey]: {
+          ...channel,
+          accountsByTime: {
+            ...(channel.accountsByTime || {}),
+            [time]: updatedList,
+          },
+          accountByTime: {
+            ...(channel.accountByTime || {}),
+            [time]: updatedList,
+          },
+        },
+      },
+    };
+    setScheduleConfig(newCfg);
+    handleSaveScheduleConfig(newCfg);
+    showToast(`Đã cập nhật tài khoản cho khung giờ ${time} (${updatedList.length} nick)!`, 'success');
+  };
+
+  const handleSlotAccountsSet = (
+    channelKey: 'fanpage' | 'groups' | 'personal',
+    time: string,
+    accountIds: string[]
+  ) => {
+    const channel = scheduleConfig.channelSchedules?.[channelKey] || { enabled: true, times: [] };
+    const newCfg = {
+      ...scheduleConfig,
+      channelSchedules: {
+        ...scheduleConfig.channelSchedules,
+        [channelKey]: {
+          ...channel,
+          accountsByTime: {
+            ...(channel.accountsByTime || {}),
+            [time]: accountIds,
+          },
+          accountByTime: {
+            ...(channel.accountByTime || {}),
+            [time]: accountIds,
+          },
+        },
+      },
+    };
+    setScheduleConfig(newCfg);
+    handleSaveScheduleConfig(newCfg);
+    showToast(`Đã lưu danh sách tài khoản cho khung giờ ${time}!`, 'success');
   };
 
   const renderSlotSheetSelect = (channelKey: 'fanpage' | 'groups' | 'personal', time: string) => {
@@ -1114,7 +1186,7 @@ export default function DashboardPage() {
   const handleAddChannelTime = (
     channelKey: 'fanpage' | 'groups' | 'personal',
     timeStr: string,
-    targetAccountId?: string,
+    targetAccountIds?: string[] | string,
     targetSheet?: string
   ) => {
     if (!timeStr) return;
@@ -1123,6 +1195,10 @@ export default function DashboardPage() {
       return showToast('Mốc giờ này đã có trong danh sách kênh!', 'info');
     }
     const updatedTimes = [...currentChannel.times, timeStr].sort();
+    const accountIdsArray: string[] = Array.isArray(targetAccountIds)
+      ? targetAccountIds
+      : (targetAccountIds ? [targetAccountIds] : []);
+
     const updatedChannelSchedules = {
       ...scheduleConfig.channelSchedules,
       [channelKey]: {
@@ -1133,16 +1209,20 @@ export default function DashboardPage() {
           [timeStr]: targetSheet || scheduleConfig.googleSheets?.channelSheetMapping?.[channelKey]
             || scheduleConfig.googleSheets?.sheetName || 'topics',
         },
+        accountsByTime: {
+          ...(currentChannel.accountsByTime || {}),
+          ...(accountIdsArray.length > 0 ? { [timeStr]: accountIdsArray } : {}),
+        },
         accountByTime: {
           ...(currentChannel.accountByTime || {}),
-          ...(targetAccountId ? { [timeStr]: targetAccountId } : {}),
+          ...(accountIdsArray.length > 0 ? { [timeStr]: accountIdsArray } : {}),
         },
       },
     };
     const newCfg = { ...scheduleConfig, channelSchedules: updatedChannelSchedules };
     setScheduleConfig(newCfg);
     handleSaveScheduleConfig(newCfg);
-    showToast(`Đã thêm mốc giờ ${timeStr} cho kênh ${channelKey.toUpperCase()}!`, 'success');
+    showToast(`Đã thêm mốc giờ ${timeStr} cho kênh ${channelKey.toUpperCase()} (${accountIdsArray.length > 0 ? accountIdsArray.length + ' nick' : 'Tự động'})!`, 'success');
   };
 
   const handleToggleChannel = (channelKey: 'fanpage' | 'groups' | 'personal') => {
@@ -3191,6 +3271,8 @@ export default function DashboardPage() {
             handleRemoveChannelTime={handleRemoveChannelTime}
             handleSlotSheetChange={handleSlotSheetChange}
             handleSlotAccountChange={handleSlotAccountChange}
+            handleSlotAccountsToggle={handleSlotAccountsToggle}
+            handleSlotAccountsSet={handleSlotAccountsSet}
             renderSlotSheetSelect={renderSlotSheetSelect}
             accounts={accounts}
             handleTriggerAutoPilot={handleTriggerAutoPilot}

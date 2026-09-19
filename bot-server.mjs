@@ -1147,13 +1147,21 @@ async function checkAutoPilotSchedule() {
           const sheetName = channelSchedules[channel]?.sheetByTime?.[vnTimeStr]
             || scheduleConfig.googleSheets?.channelSheetMapping?.[channel]
             || scheduleConfig.googleSheets?.sheetName || 'topics';
-          const targetAccountId = channelSchedules[channel]?.accountByTime?.[vnTimeStr] || null;
+          const rawAccountSetting = channelSchedules[channel]?.accountsByTime?.[vnTimeStr]
+            ?? channelSchedules[channel]?.accountByTime?.[vnTimeStr];
 
-          console.log(`[Scheduler] Đang chạy kênh "${channel}" khung giờ ${vnTimeStr} (Sheet: "${sheetName}", Tài khoản: ${targetAccountId || 'Tự động'})...`);
+          let targetAccounts = null;
+          if (Array.isArray(rawAccountSetting)) {
+            targetAccounts = rawAccountSetting.length > 0 ? rawAccountSetting : null;
+          } else if (rawAccountSetting) {
+            targetAccounts = [rawAccountSetting];
+          }
+
+          console.log(`[Scheduler] Đang chạy kênh "${channel}" khung giờ ${vnTimeStr} (Sheet: "${sheetName}", Tài khoản: ${Array.isArray(targetAccounts) ? targetAccounts.join(', ') : (targetAccounts || 'Tự động')})...`);
           try {
             await runAutoPilotCycle({
               channels: { [channel]: true },
-              accounts: { [channel]: targetAccountId },
+              accounts: { [channel]: targetAccounts },
               sheetName,
             });
           } catch (err) {

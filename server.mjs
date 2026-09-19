@@ -910,9 +910,26 @@ async function publishFacebookPage(body) {
   const allAccounts = loadFanpageAccounts();
   let targetAccounts = allAccounts.filter((a) => a.enabled !== false && a.status !== 'checkpoint' && !a.checkpointAt);
 
-  // Nếu request chỉ định rõ accountId cụ thể
-  if (body.accountId) {
-    const specific = allAccounts.find((a) => String(a.id) === String(body.accountId));
+  // Nếu request chỉ định danh sách tài khoản cụ thể (array hoặc single)
+  if (Array.isArray(body.accountIds) && body.accountIds.length > 0) {
+    const selected = allAccounts.filter((a) =>
+      body.accountIds.some((id) =>
+        String(a.id) === String(id) ||
+        `fb_acc_${a.id}` === String(id) ||
+        a.name === String(id) ||
+        (a.port && String(a.port) === String(id))
+      )
+    );
+    if (selected.length > 0) {
+      targetAccounts = selected.filter((a) => a.enabled !== false && a.status !== 'checkpoint' && !a.checkpointAt);
+    }
+  } else if (body.accountId) {
+    const specific = allAccounts.find((a) =>
+      String(a.id) === String(body.accountId) ||
+      `fb_acc_${a.id}` === String(body.accountId) ||
+      a.name === String(body.accountId) ||
+      (a.port && String(a.port) === String(body.accountId))
+    );
     if (specific) {
       if (specific.status === 'checkpoint' || specific.checkpointAt) {
         throw new Error(`Tài khoản "${specific.name}" đang bị Facebook yêu cầu xác thực / Checkpoint. Vui lòng vào mục "Acc yêu cầu xác thực" trên Dashboard để mở Chrome xử lý.`);
@@ -935,8 +952,8 @@ async function publishFacebookPage(body) {
     throw new Error('Không có tài khoản Fanpage nào sẵn sàng để đăng bài (tất cả tài khoản đang bị Facebook yêu cầu xác thực Checkpoint hoặc bị tắt). Hãy vào mục "Acc yêu cầu xác thực" trên Dashboard để mở Chrome xử lý!');
   }
 
-  // Nếu không chỉ định cụ thể tài khoản, chỉ đăng 1 tài khoản đầu tiên chứ không đăng dồn dập toàn bộ tài khoản
-  if (!body.accountId && !body.pageUrl && targetAccounts.length > 1) {
+  // Nếu hoàn toàn KHÔNG chỉ định tài khoản (cả accountId lẫn accountIds đều rỗng), chỉ đăng 1 tài khoản đầu tiên để tránh đăng dồn dập
+  if (!body.accountId && (!body.accountIds || body.accountIds.length === 0) && !body.pageUrl && targetAccounts.length > 1) {
     console.log(`[Fanpage Server 3001] Không chỉ định tài khoản cụ thể. Chỉ đăng tài khoản: "${targetAccounts[0].name}" (Port ${targetAccounts[0].port}) để tránh đăng dồn dập.`);
     targetAccounts = [targetAccounts[0]];
   }
