@@ -141,7 +141,7 @@ export function isPortOpen(port: number, timeoutMs = 800): Promise<boolean> {
 
 export interface ChromeTabStatus {
   isReady: boolean;
-  loginStatus: 'logged_in' | 'not_logged_in' | 'no_tab' | 'offline';
+  loginStatus: 'logged_in' | 'not_logged_in' | 'checkpoint' | 'no_tab' | 'offline';
   currentUrl?: string;
 }
 
@@ -270,7 +270,10 @@ export async function checkChromeTabStatus(
       }
 
       const url = fbTab.url || '';
-      if (url.includes('/login') || url.includes('/checkpoint') || url.includes('login.php')) {
+      if (url.includes('/checkpoint') || url.includes('login.php?next=checkpoint')) {
+        return { isReady: true, loginStatus: 'checkpoint', currentUrl: url };
+      }
+      if (url.includes('/login') || url.includes('login.php')) {
         return { isReady: true, loginStatus: 'not_logged_in', currentUrl: url };
       }
 
@@ -278,21 +281,32 @@ export async function checkChromeTabStatus(
         const evalResult = (await evalCdpJs(
           fbTab.webSocketDebuggerUrl,
           `(() => {
+            const path = window.location.pathname || '';
+            const href = window.location.href || '';
+            const bodyText = (document.body && document.body.innerText) ? document.body.innerText.toLowerCase() : '';
+            const isCp = path.includes('/checkpoint') || href.includes('/checkpoint') ||
+              bodyText.includes('xác nhận bạn là người thật') ||
+              bodyText.includes('hãy xác nhận bạn là người thật') ||
+              bodyText.includes('confirm your identity') ||
+              bodyText.includes('xác minh danh tính');
+            if (isCp) return 'checkpoint';
+
             const isLoginPage = Boolean(
-              window.location.pathname.includes('/login') ||
-              window.location.pathname.includes('/checkpoint') ||
+              path.includes('/login') ||
               document.querySelector('form#login_form, input[name="email"], input[name="pass"], button[name="login"]')
             );
+            if (isLoginPage) return 'not_logged_in';
+
             const hasUserCookie = document.cookie.includes('c_user');
             const hasFbNav = Boolean(document.querySelector('[aria-label*="Trang chủ"], [aria-label*="Home"], [aria-label*="Tài khoản của bạn"], [aria-label*="Your profile"], [role="navigation"]'));
-            return hasUserCookie || (hasFbNav && !isLoginPage);
+            return (hasUserCookie || hasFbNav) ? 'logged_in' : 'not_logged_in';
           })()`,
-        )) as boolean | null;
+        )) as string | null;
 
         if (evalResult !== null) {
           return {
             isReady: true,
-            loginStatus: evalResult ? 'logged_in' : 'not_logged_in',
+            loginStatus: evalResult as 'logged_in' | 'not_logged_in' | 'checkpoint',
             currentUrl: url,
           };
         }

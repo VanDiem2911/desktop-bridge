@@ -20,12 +20,16 @@ import {
   UserPlus,
   KeyRound,
   Sparkles,
+  ShieldAlert,
+  AlertTriangle,
 } from 'lucide-react';
 import { AccountCategory, AccountItem, GroupAccount, CentralPoolItem, RotationConfig } from '@/types/dashboard';
 import AccountModals from '@/components/modals/AccountModals';
 
 interface AccountsTabProps {
   handleSyncAllProfiles?: () => Promise<void>;
+  handleMarkCheckpoint?: (accountId: string, category: string, reason?: string) => Promise<void>;
+  handleResolveCheckpoint?: (accountId: string, category: string) => Promise<void>;
   accounts: AccountCategory[];
   groupsData: {
     accounts?: GroupAccount[];
@@ -119,6 +123,8 @@ export default function AccountsTab({
   handleDeleteFanpage,
   handleDeletePersonal,
   handleToggleAccount,
+  handleMarkCheckpoint,
+  handleResolveCheckpoint,
   handleSyncAllProfiles,
   setDetectedGroupName,
   isDetectingName,
@@ -281,8 +287,101 @@ export default function AccountsTab({
                   </div>
                 </div>
 
-                {/* Account Cards Grid OR 3-Group Rotation Kanban for Groups */}
-                {category.category === 'groups' ? (
+                {/* Account Cards Grid OR 3-Group Rotation Kanban for Groups OR Acc Yêu Cầu Xác Thực */}
+                {category.category === 'checkpoint' ? (
+                  category.items.length === 0 ? (
+                    <div className="p-6 rounded-2xl bg-emerald-50/80 border border-emerald-200/90 flex flex-col sm:flex-row items-center justify-between gap-4">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-11 h-11 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 shadow-2xs">
+                          <ShieldCheck className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-extrabold text-emerald-900">Tất cả tài khoản Facebook đang an toàn!</h4>
+                          <p className="text-xs text-emerald-700 mt-0.5">Không có tài khoản nào dính checkpoint hay bị Facebook yêu cầu xác minh người thật.</p>
+                        </div>
+                      </div>
+                      <span className="px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-extrabold rounded-full border border-emerald-300 shrink-0">
+                        🟢 0 Checkpoint
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                      {category.items.map((acc: AccountItem) => {
+                        return (
+                          <div
+                            key={acc.id}
+                            className="rounded-2xl p-5 border-2 border-amber-300/90 bg-gradient-to-br from-amber-50/90 via-orange-50/50 to-rose-50/60 shadow-lg shadow-amber-500/10 flex flex-col justify-between gap-4 relative overflow-hidden"
+                          >
+                            {/* Top warning ribbon */}
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-200/90 text-amber-900 border border-amber-300 flex items-center gap-1 shadow-2xs">
+                                <AlertTriangle className="w-3 h-3 text-amber-700" />
+                                {acc.originalCategory === 'fanpage' ? '📄 FANPAGE' : acc.originalCategory === 'groups' ? '👥 NHÓM FACEBOOK' : '👤 CÁ NHÂN'}
+                              </span>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping"></span>
+                                CẦN XÁC THỰC
+                              </span>
+                            </div>
+
+                            <div className="space-y-2.5">
+                              <div>
+                                <h4 className="font-extrabold text-base text-slate-900 flex items-center gap-1.5 truncate" title={acc.name}>
+                                  {acc.name}
+                                </h4>
+                                <span className="text-[11px] text-slate-500 font-mono block mt-0.5">
+                                  📁 Profile: <b className="text-slate-800">{acc.profileDir}</b> (Port: <b>{acc.port}</b>)
+                                </span>
+                              </div>
+
+                              <div className="p-3 rounded-xl bg-white/90 border border-amber-200/90 text-xs text-amber-950 space-y-1.5 shadow-2xs">
+                                <div className="font-extrabold text-rose-800 flex items-start gap-1.5">
+                                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                                  <span>{acc.checkpointReason || 'Facebook yêu cầu: "Hãy xác nhận bạn là người thật để sử dụng trang cá nhân"'}</span>
+                                </div>
+                                <p className="text-[11px] text-slate-600">
+                                  Tài khoản đã được <b>rút khỏi danh sách đăng bài</b> để tránh bị khóa vĩnh viễn. Vui lòng mở Chrome để bấm xác minh theo yêu cầu của Facebook.
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="space-y-2 pt-2 border-t border-amber-200/80">
+                              <button
+                                onClick={() => handleOpenChrome(acc.profileDir, acc.port, acc.checkpointUrl || acc.currentUrl || 'https://www.facebook.com/')}
+                                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-extrabold shadow-md shadow-blue-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                              >
+                                <ExternalLink className="w-4 h-4" /> Mở Chrome để xác thực ngay
+                              </button>
+
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => handleResolveCheckpoint?.(acc.id, acc.originalCategory || 'fanpage')}
+                                  className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                                  title="Bấm sau khi đã xác thực người thật xong trên Chrome để đưa tài khoản trở lại chỗ đăng Fanpage & Nhóm"
+                                >
+                                  <Unlock className="w-3.5 h-3.5" /> Đã xác thực (Khôi phục)
+                                </button>
+
+                                <button
+                                  onClick={() => {
+                                    if (acc.originalCategory === 'fanpage') handleDeleteFanpage(acc.id, acc.name);
+                                    else if (acc.originalCategory === 'groups') handleDeleteAccount(acc.id, acc.name);
+                                    else if (acc.originalCategory === 'personal') handleDeletePersonal(acc.id, acc.name);
+                                  }}
+                                  className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-all border border-rose-200/70"
+                                  title="Xóa vĩnh viễn tài khoản này nếu không muốn dùng nữa"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
+                ) : category.category === 'groups' ? (
                   <div className="space-y-6">
                     {/* Header: Thanh điều khiển Chiến thuật 3 Nhóm */}
                     <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-slate-50 via-indigo-50/40 to-slate-50 border border-slate-200 shadow-2xs">
@@ -873,6 +972,16 @@ export default function AccountsTab({
                               >
                                 <Edit3 className="w-3 h-3 text-slate-500" /> Sửa
                               </button>
+                              {category.category !== 'chatgpt' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleMarkCheckpoint?.(acc.id, category.category)}
+                                  className="py-1.5 px-2.5 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-bold text-amber-800 transition-all flex items-center gap-1"
+                                  title="Đưa tài khoản này vào mục 'Acc yêu cầu xác thực' và tạm dừng đăng bài"
+                                >
+                                  <ShieldAlert className="w-3.5 h-3.5 text-amber-600" /> Báo checkpoint
+                                </button>
+                              )}
                               <button
                                 onClick={() => {
                                   if (category.category === 'chatgpt') handleDeleteChatGpt(acc.id, acc.name);

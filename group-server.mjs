@@ -106,7 +106,7 @@ function resolveRotationAndQuarantine(config) {
       isDirty = true;
     }
 
-    if (acc.roleGroup === 'quarantine' || acc.quarantineUntil || acc.cooldownUntil) {
+    if ((acc.roleGroup === 'quarantine' || acc.quarantineUntil || acc.cooldownUntil) && acc.status !== 'checkpoint' && !acc.checkpointAt) {
       const qUntilTime = new Date(acc.quarantineUntil || acc.cooldownUntil).getTime();
       if (now >= qUntilTime) {
         const restoredRole = acc.originalRoleGroup || (acc.id === 'acc_2' ? 'group_2' : 'group_1');
@@ -701,11 +701,15 @@ async function ensureJoinedGroup(page, groupUrl) {
 async function detectFacebookWarningOrBlock(page, dialog = null) {
   try {
     const currentUrl = page.url();
-    if (currentUrl.includes('/checkpoint/')) {
-      return 'Tài khoản đang bị Facebook chuyển hướng đến trang Checkpoint (xác minh số điện thoại / danh tính)';
+    if (currentUrl.includes('/checkpoint/') || currentUrl.includes('login.php?next=checkpoint') || currentUrl.includes('checkpoint')) {
+      return 'Tài khoản đang bị Facebook chuyển hướng đến trang Checkpoint (Xác nhận bạn là người thật / xác minh danh tính)';
     }
 
     const warningKeywords = [
+      'xác nhận bạn là người thật',
+      'hãy xác nhận bạn là người thật',
+      'để sử dụng trang cá nhân của mình',
+      'xác minh danh tính',
       'để bảo vệ cộng đồng khỏi spam',
       'giới hạn tần suất bạn đăng bài',
       'giới hạn tần suất',
@@ -780,6 +784,9 @@ async function detectFacebookWarningOrBlock(page, dialog = null) {
     }).catch(() => '');
 
     if (
+      pageSnippet.includes('xác nhận bạn là người thật') ||
+      pageSnippet.includes('hãy xác nhận bạn là người thật') ||
+      pageSnippet.includes('confirm your identity') ||
       pageSnippet.includes('để bảo vệ cộng đồng khỏi spam') ||
       (pageSnippet.includes('giới hạn tần suất') && pageSnippet.includes('thử lại sau')) ||
       pageSnippet.includes('tài khoản của bạn đã bị khóa') ||
@@ -1105,6 +1112,12 @@ async function executeGroupPosting(body) {
   console.log(`[Group Server] 👉 Chế độ luân phiên: ${rotationEnabled ? 'Tự động luân phiên mỗi ngày' : 'Thủ công'}`);
 
   let accountsToRun = (config.accounts || []).filter(acc => {
+    // 0. KIỂM TRA CHECKPOINT / YÊU CẦU XÁC THỰC
+    if (acc.status === 'checkpoint' || acc.checkpointAt) {
+      console.log(`[Group Server] 🛡️ Tài khoản "${acc.name}" ĐANG YÊU CẦU XÁC THỰC CHECKPOINT. Đã đưa ra khỏi danh sách đăng bài nhóm!`);
+      return false;
+    }
+
     // 1. Kiểm tra tài khoản bị tắt thủ công
     if (acc.enabled === false && acc.roleGroup !== 'quarantine') {
       console.log(`[Group Server] ⚪ Tài khoản "${acc.name}" đang bị tắt trên Dashboard. Bỏ qua.`);
@@ -1222,6 +1235,10 @@ async function executeGroupPosting(body) {
         console.error(`👉 Đóng băng toàn bộ hoạt động trong 168 giờ để nhả phạt Facebook an toàn.`);
         console.error(`======================================================\n`);
 
+        const isPreCheckpoint = String(preCheckWarning).toLowerCase().includes('checkpoint') ||
+          String(preCheckWarning).toLowerCase().includes('người thật') ||
+          String(preCheckWarning).toLowerCase().includes('danh tính');
+
         const targetAccInConfig = (config.accounts || []).find(a => String(a.id) === String(account.id));
         if (targetAccInConfig) {
           if (targetAccInConfig.roleGroup !== 'quarantine') {
@@ -1233,7 +1250,12 @@ async function executeGroupPosting(body) {
           targetAccInConfig.quarantineReason = preCheckWarning;
           targetAccInConfig.quarantineAt = new Date().toISOString();
           targetAccInConfig.cooldownUntil = quarantineUntil;
-          targetAccInConfig.status = 'quarantined_7d';
+          targetAccInConfig.status = isPreCheckpoint ? 'checkpoint' : 'quarantined_7d';
+          if (isPreCheckpoint) {
+            targetAccInConfig.checkpointReason = preCheckWarning;
+            targetAccInConfig.checkpointUrl = 'https://www.facebook.com/checkpoint/';
+            targetAccInConfig.checkpointAt = new Date().toISOString();
+          }
           targetAccInConfig.disabledReason = `Facebook cảnh báo: ${preCheckWarning}. Cách ly 7 ngày đến ${quarantineText}`;
           targetAccInConfig.disabledAt = new Date().toISOString();
         }
@@ -1246,7 +1268,12 @@ async function executeGroupPosting(body) {
         account.quarantineReason = preCheckWarning;
         account.quarantineAt = new Date().toISOString();
         account.cooldownUntil = quarantineUntil;
-        account.status = 'quarantined_7d';
+        account.status = isPreCheckpoint ? 'checkpoint' : 'quarantined_7d';
+        if (isPreCheckpoint) {
+          account.checkpointReason = preCheckWarning;
+          account.checkpointUrl = 'https://www.facebook.com/checkpoint/';
+          account.checkpointAt = new Date().toISOString();
+        }
         account.disabledReason = `Facebook cảnh báo: ${preCheckWarning}. Cách ly 7 ngày đến ${quarantineText}`;
         account.disabledAt = new Date().toISOString();
         saveConfig(config);
@@ -1321,6 +1348,10 @@ async function executeGroupPosting(body) {
             console.error(`👉 DỪNG NGAY TẤT CẢ CÁC NHÓM CÒN LẠI ĐỂ TRÁNH BAY NICK!`);
             console.error(`======================================================\n`);
 
+            const isPostCheckpoint = String(groupError.message).toLowerCase().includes('checkpoint') ||
+              String(groupError.message).toLowerCase().includes('người thật') ||
+              String(groupError.message).toLowerCase().includes('danh tính');
+
             const targetAccInConfig = (config.accounts || []).find(a => String(a.id) === String(account.id));
             if (targetAccInConfig) {
               if (targetAccInConfig.roleGroup !== 'quarantine') {
@@ -1332,7 +1363,12 @@ async function executeGroupPosting(body) {
               targetAccInConfig.quarantineReason = groupError.message;
               targetAccInConfig.quarantineAt = new Date().toISOString();
               targetAccInConfig.cooldownUntil = quarantineUntil;
-              targetAccInConfig.status = 'quarantined_7d';
+              targetAccInConfig.status = isPostCheckpoint ? 'checkpoint' : 'quarantined_7d';
+              if (isPostCheckpoint) {
+                targetAccInConfig.checkpointReason = groupError.message;
+                targetAccInConfig.checkpointUrl = 'https://www.facebook.com/checkpoint/';
+                targetAccInConfig.checkpointAt = new Date().toISOString();
+              }
               targetAccInConfig.disabledReason = `Facebook cảnh báo: ${groupError.message}. Cách ly 7 ngày đến ${quarantineText}`;
               targetAccInConfig.disabledAt = new Date().toISOString();
             }
@@ -1345,7 +1381,12 @@ async function executeGroupPosting(body) {
             account.quarantineReason = groupError.message;
             account.quarantineAt = new Date().toISOString();
             account.cooldownUntil = quarantineUntil;
-            account.status = 'quarantined_7d';
+            account.status = isPostCheckpoint ? 'checkpoint' : 'quarantined_7d';
+            if (isPostCheckpoint) {
+              account.checkpointReason = groupError.message;
+              account.checkpointUrl = 'https://www.facebook.com/checkpoint/';
+              account.checkpointAt = new Date().toISOString();
+            }
             account.disabledReason = `Facebook cảnh báo: ${groupError.message}. Cách ly 7 ngày đến ${quarantineText}`;
             account.disabledAt = new Date().toISOString();
             saveConfig(config);

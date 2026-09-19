@@ -19,7 +19,12 @@ interface FanpageAccount {
   pageUrl: string;
   profileDir?: string;
   port?: number;
+  facebookAccountId?: string;
   enabled?: boolean;
+  status?: string;
+  checkpointReason?: string;
+  checkpointUrl?: string;
+  checkpointAt?: string;
   desc?: string;
 }
 
@@ -29,7 +34,12 @@ interface GroupAccount {
   profileUrl?: string;
   profileDir?: string;
   port?: number;
+  facebookAccountId?: string;
   enabled?: boolean;
+  status?: string;
+  checkpointReason?: string;
+  checkpointUrl?: string;
+  checkpointAt?: string;
   roleGroup?: string;
   originalRoleGroup?: string;
   groupUrls?: string[];
@@ -59,10 +69,38 @@ function assignUniqueFacebookProfiles(
 ): boolean {
   const usedPorts = new Set<number>();
   const usedProfiles = new Set<string>();
+  const profilesByFacebookAccount = new Map<string, { port: number; profileDir: string }>();
   let nextPort = 9223;
   let changed = false;
 
   for (const account of [...fanpages, ...groups]) {
+    const facebookAccountId = typeof account.facebookAccountId === 'string' ? account.facebookAccountId : '';
+    const linkedProfile = facebookAccountId ? profilesByFacebookAccount.get(facebookAccountId) : undefined;
+    if (linkedProfile) {
+      if (account.port !== linkedProfile.port || account.profileDir !== linkedProfile.profileDir) {
+        account.port = linkedProfile.port;
+        account.profileDir = linkedProfile.profileDir;
+        changed = true;
+      }
+      continue;
+    }
+
+    const description = typeof account.desc === 'string' ? account.desc : '';
+    const linkedPortMatch = description.match(/(?:Liên kết với tài khoản Facebook|Dùng chung phiên FB).*?Port\s+(\d+)/i);
+    if (linkedPortMatch) {
+      const linkedPort = Number(linkedPortMatch[1]);
+      const linkedProfile = `n8n-fb-profile-${linkedPort}`;
+      if (account.port !== linkedPort || account.profileDir !== linkedProfile) {
+        account.port = linkedPort;
+        account.profileDir = linkedProfile;
+        changed = true;
+      }
+      usedPorts.add(linkedPort);
+      usedProfiles.add(linkedProfile);
+      if (facebookAccountId) profilesByFacebookAccount.set(facebookAccountId, { port: linkedPort, profileDir: linkedProfile });
+      continue;
+    }
+
     const currentPort = Number(account.port);
     const currentProfile = typeof account.profileDir === 'string' ? account.profileDir : '';
     const hasUniquePort = Number.isInteger(currentPort) && currentPort >= 9223 && !usedPorts.has(currentPort);
@@ -71,6 +109,7 @@ function assignUniqueFacebookProfiles(
     if (hasUniquePort && hasUniqueProfile) {
       usedPorts.add(currentPort);
       usedProfiles.add(currentProfile);
+      if (facebookAccountId) profilesByFacebookAccount.set(facebookAccountId, { port: currentPort, profileDir: currentProfile });
       continue;
     }
 
@@ -79,6 +118,7 @@ function assignUniqueFacebookProfiles(
     account.profileDir = `n8n-fb-profile-${nextPort}`;
     usedPorts.add(nextPort);
     usedProfiles.add(`n8n-fb-profile-${nextPort}`);
+    if (facebookAccountId) profilesByFacebookAccount.set(facebookAccountId, { port: nextPort, profileDir: `n8n-fb-profile-${nextPort}` });
     nextPort++;
     changed = true;
   }
@@ -180,8 +220,16 @@ export async function GET() {
         pageUrl,
         desc: (acc.desc as string) || `Link Fanpage: ${pageUrl} (Port ${port})`,
         enabled: acc.enabled !== false,
+        status: (acc.status as string) || 'active',
+        checkpointReason: (acc.checkpointReason as string) || '',
+        checkpointUrl: (acc.checkpointUrl as string) || '',
+        checkpointAt: (acc.checkpointAt as string) || '',
+        originalCategory: 'fanpage' as const,
         profileExists,
         isConfigured: Boolean(pageUrl && pageUrl.startsWith('https://www.facebook.com/')),
+        loginStatus: undefined as string | undefined,
+        isReady: false,
+        currentUrl: undefined as string | undefined,
       };
     });
 
@@ -203,9 +251,17 @@ export async function GET() {
         url: 'https://www.facebook.com/',
         groupCount: groupUrls.length,
         enabled: acc.enabled !== false,
+        status: (acc.status as string) || (acc.roleGroup === 'quarantine' ? 'checkpoint' : 'active'),
+        checkpointReason: (acc.checkpointReason as string) || (acc.quarantineReason as string) || '',
+        checkpointUrl: (acc.checkpointUrl as string) || '',
+        checkpointAt: (acc.checkpointAt as string) || '',
+        originalCategory: 'groups' as const,
         profileExists,
         isConfigured,
         desc: `Profile Chrome riêng biệt số ${num}`,
+        loginStatus: undefined as string | undefined,
+        isReady: false,
+        currentUrl: undefined as string | undefined,
       };
     });
 
@@ -226,12 +282,82 @@ export async function GET() {
         profileUrl: pUrl,
         desc: (acc.description as string) || `Trang cá nhân: ${pUrl} (Port ${port})`,
         enabled: acc.enabled !== false,
+        status: (acc.status as string) || 'active',
+        checkpointReason: (acc.checkpointReason as string) || '',
+        checkpointUrl: (acc.checkpointUrl as string) || '',
+        checkpointAt: (acc.checkpointAt as string) || '',
+        originalCategory: 'personal' as const,
         profileExists: pExists,
         isConfigured: Boolean(pUrl && pUrl.startsWith('https://www.facebook.com/')),
+        loginStatus: undefined as string | undefined,
+        isReady: false,
+        currentUrl: undefined as string | undefined,
       };
     });
 
+    // Kiểm tra trạng thái port online & trạng thái tab login qua CDP song song
+    const allFbAndGptItems = [...chatgptItems, ...fanpageItems, ...groupItems, ...personalItems];
+    const checkPromises: Promise<void>[] = [];
+    for (const item of allFbAndGptItems) {
+      const isGpt = item.id.startsWith('gpt_');
+      const service = isGpt ? 'chatgpt' : 'facebook';
+      checkPromises.push(
+        (async () => {
+          const status = await checkChromeTabStatus(item.port, service);
+          const itemObj = item as Record<string, unknown>;
+          itemObj.isReady = status.isReady;
+          itemObj.loginStatus = status.loginStatus;
+          itemObj.currentUrl = status.currentUrl;
+
+          if (status.loginStatus === 'checkpoint') {
+            itemObj.status = 'checkpoint';
+            if (!itemObj.checkpointReason) {
+              itemObj.checkpointReason = 'Phát hiện trang Checkpoint: Hãy xác nhận bạn là người thật';
+            }
+            itemObj.checkpointUrl = status.currentUrl;
+          }
+        })(),
+      );
+    }
+    await Promise.all(checkPromises);
+
+    // Tách riêng các tài khoản bị checkpoint ra khỏi Fanpage & Nhóm
+    const checkpointItems: Record<string, unknown>[] = [];
+    const activeFanpages: Record<string, unknown>[] = [];
+    const activeGroups: Record<string, unknown>[] = [];
+    const activePersonals: Record<string, unknown>[] = [];
+
+    for (const item of fanpageItems) {
+      if (item.status === 'checkpoint' || item.loginStatus === 'checkpoint') {
+        checkpointItems.push({ ...item, originalCategory: 'fanpage' });
+      } else {
+        activeFanpages.push(item);
+      }
+    }
+
+    for (const item of groupItems) {
+      if (item.status === 'checkpoint' || item.loginStatus === 'checkpoint') {
+        checkpointItems.push({ ...item, originalCategory: 'groups' });
+      } else {
+        activeGroups.push(item);
+      }
+    }
+
+    for (const item of personalItems) {
+      if (item.status === 'checkpoint' || item.loginStatus === 'checkpoint') {
+        checkpointItems.push({ ...item, originalCategory: 'personal' });
+      } else {
+        activePersonals.push(item);
+      }
+    }
+
     const categories = [
+      {
+        category: 'checkpoint',
+        categoryName: `🛡️ Acc Yêu Cầu Xác Thực (${checkpointItems.length} Tài khoản dính Checkpoint)`,
+        description: 'Các tài khoản Facebook bị văng vào trang xác minh danh tính/người thật. Đã đưa ra khỏi danh sách đăng bài Fanpage & Nhóm để đảm bảo an toàn.',
+        items: checkpointItems,
+      },
       {
         category: 'chatgpt',
         categoryName: `🤖 Tài khoản ChatGPT (${chatgptItems.length} Tài khoản Xen Kẽ)`,
@@ -240,35 +366,26 @@ export async function GET() {
       },
       {
         category: 'fanpage',
-        categoryName: `📄 Facebook Fanpage (${fanpageItems.length} Tài khoản Fanpage)`,
-        description: 'Profile Chrome xuất bản bài viết lên Fanpage',
-        items: fanpageItems,
+        categoryName: `📄 Facebook Fanpage (${activeFanpages.length} Tài khoản sẵn sàng đăng)`,
+        description: 'Profile Chrome xuất bản bài viết lên Fanpage (Đã lọc bỏ các nick bị checkpoint)',
+        items: activeFanpages,
       },
       {
         category: 'groups',
-        categoryName: `👥 Facebook Groups (${groupItems.length} Tài khoản đăng nhóm)`,
-        description: 'Các Profile Chrome riêng biệt để xoay vòng đăng bài nhóm',
-        items: groupItems,
+        categoryName: `👥 Facebook Groups (${activeGroups.length} Tài khoản sẵn sàng đăng nhóm)`,
+        description: 'Các Profile Chrome riêng biệt để xoay vòng đăng bài nhóm (Đã lọc bỏ nick checkpoint)',
+        items: activeGroups,
       },
     ];
 
-    // Kiểm tra trạng thái port online & trạng thái tab login qua CDP song song
-    const checkPromises: Promise<void>[] = [];
-    for (const cat of categories) {
-      const service = cat.category === 'chatgpt' ? 'chatgpt' : 'facebook';
-      for (const item of cat.items) {
-        checkPromises.push(
-          (async () => {
-            const status = await checkChromeTabStatus(item.port, service);
-            const itemObj = item as Record<string, unknown>;
-            itemObj.isReady = status.isReady;
-            itemObj.loginStatus = status.loginStatus;
-            itemObj.currentUrl = status.currentUrl;
-          })(),
-        );
-      }
+    if (activePersonals.length > 0) {
+      categories.push({
+        category: 'personal',
+        categoryName: `👤 Facebook Cá nhân (${activePersonals.length} Tài khoản)`,
+        description: 'Trang cá nhân Facebook',
+        items: activePersonals,
+      });
     }
-    await Promise.all(checkPromises);
 
     return NextResponse.json({ ok: true, categories });
   } catch (error: unknown) {
@@ -391,6 +508,7 @@ export async function POST(req: NextRequest) {
       let targetPort = 9223;
       while (usedPorts.has(targetPort)) targetPort++;
       const targetProfileDir = customProfileDir?.trim() || `n8n-fb-profile-${targetPort}`;
+      const facebookAccountId = `fb_${targetPort}`;
       const parsedFanpageUrls = parseFacebookUrls(fanpageUrls ?? fanpageUrlsText);
       const parsedGroupUrls = parseFacebookUrls(groupUrls ?? groupUrlsText);
 
@@ -416,6 +534,7 @@ export async function POST(req: NextRequest) {
             pageUrl: cleanFpUrl,
             profileDir: targetProfileDir,
             port: targetPort,
+            facebookAccountId,
             enabled: true,
             desc: `Liên kết với tài khoản Facebook: ${name || 'Chính'} (Port ${targetPort})`,
           });
@@ -439,7 +558,9 @@ export async function POST(req: NextRequest) {
           profileUrl: profileUrl?.trim() || undefined,
           profileDir: targetProfileDir,
           port: targetPort,
+          facebookAccountId,
           enabled: true,
+          desc: `Liên kết với tài khoản Facebook: ${name || 'Chính'} (Port ${targetPort})`,
           roleGroup: 'group_1',
           originalRoleGroup: 'group_1',
           groupUrls: parsedGroupUrls,
@@ -577,6 +698,7 @@ export async function POST(req: NextRequest) {
         profileDir: profileDir?.trim() || `n8n-fb-group-profile-${nextIndex}`,
         groupUrls: lines,
       };
+
       config.accounts.push(newAcc);
       writeJsonFile(GROUPS_CONFIG_PATH, config);
       return NextResponse.json({ ok: true, message: `Đã thêm "${newAcc.name}" thành công!`, data: config });
@@ -600,6 +722,118 @@ export async function POST(req: NextRequest) {
       if (enabled !== undefined) target.enabled = Boolean(enabled);
       writeJsonFile(GROUPS_CONFIG_PATH, config);
       return NextResponse.json({ ok: true, message: `Đã cập nhật "${target.name}"!`, data: config });
+    }
+
+    // ================= XỬ LÝ CHECKPOINT / YÊU CẦU XÁC THỰC =================
+    if (action === 'mark_checkpoint') {
+      const { category, accountId, reason, checkpointUrl } = body;
+      const cpReason = reason?.trim() || 'Người dùng báo dính checkpoint (Hãy xác nhận bạn là người thật)';
+      const cpTime = new Date().toISOString();
+
+      if (category === 'fanpage') {
+        const config = getFanpageConfig();
+        const rawId = String(accountId).replace('fanpage_', '');
+        const target = config.accounts.find((a) => String(a.id) === rawId);
+        if (target) {
+          target.status = 'checkpoint';
+          target.checkpointReason = cpReason;
+          target.checkpointUrl = checkpointUrl || '';
+          target.checkpointAt = cpTime;
+          target.enabled = false;
+          writeJsonFile(FANPAGE_CONFIG_PATH, config);
+          return NextResponse.json({ ok: true, message: `Đã đưa Fanpage "${target.name}" vào danh sách "Acc yêu cầu xác thực"` });
+        }
+      } else if (category === 'groups') {
+        const config = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] });
+        const target = (config.accounts || []).find((a) => a.id === accountId);
+        if (target) {
+          if (target.roleGroup !== 'quarantine') {
+            target.originalRoleGroup = target.roleGroup || 'group_1';
+          }
+          target.roleGroup = 'quarantine';
+          target.status = 'checkpoint';
+          target.checkpointReason = cpReason;
+          target.quarantineReason = cpReason;
+          target.checkpointUrl = checkpointUrl || '';
+          target.checkpointAt = cpTime;
+          target.enabled = false;
+          writeJsonFile(GROUPS_CONFIG_PATH, config);
+          return NextResponse.json({ ok: true, message: `Đã đưa tài khoản Group "${target.name}" vào danh sách "Acc yêu cầu xác thực"` });
+        }
+      } else if (category === 'personal') {
+        const config = readJsonFile<{ accounts?: Array<Record<string, unknown>> }>(PERSONAL_CONFIG_PATH, { accounts: [] });
+        const rawId = String(accountId).replace('personal_acc_', '');
+        const target = (config.accounts || []).find((a) => String(a.id) === rawId);
+        if (target) {
+          target.status = 'checkpoint';
+          target.checkpointReason = cpReason;
+          target.checkpointUrl = checkpointUrl || '';
+          target.checkpointAt = cpTime;
+          target.enabled = false;
+          writeJsonFile(PERSONAL_CONFIG_PATH, config);
+          return NextResponse.json({ ok: true, message: `Đã đưa tài khoản cá nhân "${target.name}" vào danh sách "Acc yêu cầu xác thực"` });
+        }
+      }
+
+      return NextResponse.json({ ok: false, error: 'Không tìm thấy tài khoản để đưa vào mục xác thực' }, { status: 404 });
+    }
+
+    if (action === 'resolve_checkpoint') {
+      const { category, accountId } = body;
+      let restoredName = '';
+
+      // Kiểm tra trong Fanpage
+      const fpConfig = getFanpageConfig();
+      const rawFpId = String(accountId).replace('fanpage_', '');
+      const fpTarget = fpConfig.accounts.find((a) => String(a.id) === rawFpId);
+      if (fpTarget) {
+        fpTarget.status = 'active';
+        fpTarget.enabled = true;
+        delete fpTarget.checkpointReason;
+        delete fpTarget.checkpointUrl;
+        delete fpTarget.checkpointAt;
+        writeJsonFile(FANPAGE_CONFIG_PATH, fpConfig);
+        restoredName = fpTarget.name;
+      }
+
+      // Kiểm tra trong Groups
+      const grpConfig = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] });
+      const grpTarget = (grpConfig.accounts || []).find((a) => a.id === accountId);
+      if (grpTarget) {
+        grpTarget.status = 'active';
+        grpTarget.enabled = true;
+        grpTarget.roleGroup = grpTarget.originalRoleGroup || 'group_1';
+        delete grpTarget.checkpointReason;
+        delete grpTarget.quarantineReason;
+        delete grpTarget.quarantineUntil;
+        delete grpTarget.checkpointUrl;
+        delete grpTarget.checkpointAt;
+        writeJsonFile(GROUPS_CONFIG_PATH, grpConfig);
+        restoredName = grpTarget.name;
+      }
+
+      // Kiểm tra trong Personal
+      const persConfig = readJsonFile<{ accounts?: Array<Record<string, unknown>> }>(PERSONAL_CONFIG_PATH, { accounts: [] });
+      const rawPersId = String(accountId).replace('personal_acc_', '');
+      const persTarget = (persConfig.accounts || []).find((a) => String(a.id) === rawPersId);
+      if (persTarget) {
+        persTarget.status = 'active';
+        persTarget.enabled = true;
+        delete persTarget.checkpointReason;
+        delete persTarget.checkpointUrl;
+        delete persTarget.checkpointAt;
+        writeJsonFile(PERSONAL_CONFIG_PATH, persConfig);
+        restoredName = String(persTarget.name || '');
+      }
+
+      if (restoredName) {
+        return NextResponse.json({
+          ok: true,
+          message: `Đã khôi phục tài khoản "${restoredName}" thành công! Tài khoản đã quay trở lại danh sách đăng bài.`,
+        });
+      }
+
+      return NextResponse.json({ ok: false, error: 'Không tìm thấy tài khoản cần khôi phục' }, { status: 404 });
     }
 
     return NextResponse.json({ ok: false, error: 'Action không hợp lệ' }, { status: 400 });

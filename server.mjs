@@ -189,9 +189,40 @@ function loadFanpageAccounts() {
   ];
 }
 
+function markFanpageAccountCheckpoint(accountId, checkpointUrl) {
+  try {
+    if (fs.existsSync(CONFIG_FANPAGE_PATH)) {
+      const parsed = JSON.parse(fs.readFileSync(CONFIG_FANPAGE_PATH, 'utf-8'));
+      if (parsed && Array.isArray(parsed.accounts)) {
+        let changed = false;
+        parsed.accounts = parsed.accounts.map((acc) => {
+          if (acc.id === accountId || (!accountId && acc.enabled !== false)) {
+            changed = true;
+            return {
+              ...acc,
+              status: 'checkpoint',
+              checkpointReason: 'Yêu cầu xác nhận bạn là người thật / danh tính trên Facebook',
+              checkpointUrl: checkpointUrl || 'https://www.facebook.com/checkpoint/',
+              checkpointAt: new Date().toISOString(),
+            };
+          }
+          return acc;
+        });
+        if (changed) {
+          fs.writeFileSync(CONFIG_FANPAGE_PATH, JSON.stringify(parsed, null, 2), 'utf-8');
+          console.log(`[Fanpage Checkpoint] Đã tự động chuyển tài khoản Fanpage ID ${accountId || 'hiện tại'} vào mục "Acc yêu cầu xác thực".`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[Fanpage Checkpoint Update Error]', err.message);
+  }
+}
+
 function loadFanpageConfig() {
   const accounts = loadFanpageAccounts();
-  return accounts.find((a) => a.enabled !== false) || accounts[0];
+  const eligible = accounts.filter((a) => a.status !== 'checkpoint' && !a.checkpointAt);
+  return eligible.find((a) => a.enabled !== false) || eligible[0] || null;
 }
 
 function loadChatGptAccounts() {
@@ -381,6 +412,29 @@ async function openFacebookPage(account, pageUrl) {
   if (page.url().includes('/login')) {
     throw new Error(`Tài khoản ${fbAccount.name} chưa đăng nhập Facebook trên profile ${fbAccount.profileDir}.`);
   }
+
+  const currentUrl = page.url();
+  let isCheckpoint = currentUrl.includes('/checkpoint') || currentUrl.includes('login.php?next=checkpoint');
+  if (!isCheckpoint) {
+    try {
+      const pageText = await page.evaluate(() => (document.body ? document.body.innerText.slice(0, 3000) : '')).catch(() => '');
+      if (
+        pageText.includes('xác nhận bạn là người thật') ||
+        pageText.includes('hãy xác nhận bạn là người thật') ||
+        pageText.includes('để sử dụng trang cá nhân của mình') ||
+        pageText.includes('confirm your identity') ||
+        pageText.includes('xác minh danh tính')
+      ) {
+        isCheckpoint = true;
+      }
+    } catch {}
+  }
+
+  if (isCheckpoint) {
+    markFanpageAccountCheckpoint(account?.id, currentUrl);
+    throw new Error(`Tài khoản [${fbAccount.name}] bị Facebook yêu cầu xác thực / Checkpoint ("Xác nhận bạn là người thật"). Đã tự động chuyển vào mục "Acc yêu cầu xác thực" trên Dashboard và loại khỏi danh sách đăng bài.`);
+  }
+
   await dismissAllPopups(page, 'facebook');
   return { browser, page };
 }
@@ -854,12 +908,17 @@ async function publishSingleFacebookPage(account, { caption, imageBase64, mimeTy
 
 async function publishFacebookPage(body) {
   const allAccounts = loadFanpageAccounts();
-  let targetAccounts = allAccounts.filter((a) => a.enabled !== false);
+  let targetAccounts = allAccounts.filter((a) => a.enabled !== false && a.status !== 'checkpoint' && !a.checkpointAt);
 
   // Nếu request chỉ định rõ accountId cụ thể
   if (body.accountId) {
     const specific = allAccounts.find((a) => String(a.id) === String(body.accountId));
-    if (specific) targetAccounts = [specific];
+    if (specific) {
+      if (specific.status === 'checkpoint' || specific.checkpointAt) {
+        throw new Error(`Tài khoản "${specific.name}" đang bị Facebook yêu cầu xác thực / Checkpoint. Vui lòng vào mục "Acc yêu cầu xác thực" trên Dashboard để mở Chrome xử lý.`);
+      }
+      targetAccounts = [specific];
+    }
   } else if (body.pageUrl && typeof body.pageUrl === 'string' && !allAccounts.some(a => a.pageUrl === body.pageUrl)) {
     // Nếu truyền một pageUrl cụ thể không nằm trong danh sách
     targetAccounts = [{
@@ -873,7 +932,7 @@ async function publishFacebookPage(body) {
   }
 
   if (targetAccounts.length === 0) {
-    throw new Error('Không có tài khoản Fanpage nào đang Bật để đăng bài.');
+    throw new Error('Không có tài khoản Fanpage nào sẵn sàng để đăng bài (tất cả tài khoản đang bị Facebook yêu cầu xác thực Checkpoint hoặc bị tắt). Hãy vào mục "Acc yêu cầu xác thực" trên Dashboard để mở Chrome xử lý!');
   }
 
   console.log(`[Fanpage Server 3001] Bắt đầu đăng bài lên ${targetAccounts.length} tài khoản Fanpage...`);

@@ -2519,6 +2519,49 @@ export default function DashboardPage() {
     }
   };
 
+  const handleMarkCheckpoint = async (accountId: string, category: string, reason?: string) => {
+    if (!confirm('Bạn có chắc muốn đưa tài khoản này vào danh sách "Acc yêu cầu xác thực" và tạm ngưng đăng bài?')) return;
+    try {
+      const res = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'mark_checkpoint', accountId, category, reason }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message, 'success');
+        fetchAccounts();
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi cập nhật', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    }
+  };
+
+  const handleResolveCheckpoint = async (accountId: string, category: string) => {
+    try {
+      const res = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'resolve_checkpoint', accountId, category }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(data.message, 'success');
+        fetchAccounts();
+        fetchGroups();
+      } else {
+        showToast(data.error || 'Lỗi khôi phục', 'error');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, 'error');
+    }
+  };
+
   const handleToggleRotation = async (enabled: boolean) => {
     try {
       const res = await fetch('/api/groups', {
@@ -2869,6 +2912,8 @@ export default function DashboardPage() {
             handleDeleteFanpage={handleDeleteFanpage}
             handleDeletePersonal={handleDeletePersonal}
             handleToggleAccount={handleToggleAccount}
+            handleMarkCheckpoint={handleMarkCheckpoint}
+            handleResolveCheckpoint={handleResolveCheckpoint}
             handleSyncAllProfiles={handleSyncAllProfiles}
             setDetectedGroupName={setDetectedGroupName}
             isAddChatGptOpen={isAddChatGptOpen}

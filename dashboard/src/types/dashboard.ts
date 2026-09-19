@@ -63,12 +63,17 @@ export interface AccountItem {
   profileUrl?: string;
   desc?: string;
   isReady?: boolean;
-  loginStatus?: 'logged_in' | 'not_logged_in' | 'no_tab' | 'offline';
+  loginStatus?: 'logged_in' | 'not_logged_in' | 'checkpoint' | 'no_tab' | 'offline';
   currentUrl?: string;
   profileExists?: boolean;
   isConfigured?: boolean;
   groupCount?: number;
   enabled?: boolean;
+  status?: string;
+  checkpointReason?: string;
+  checkpointUrl?: string;
+  checkpointAt?: string;
+  originalCategory?: 'fanpage' | 'groups' | 'personal' | 'chatgpt';
 }
 
 export interface AccountCategory {
