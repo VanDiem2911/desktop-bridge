@@ -475,18 +475,29 @@ export async function POST(req: NextRequest) {
         finalName = `Facebook Fanpage ${nextId}`;
       }
 
+      const existingFanpages = config.accounts || [];
+      const existingGroups = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] }).accounts || [];
+      const usedPorts = new Set([...existingFanpages, ...existingGroups].map((account) => Number(account.port)).filter(Number.isInteger));
+
+      let targetPort = port ? Number(port) : 0;
+      if (!targetPort) {
+        targetPort = 9223;
+        while (usedPorts.has(targetPort)) targetPort++;
+      }
+      const targetProfileDir = profileDir?.trim() || `n8n-fb-profile-${targetPort}`;
+
       const newAcc: FanpageAccount = {
         id: nextId,
         name: finalName,
         pageUrl: cleanUrl,
-        profileDir: profileDir?.trim() || 'n8n-fb-group-profile-1',
-        port: port ? Number(port) : 9223,
+        profileDir: targetProfileDir,
+        port: targetPort,
         enabled: enabled !== false,
-        desc: description?.trim() || `Fanpage: ${cleanUrl} (Dùng chung phiên FB: Port ${port || 9223})`,
+        desc: description?.trim() || `Profile Chrome riêng cho Fanpage (Port ${targetPort})`,
       };
       config.accounts.push(newAcc);
       writeJsonFile(FANPAGE_CONFIG_PATH, config);
-      return NextResponse.json({ ok: true, message: `Đã thêm Fanpage "${newAcc.name}" thành công!`, data: config });
+      return NextResponse.json({ ok: true, message: `Đã thêm Fanpage "${newAcc.name}" (Port ${targetPort}) thành công!`, data: config });
     }
 
     // ================= TÀI KHOẢN FACEBOOK TOÀN NĂNG (CHO CẢ FANPAGE & GROUPS) =================

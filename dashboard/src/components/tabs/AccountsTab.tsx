@@ -27,7 +27,6 @@ import { AccountCategory, AccountItem, GroupAccount, CentralPoolItem, RotationCo
 import AccountModals from '@/components/modals/AccountModals';
 
 interface AccountsTabProps {
-  handleSyncAllProfiles?: () => Promise<void>;
   handleMarkCheckpoint?: (accountId: string, category: string, reason?: string) => Promise<void>;
   handleResolveCheckpoint?: (accountId: string, category: string) => Promise<void>;
   accounts: AccountCategory[];
@@ -125,7 +124,6 @@ export default function AccountsTab({
   handleToggleAccount,
   handleMarkCheckpoint,
   handleResolveCheckpoint,
-  handleSyncAllProfiles,
   setDetectedGroupName,
   isDetectingName,
   detectedGroupName,
@@ -445,35 +443,24 @@ export default function AccountsTab({
                       </div>
                     </div>
 
-                    {/* BANNER HƯỚNG DẪN ĐĂNG NHẬP 1 LẦN & ĐỒNG BỘ PHIÊN */}
-                    <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-slate-50 border border-blue-200/80 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    {/* BANNER HƯỚNG DẪN DÀN PROFILE ĐỘC LẬP CHỐNG CHECKPOINT CHÉO */}
+                    <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50/90 via-teal-50/70 to-slate-50 border border-emerald-200/80 shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div className="flex items-start gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                          <KeyRound className="w-4 h-4" />
+                        <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                          <ShieldCheck className="w-4 h-4" />
                         </div>
                         <div>
                           <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
-                            <span>Quy trình đăng nhập 1 lần duy nhất</span>
+                            <span>Mỗi tài khoản hoạt động trên Profile Chrome riêng biệt</span>
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                              Đang hoạt động
+                              Độc lập 100%
                             </span>
                           </div>
                           <p className="text-[11px] text-slate-600 mt-0.5">
-                            Bạn chỉ cần đăng nhập Facebook <strong className="text-blue-700">1 lần duy nhất</strong> trên Tài khoản 1. Mọi tài khoản nhóm khác tự động dùng chung phiên đăng nhập này mà không cần nhập mật khẩu hay mã 2FA lại!
+                            Mỗi nick Facebook sử dụng 1 thư mục Profile Chrome và 1 Cổng Port riêng biệt. Tuyệt đối không dùng chung phiên để tránh Checkpoint chéo giữa các nick!
                           </p>
                         </div>
                       </div>
-
-                      {handleSyncAllProfiles && (
-                        <button
-                          onClick={handleSyncAllProfiles}
-                          className="shrink-0 px-3.5 py-2 rounded-xl bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 text-xs font-bold shadow-2xs hover:shadow-xs transition-all flex items-center gap-1.5"
-                          title="Chuyển toàn bộ tài khoản nhóm sang dùng chung phiên đăng nhập của nick FB chính"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                          Đồng bộ toàn bộ tài khoản
-                        </button>
-                      )}
                     </div>
 
                     {/* 3 Columns Kanban Board */}
@@ -566,8 +553,8 @@ export default function AccountsTab({
                                           Profile sẵn sàng
                                         </span>
                                       )}
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-blue-50 text-blue-700 border border-blue-200" title={`Dùng chung phiên Facebook (${acc.profileDir || 'n8n-fb-group-profile-1'})`}>
-                                        <KeyRound className="w-3 h-3 text-blue-600" /> Phiên FB chung
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-slate-50 text-slate-600 border border-slate-200" title={`Profile Chrome riêng: ${acc.profileDir || 'n8n-fb-group-profile'}`}>
+                                        <ShieldCheck className="w-3 h-3 text-emerald-600" /> Profile riêng
                                       </span>
                                     </div>
 
@@ -709,8 +696,8 @@ export default function AccountsTab({
                                           Profile sẵn sàng
                                         </span>
                                       )}
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-blue-50 text-blue-700 border border-blue-200" title={`Dùng chung phiên Facebook (${acc.profileDir || 'n8n-fb-group-profile-1'})`}>
-                                        <KeyRound className="w-3 h-3 text-blue-600" /> Phiên FB chung
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-slate-50 text-slate-600 border border-slate-200" title={`Profile Chrome riêng: ${acc.profileDir || 'n8n-fb-group-profile'}`}>
+                                        <ShieldCheck className="w-3 h-3 text-emerald-600" /> Profile riêng
                                       </span>
                                     </div>
 
