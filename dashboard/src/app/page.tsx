@@ -129,9 +129,9 @@ export default function DashboardPage() {
     groqModel: 'llama-3.3-70b-versatile',
     scheduleTimes: ['08:00', '16:00'],
     channelSchedules: {
-      fanpage: { enabled: true, times: ['08:00', '16:00'], sheetByTime: Object.fromEntries<string>([]) },
-      groups: { enabled: true, times: ['09:30', '14:00', '20:00'], sheetByTime: Object.fromEntries<string>([]) },
-      personal: { enabled: false, times: [] as string[], sheetByTime: Object.fromEntries<string>([]) },
+      fanpage: { enabled: true, times: ['08:00', '16:00'], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string>([]) },
+      groups: { enabled: true, times: ['09:30', '14:00', '20:00'], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string>([]) },
+      personal: { enabled: false, times: [] as string[], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string>([]) },
     },
     channels: { fanpage: true, groups: true, personal: false },
     aspectRatio: '4:5',
@@ -1061,7 +1061,7 @@ export default function DashboardPage() {
 
   // Channel-Specific Schedule Handlers
   const handleSlotSheetChange = (channelKey: 'fanpage' | 'groups' | 'personal', time: string, sheetName: string) => {
-    const channel = scheduleConfig.channelSchedules[channelKey];
+    const channel = scheduleConfig.channelSchedules?.[channelKey] || { enabled: true, times: [] };
     const newCfg = {
       ...scheduleConfig,
       channelSchedules: {
@@ -1071,6 +1071,26 @@ export default function DashboardPage() {
     };
     setScheduleConfig(newCfg);
     handleSaveScheduleConfig(newCfg);
+  };
+
+  const handleSlotAccountChange = (channelKey: 'fanpage' | 'groups' | 'personal', time: string, accountId: string) => {
+    const channel = scheduleConfig.channelSchedules?.[channelKey] || { enabled: true, times: [] };
+    const newCfg = {
+      ...scheduleConfig,
+      channelSchedules: {
+        ...scheduleConfig.channelSchedules,
+        [channelKey]: {
+          ...channel,
+          accountByTime: {
+            ...(channel.accountByTime || {}),
+            [time]: accountId,
+          },
+        },
+      },
+    };
+    setScheduleConfig(newCfg);
+    handleSaveScheduleConfig(newCfg);
+    showToast(`Đã lưu tài khoản đăng bài cho khung giờ ${time}!`, 'success');
   };
 
   const renderSlotSheetSelect = (channelKey: 'fanpage' | 'groups' | 'personal', time: string) => {
@@ -1091,7 +1111,12 @@ export default function DashboardPage() {
     );
   };
 
-  const handleAddChannelTime = (channelKey: 'fanpage' | 'groups' | 'personal', timeStr: string) => {
+  const handleAddChannelTime = (
+    channelKey: 'fanpage' | 'groups' | 'personal',
+    timeStr: string,
+    targetAccountId?: string,
+    targetSheet?: string
+  ) => {
     if (!timeStr) return;
     const currentChannel = scheduleConfig.channelSchedules?.[channelKey] || { enabled: true, times: [] };
     if (currentChannel.times.includes(timeStr)) {
@@ -1105,8 +1130,12 @@ export default function DashboardPage() {
         times: updatedTimes,
         sheetByTime: {
           ...currentChannel.sheetByTime,
-          [timeStr]: scheduleConfig.googleSheets?.channelSheetMapping?.[channelKey]
+          [timeStr]: targetSheet || scheduleConfig.googleSheets?.channelSheetMapping?.[channelKey]
             || scheduleConfig.googleSheets?.sheetName || 'topics',
+        },
+        accountByTime: {
+          ...(currentChannel.accountByTime || {}),
+          ...(targetAccountId ? { [timeStr]: targetAccountId } : {}),
         },
       },
     };
@@ -1146,9 +1175,11 @@ export default function DashboardPage() {
     const updatedTimes = currentChannel.times.filter((t: string) => t !== timeStr);
     const sheetByTime = { ...currentChannel.sheetByTime };
     delete sheetByTime[timeStr];
+    const accountByTime = { ...(currentChannel.accountByTime || {}) };
+    delete accountByTime[timeStr];
     const updatedChannelSchedules = {
       ...scheduleConfig.channelSchedules,
-      [channelKey]: { ...currentChannel, times: updatedTimes, sheetByTime },
+      [channelKey]: { ...currentChannel, times: updatedTimes, sheetByTime, accountByTime },
     };
     const newCfg = { ...scheduleConfig, channelSchedules: updatedChannelSchedules };
     setScheduleConfig(newCfg);
@@ -3159,7 +3190,9 @@ export default function DashboardPage() {
             handleAddChannelTime={handleAddChannelTime}
             handleRemoveChannelTime={handleRemoveChannelTime}
             handleSlotSheetChange={handleSlotSheetChange}
+            handleSlotAccountChange={handleSlotAccountChange}
             renderSlotSheetSelect={renderSlotSheetSelect}
+            accounts={accounts}
             handleTriggerAutoPilot={handleTriggerAutoPilot}
             handleSyncGoogleSheets={handleSyncGoogleSheets}
             sheetsOverview={sheetsOverview}
@@ -3197,7 +3230,6 @@ export default function DashboardPage() {
             handleRemoveBackupKey={handleRemoveBackupKey}
             handleTestAi={handleTestAi}
             testingAi={testingAi}
-            accounts={accounts}
             copiedId={copiedId}
             copyToClipboard={copyToClipboard}
           />

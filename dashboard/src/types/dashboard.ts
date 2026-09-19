@@ -149,9 +149,9 @@ export interface ScheduleConfig {
   groqModel: string;
   scheduleTimes?: string[];
   channelSchedules?: {
-    fanpage: { enabled: boolean; times: string[]; sheetByTime?: Record<string, string> };
-    groups: { enabled: boolean; times: string[]; sheetByTime?: Record<string, string> };
-    personal: { enabled: boolean; times: string[]; sheetByTime?: Record<string, string> };
+    fanpage: { enabled: boolean; times: string[]; sheetByTime?: Record<string, string>; accountByTime?: Record<string, string> };
+    groups: { enabled: boolean; times: string[]; sheetByTime?: Record<string, string>; accountByTime?: Record<string, string> };
+    personal: { enabled: boolean; times: string[]; sheetByTime?: Record<string, string>; accountByTime?: Record<string, string> };
   };
   channels?: { fanpage: boolean; groups: boolean; personal: boolean };
   aspectRatio?: string;

@@ -1142,21 +1142,22 @@ async function checkAutoPilotSchedule() {
       console.log(`[Scheduler] ⏰ Đến khung giờ hẹn ${vnTimeStr}! Bắt đầu kích hoạt Auto-Pilot cho: ${triggeredNames}...`);
 
       try {
-        const runsBySheet = new Map();
         for (const [channel, triggered] of Object.entries(triggeredChannels)) {
           if (!triggered) continue;
           const sheetName = channelSchedules[channel]?.sheetByTime?.[vnTimeStr]
             || scheduleConfig.googleSheets?.channelSheetMapping?.[channel]
             || scheduleConfig.googleSheets?.sheetName || 'topics';
-          const channels = runsBySheet.get(sheetName) || { fanpage: false, groups: false, personal: false };
-          channels[channel] = true;
-          runsBySheet.set(sheetName, channels);
-        }
-        for (const [sheetName, channels] of runsBySheet) {
+          const targetAccountId = channelSchedules[channel]?.accountByTime?.[vnTimeStr] || null;
+
+          console.log(`[Scheduler] Đang chạy kênh "${channel}" khung giờ ${vnTimeStr} (Sheet: "${sheetName}", Tài khoản: ${targetAccountId || 'Tự động'})...`);
           try {
-            await runAutoPilotCycle({ channels, sheetName });
+            await runAutoPilotCycle({
+              channels: { [channel]: true },
+              accounts: { [channel]: targetAccountId },
+              sheetName,
+            });
           } catch (err) {
-            console.error(`[Scheduler] Lỗi sheet ${sheetName} lúc ${vnTimeStr}:`, err.message);
+            console.error(`[Scheduler] Lỗi kênh ${channel} lúc ${vnTimeStr}:`, err.message);
           }
         }
       } catch (err) {

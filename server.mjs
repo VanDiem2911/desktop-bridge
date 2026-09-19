@@ -935,6 +935,12 @@ async function publishFacebookPage(body) {
     throw new Error('Không có tài khoản Fanpage nào sẵn sàng để đăng bài (tất cả tài khoản đang bị Facebook yêu cầu xác thực Checkpoint hoặc bị tắt). Hãy vào mục "Acc yêu cầu xác thực" trên Dashboard để mở Chrome xử lý!');
   }
 
+  // Nếu không chỉ định cụ thể tài khoản, chỉ đăng 1 tài khoản đầu tiên chứ không đăng dồn dập toàn bộ tài khoản
+  if (!body.accountId && !body.pageUrl && targetAccounts.length > 1) {
+    console.log(`[Fanpage Server 3001] Không chỉ định tài khoản cụ thể. Chỉ đăng tài khoản: "${targetAccounts[0].name}" (Port ${targetAccounts[0].port}) để tránh đăng dồn dập.`);
+    targetAccounts = [targetAccounts[0]];
+  }
+
   console.log(`[Fanpage Server 3001] Bắt đầu đăng bài lên ${targetAccounts.length} tài khoản Fanpage...`);
   const successList = [];
   const errorList = [];

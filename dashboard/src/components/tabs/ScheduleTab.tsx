@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Workflow,
   Clock,
@@ -60,9 +60,10 @@ interface ScheduleTabProps {
   setInspectingNodeData: (val: { id: string; name: string; data: any } | null) => void;
   workflowActiveTab: 'canvas' | 'times' | 'sheets' | 'ai_config';
   setWorkflowActiveTab: (val: 'canvas' | 'times' | 'sheets' | 'ai_config') => void;
-  handleAddChannelTime: (channelKey: 'fanpage' | 'groups' | 'personal', timeStr: string) => void;
+  handleAddChannelTime: (channelKey: 'fanpage' | 'groups' | 'personal', timeStr: string, targetAccountId?: string, targetSheet?: string) => void;
   handleRemoveChannelTime: (channelKey: 'fanpage' | 'groups' | 'personal', timeStr: string) => void;
   handleSlotSheetChange: (channelKey: 'fanpage' | 'groups' | 'personal', time: string, sheetName: string) => void;
+  handleSlotAccountChange?: (channelKey: 'fanpage' | 'groups' | 'personal', time: string, accountId: string) => void;
   renderSlotSheetSelect: (channelKey: 'fanpage' | 'groups' | 'personal', time: string) => React.ReactNode;
   handleTriggerAutoPilot: (customTopic?: string, channelKey?: 'fanpage' | 'groups' | 'personal') => Promise<void>;
   handleSyncGoogleSheets: (targetName?: string) => Promise<void>;
@@ -162,6 +163,7 @@ export default function ScheduleTab({
   handleAddChannelTime,
   handleRemoveChannelTime,
   handleSlotSheetChange,
+  handleSlotAccountChange,
   renderSlotSheetSelect,
   handleTriggerAutoPilot,
   handleSyncGoogleSheets,
@@ -204,6 +206,23 @@ export default function ScheduleTab({
   copiedId,
   copyToClipboard,
 }: ScheduleTabProps) {
+  const [selectedNewFanpageAccount, setSelectedNewFanpageAccount] = useState<string>('');
+  const [selectedNewFanpageSheet, setSelectedNewFanpageSheet] = useState<string>('topics');
+
+  const fanpageAccounts = React.useMemo(() => {
+    const list: Array<{ id: string; name: string; port?: number }> = [];
+    (accounts || []).forEach((cat) => {
+      if (cat.category === 'facebook' || cat.category === 'fanpage') {
+        (cat.items || []).forEach((item) => {
+          if (item.enabled !== false && item.canPostFanpage !== false) {
+            list.push({ id: item.id, name: item.name, port: item.port });
+          }
+        });
+      }
+    });
+    return list;
+  }, [accounts]);
+
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
             
@@ -838,45 +857,137 @@ export default function ScheduleTab({
                         </select>
                       </div>
 
-                      {/* List of Times */}
-                      <div className="space-y-2">
-                        <label className="block text-[11px] font-bold text-slate-700">Khung giờ Fanpage hiện tại:</label>
-                        <div className="flex flex-wrap gap-1.5">
-                          {(scheduleConfig.channelSchedules?.fanpage?.times || ['08:00', '16:00']).map((t: string) => (
-                            <span
-                              key={t}
-                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-blue-100 text-blue-900 font-black text-xs border border-blue-200 shadow-2xs"
-                            >
-                              <Clock className="w-3 h-3 text-blue-600" />
-                              {t}
-                              {renderSlotSheetSelect('fanpage', t)}
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveChannelTime('fanpage', t)}
-                                className="hover:text-rose-600 text-blue-400 cursor-pointer"
-                                title="Xóa giờ này"
+                      {/* List of Times with Account and Sheet */}
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-[11px] font-bold text-slate-700">Khung giờ Fanpage theo tài khoản &amp; loại bài:</label>
+                          <span className="text-[10px] text-blue-700 font-bold bg-blue-100/70 px-2 py-0.5 rounded-md">
+                            1 giờ = 1 nick + 1 sheet
+                          </span>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          {(scheduleConfig.channelSchedules?.fanpage?.times || ['08:00', '16:00']).map((t: string) => {
+                            const currentAccId = scheduleConfig.channelSchedules?.fanpage?.accountByTime?.[t] || '';
+                            const currentSheet = scheduleConfig.channelSchedules?.fanpage?.sheetByTime?.[t]
+                              || scheduleConfig.googleSheets?.channelSheetMapping?.fanpage
+                              || scheduleConfig.googleSheets?.sheetName || 'topics';
+
+                            return (
+                              <div
+                                key={t}
+                                className="bg-white p-2.5 rounded-xl border border-blue-200/90 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2"
                               >
-                                ×
-                              </button>
-                            </span>
-                          ))}
+                                <div className="flex items-center gap-2">
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-100 text-blue-900 font-black text-xs border border-blue-200 shadow-2xs">
+                                    <Clock className="w-3.5 h-3.5 text-blue-600" />
+                                    {t}
+                                  </span>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-2 text-xs flex-1 sm:justify-end">
+                                  {/* Account Selector */}
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] text-slate-500 font-semibold">Tài khoản:</span>
+                                    <select
+                                      value={currentAccId}
+                                      onChange={(e) => handleSlotAccountChange?.('fanpage', t, e.target.value)}
+                                      className="bg-slate-50 border border-slate-200 text-slate-800 text-[11px] font-bold rounded-lg px-2 py-1 max-w-[150px] truncate outline-hidden cursor-pointer"
+                                      title="Chọn tài khoản FB đăng Fanpage cho khung giờ này"
+                                    >
+                                      <option value="">(Tự động / Nick đầu)</option>
+                                      {fanpageAccounts.map((acc) => (
+                                        <option key={acc.id} value={acc.id}>
+                                          {acc.name} ({acc.id})
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  {/* Sheet / Topic Type Selector */}
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] text-slate-500 font-semibold">Sheet:</span>
+                                    <select
+                                      value={currentSheet}
+                                      onChange={(e) => handleSlotSheetChange('fanpage', t, e.target.value)}
+                                      className="bg-blue-50 border border-blue-200 text-blue-900 text-[11px] font-bold rounded-lg px-2 py-1 max-w-[120px] truncate outline-hidden cursor-pointer"
+                                      title="Chọn Sheet chứa chủ đề/bài viết cho khung giờ này"
+                                    >
+                                      {availableSheets.map((s) => (
+                                        <option key={s} value={s}>{s}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  {/* Delete Slot Button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveChannelTime('fanpage', t)}
+                                    className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                    title={`Xóa khung giờ ${t}`}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
 
                       {/* Add Time Form */}
-                      <div className="flex items-center gap-2 pt-2 border-t border-blue-100">
-                        <input
-                          type="time"
-                          value={newFanpageTime}
-                          onChange={(e) => setNewFanpageTime(e.target.value)}
-                          className="liquid-input rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900 w-28"
-                        />
+                      <div className="bg-white/90 p-3 rounded-xl border border-blue-200/80 space-y-2.5">
+                        <div className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                          <Plus className="w-3.5 h-3.5 text-blue-600" /> Thêm khung giờ &amp; chọn tài khoản:
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Giờ đăng</label>
+                            <input
+                              type="time"
+                              value={newFanpageTime}
+                              onChange={(e) => setNewFanpageTime(e.target.value)}
+                              className="liquid-input rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-900 w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Chọn tài khoản FB</label>
+                            <select
+                              value={selectedNewFanpageAccount}
+                              onChange={(e) => setSelectedNewFanpageAccount(e.target.value)}
+                              className="bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-xl px-2.5 py-1.5 w-full truncate outline-hidden cursor-pointer"
+                            >
+                              <option value="">(Tự động / Nick đầu)</option>
+                              {fanpageAccounts.map((acc) => (
+                                <option key={acc.id} value={acc.id}>
+                                  {acc.name} ({acc.id})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Chọn loại bài (Sheet)</label>
+                            <select
+                              value={selectedNewFanpageSheet}
+                              onChange={(e) => setSelectedNewFanpageSheet(e.target.value)}
+                              className="bg-blue-50 border border-blue-200 text-blue-900 text-xs font-bold rounded-xl px-2.5 py-1.5 w-full truncate outline-hidden cursor-pointer"
+                            >
+                              {availableSheets.map((s) => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
                         <button
                           type="button"
-                          onClick={() => handleAddChannelTime('fanpage', newFanpageTime)}
-                          className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-xs flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                          onClick={() => {
+                            if (!newFanpageTime) return;
+                            handleAddChannelTime('fanpage', newFanpageTime, selectedNewFanpageAccount, selectedNewFanpageSheet);
+                          }}
+                          className="w-full py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-xs flex items-center justify-center gap-1 cursor-pointer transition-colors"
                         >
-                          <Plus className="w-3.5 h-3.5" /> Thêm Giờ
+                          <Plus className="w-3.5 h-3.5" /> Thêm Khung Giờ Này
                         </button>
                       </div>
 
