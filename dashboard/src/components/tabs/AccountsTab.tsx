@@ -252,7 +252,26 @@ export default function AccountsTab({
                 </p>
               </div>
 
-              <div className="flex items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/* Ca trực đăng nhóm gọn gàng */}
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                  <span className="text-slate-500 font-medium">Ca đăng:</span>
+                  <span className="font-extrabold text-slate-800 flex items-center gap-1">
+                    {groupsData.rotation?.activeGroupToday === 'group_1' ? (
+                      <span className="text-emerald-700 font-bold">🟢 Nhóm 1</span>
+                    ) : (
+                      <span className="text-amber-700 font-bold">🟡 Nhóm 2</span>
+                    )}
+                  </span>
+                  <button
+                    onClick={() => handleSwitchActiveGroup()}
+                    className="ml-1 p-1 rounded-md text-indigo-600 hover:bg-indigo-50 border border-indigo-200/60 cursor-pointer"
+                    title="Đổi ca trực sang nhóm khác"
+                  >
+                    <ArrowLeftRight className="w-3 h-3" />
+                  </button>
+                </div>
+
                 <button
                   onClick={openAddFbModal}
                   className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-xl shadow-md shadow-blue-600/25 transition-all cursor-pointer"
@@ -399,64 +418,6 @@ export default function AccountsTab({
                   </div>
                 );
               })}
-            </div>
-
-            {/* Thanh điều khiển Chiến thuật 3 Nhóm cho các tài khoản đăng nhóm */}
-            <div className="mt-4 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-slate-50 via-indigo-50/40 to-slate-50 border border-slate-200 shadow-2xs">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-200/80 flex items-center gap-1.5">
-                      <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
-                      CHIẾN THUẬT LUÂN PHIÊN ĐĂNG NHÓM
-                    </span>
-                    <span className="text-xs text-slate-500 font-medium">
-                      Tự động đổi ca mỗi ngày & Cách ly bảo vệ an toàn
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600">
-                    Hệ thống sẽ luân phiên đăng bài giữa <b>🟢 Nhóm 1</b> và <b>🟡 Nhóm 2</b> theo ca mỗi ngày để Facebook không đánh dấu hành vi bất thường.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3 p-2.5 bg-white rounded-xl border border-slate-200 shadow-2xs shrink-0">
-                  <div className="px-2 border-r border-slate-200 text-left">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Ca chạy hôm nay</span>
-                    <span className="text-xs font-extrabold flex items-center gap-1.5 mt-0.5">
-                      {groupsData.rotation?.activeGroupToday === 'group_1' ? (
-                        <span className="text-emerald-700 flex items-center gap-1">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                          🟢 Nhóm 1 (Đang chạy)
-                        </span>
-                      ) : (
-                        <span className="text-amber-700 flex items-center gap-1">
-                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-                          🟡 Nhóm 2 (Đang chạy)
-                        </span>
-                      )}
-                    </span>
-                  </div>
-
-                  <button
-                    onClick={() => handleSwitchActiveGroup()}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-xs cursor-pointer"
-                    title="Đổi ca trực ngay lập tức"
-                  >
-                    <ArrowLeftRight className="w-3.5 h-3.5" />
-                    Đổi ca trực
-                  </button>
-
-                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none pl-1">
-                    <input
-                      type="checkbox"
-                      checked={groupsData.rotation?.enabled !== false}
-                      onChange={(e) => handleToggleRotation(e.target.checked)}
-                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span>Tự xoay ca mỗi ngày</span>
-                  </label>
-                </div>
-              </div>
             </div>
           </div>
         )}

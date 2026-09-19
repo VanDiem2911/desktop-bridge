@@ -11,6 +11,7 @@ import {
   Globe,
   FileText,
   Users,
+  X,
 } from 'lucide-react';
 
 export interface FbModalFormData {
@@ -76,90 +77,100 @@ export default function AccountModals({
     <>
       {/* ==================== MODAL TẬP TRUNG: THÊM / SỬA TÀI KHOẢN FACEBOOK ==================== */}
       {isFbModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="liquid-glass-modal rounded-3xl w-full max-w-xl p-7 space-y-5 shadow-2xl max-h-[92vh] overflow-y-auto">
-            <div className="flex items-start justify-between gap-3 border-b border-slate-200/80 pb-4">
-              <div>
-                <h3 className="font-extrabold text-lg text-slate-900 flex items-center gap-2">
-                  <span className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center text-xs font-black shadow-xs">
-                    FB
-                  </span>
-                  {isFbModalEditing ? `Chỉnh sửa tài khoản: ${fbModalForm.name}` : 'Thêm tài khoản Facebook mới'}
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Mỗi tài khoản hoạt động độc lập trên Port và Profile Chrome riêng biệt. Chọn quyền đăng Fanpage hoặc Nhóm.
-                </p>
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-5 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-xs shadow-xs">
+                  FB
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900 leading-tight">
+                    {isFbModalEditing ? `Chỉnh sửa: ${fbModalForm.name || 'Tài khoản'}` : 'Thêm tài khoản Facebook mới'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Cấu hình Chrome độc lập & phân quyền đăng bài
+                  </p>
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setIsFbModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors cursor-pointer"
+                title="Đóng"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
             <form onSubmit={handleSaveFbAccount} className="space-y-4">
-              {/* Link Facebook */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-bold text-slate-700">Link Facebook / Fanpage / Profile:</label>
-                  {isDetectingName && (
-                    <span className="text-[11px] font-extrabold text-blue-600 flex items-center gap-1.5 animate-pulse">
-                      <RefreshCw className="w-3 h-3 animate-spin" /> Đang lấy tên Facebook...
-                    </span>
-                  )}
-                </div>
-                <input
-                  type="text"
-                  value={fbModalForm.url}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setFbModalForm(prev => ({ ...prev, url: val }));
-                    if (val.includes('facebook.com') && val.length > 20) {
-                      handleAutoDetectFbName(val, 'unifiedFb');
-                    }
-                  }}
-                  onPaste={(e) => {
-                    const pasted = e.clipboardData.getData('text');
-                    if (pasted && pasted.includes('facebook.com')) {
-                      handleAutoDetectFbName(pasted, 'unifiedFb');
-                    }
-                  }}
-                  placeholder="https://www.facebook.com/..."
-                  required
-                  className="liquid-input w-full rounded-xl px-4 py-2.5 text-sm text-slate-900 font-mono text-xs"
-                />
-              </div>
-
-              {/* Tên tài khoản */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Tên tài khoản hiển thị:</label>
-                <div className="relative">
+              {/* 1. Tên hiển thị & Link */}
+              <div className="space-y-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-700">Tên tài khoản hiển thị:</label>
+                    {fbModalForm.url && (
+                      <button
+                        type="button"
+                        disabled={isDetectingName}
+                        onClick={() => handleAutoDetectFbName(fbModalForm.url, 'unifiedFb')}
+                        className="text-[11px] font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-md transition-colors cursor-pointer flex items-center gap-1"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isDetectingName ? 'animate-spin' : ''}`} />
+                        {isDetectingName ? 'Đang lấy...' : 'Lấy tên'}
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={fbModalForm.name}
                     onChange={(e) => setFbModalForm(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="VD: Pham Hien, Võ Bảo Vy,..."
+                    placeholder="VD: 3H Paradise, Pham Hien..."
                     required
-                    className="liquid-input w-full rounded-xl px-4 py-2.5 pr-24 text-sm text-slate-900 font-semibold"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/60 focus:bg-white focus:border-blue-500 px-3.5 py-2 text-xs font-semibold text-slate-900 transition-all outline-none"
                   />
-                  {fbModalForm.url && (
-                    <button
-                      type="button"
-                      disabled={isDetectingName}
-                      onClick={() => handleAutoDetectFbName(fbModalForm.url, 'unifiedFb')}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 cursor-pointer transition-colors"
-                      title="Bấm để lấy lại tên từ Facebook"
-                    >
-                      ⚡ Lấy tên
-                    </button>
-                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Link Facebook (Profile / Trang):</label>
+                  <input
+                    type="text"
+                    value={fbModalForm.url}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFbModalForm(prev => ({ ...prev, url: val }));
+                      if (val.includes('facebook.com') && val.length > 20) {
+                        handleAutoDetectFbName(val, 'unifiedFb');
+                      }
+                    }}
+                    onPaste={(e) => {
+                      const pasted = e.clipboardData.getData('text');
+                      if (pasted && pasted.includes('facebook.com')) {
+                        handleAutoDetectFbName(pasted, 'unifiedFb');
+                      }
+                    }}
+                    placeholder="https://www.facebook.com/..."
+                    required
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/60 focus:bg-white focus:border-blue-500 px-3.5 py-2 text-xs font-mono text-slate-700 transition-all outline-none"
+                  />
                 </div>
               </div>
 
-              {/* Port & Profile Chrome riêng biệt */}
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
-                <div className="flex items-center gap-2 text-xs font-extrabold text-slate-800">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                  <span>Cấu hình Chrome độc lập (Mỗi nick 1 Port riêng biệt)</span>
+              {/* 2. Cấu hình Chrome gọn gàng */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    Chrome Profile độc lập
+                  </span>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded-md">
+                    Không dính checkpoint chéo
+                  </span>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Cổng Remote Port:</label>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">Cổng Remote Port:</label>
                     <input
                       type="number"
                       value={fbModalForm.port}
@@ -172,70 +183,74 @@ export default function AccountModals({
                         }));
                       }}
                       required
-                      className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 bg-white"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono font-bold text-slate-900 outline-none focus:border-blue-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">Thư mục Profile Chrome:</label>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">Thư mục Profile:</label>
                     <input
                       type="text"
                       value={fbModalForm.profileDir}
                       onChange={(e) => setFbModalForm(prev => ({ ...prev, profileDir: e.target.value }))}
                       required
-                      className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 bg-white"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono font-bold text-slate-900 outline-none focus:border-blue-500"
                     />
                   </div>
                 </div>
-                <p className="text-[11px] text-slate-500">
-                  💡 Mỗi tài khoản được cấp Port và thư mục dữ liệu Chrome riêng để không dính phiên và chống checkpoint chéo.
-                </p>
               </div>
 
-              {/* CHỌN MỤC ĐÍCH SỬ DỤNG: ĐĂNG FANPAGE / ĐĂNG NHÓM */}
-              <div className="space-y-3 pt-1">
-                <label className="block text-xs font-extrabold text-slate-800">
-                  Chọn mục đích sử dụng (Tùy chọn quyền đăng bài):
+              {/* 3. Mục đích sử dụng */}
+              <div className="space-y-2.5">
+                <label className="block text-xs font-bold text-slate-800">
+                  Mục đích sử dụng (Tùy chọn quyền đăng bài):
                 </label>
 
-                {/* 1. Tùy chọn Đăng Fanpage */}
-                <div className={`p-3.5 rounded-2xl border transition-all ${fbModalForm.canPostFanpage ? 'bg-blue-50/70 border-blue-200' : 'bg-slate-50/60 border-slate-200 opacity-80'}`}>
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                {/* Option: Fanpage */}
+                <div className={`p-3 rounded-2xl border transition-all ${
+                  fbModalForm.canPostFanpage
+                    ? 'bg-blue-50/60 border-blue-300 ring-1 ring-blue-400/20'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                }`}>
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none">
                     <input
                       type="checkbox"
                       checked={fbModalForm.canPostFanpage}
                       onChange={(e) => setFbModalForm(prev => ({ ...prev, canPostFanpage: e.target.checked }))}
                       className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
                     />
-                    <span className="text-xs font-extrabold text-blue-950 flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                       <FileText className="w-4 h-4 text-blue-600" />
                       Dùng để đăng lên Fanpage
                     </span>
                   </label>
                   {fbModalForm.canPostFanpage && (
-                    <div className="mt-2.5 pl-6 space-y-1">
-                      <label className="block text-[11px] font-bold text-slate-600">Link Fanpage (Để trống nếu dùng link ở trên):</label>
+                    <div className="mt-2.5 pl-6.5">
                       <input
                         type="text"
                         value={fbModalForm.fanpageUrl || ''}
                         onChange={(e) => setFbModalForm(prev => ({ ...prev, fanpageUrl: e.target.value }))}
-                        placeholder={fbModalForm.url || 'https://www.facebook.com/...'}
-                        className="liquid-input w-full rounded-xl px-3 py-1.5 text-xs font-mono bg-white"
+                        placeholder={fbModalForm.url || 'Link Fanpage riêng (để trống nếu dùng link ở trên)'}
+                        className="w-full rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xs font-mono text-slate-800 outline-none focus:border-blue-500"
                       />
                     </div>
                   )}
                 </div>
 
-                {/* 2. Tùy chọn Đăng Nhóm */}
-                <div className={`p-3.5 rounded-2xl border transition-all ${fbModalForm.canPostGroup ? 'bg-indigo-50/70 border-indigo-200' : 'bg-slate-50/60 border-slate-200 opacity-80'}`}>
+                {/* Option: Nhóm Facebook */}
+                <div className={`p-3 rounded-2xl border transition-all ${
+                  fbModalForm.canPostGroup
+                    ? 'bg-indigo-50/60 border-indigo-300 ring-1 ring-indigo-400/20'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                }`}>
                   <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={fbModalForm.canPostGroup}
                         onChange={(e) => setFbModalForm(prev => ({ ...prev, canPostGroup: e.target.checked }))}
                         className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
                       />
-                      <span className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                         <Users className="w-4 h-4 text-indigo-600" />
                         Dùng để đăng vào các Nhóm Facebook
                       </span>
@@ -245,7 +260,7 @@ export default function AccountModals({
                       <select
                         value={fbModalForm.roleGroup || 'group_1'}
                         onChange={(e) => setFbModalForm(prev => ({ ...prev, roleGroup: e.target.value }))}
-                        className="text-[11px] font-bold bg-white border border-indigo-200 rounded-lg px-2 py-1 text-indigo-900"
+                        className="text-xs font-bold bg-white border border-indigo-200 rounded-xl px-2.5 py-1 text-indigo-950 shadow-2xs outline-none focus:border-indigo-500 cursor-pointer"
                       >
                         <option value="group_1">🟢 Nhóm 1 (Đội chính)</option>
                         <option value="group_2">🟡 Nhóm 2 (Đội dự phòng)</option>
@@ -254,53 +269,55 @@ export default function AccountModals({
                   </div>
 
                   {fbModalForm.canPostGroup && (
-                    <div className="mt-2.5 pl-6 space-y-1.5">
-                      <label className="block text-[11px] font-bold text-slate-600">
-                        Danh sách link nhóm Facebook của nick này (Mỗi dòng 1 link):
-                      </label>
+                    <div className="mt-2.5 pl-6.5 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-slate-600">
+                          Danh sách link nhóm Facebook của nick này:
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {fbModalForm.groupUrlsText ? fbModalForm.groupUrlsText.split('\n').filter(Boolean).length : 0} link
+                        </span>
+                      </div>
                       <textarea
                         value={fbModalForm.groupUrlsText || ''}
                         onChange={(e) => setFbModalForm(prev => ({ ...prev, groupUrlsText: e.target.value }))}
                         rows={3}
                         placeholder="https://www.facebook.com/groups/nhom1/&#10;https://www.facebook.com/groups/nhom2/"
-                        className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-mono bg-white"
+                        className="w-full rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs font-mono text-slate-800 outline-none focus:border-indigo-500 resize-y"
                       />
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Bật / Tắt nếu đang chỉnh sửa */}
-              {isFbModalEditing && (
-                <div className="flex items-center gap-2 pt-1">
+              {/* Bật / Tắt trạng thái */}
+              <div className="flex items-center justify-between pt-1">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none">
                   <input
                     type="checkbox"
-                    id="unifiedFbEnabled"
                     checked={fbModalForm.enabled !== false}
                     onChange={(e) => setFbModalForm(prev => ({ ...prev, enabled: e.target.checked }))}
-                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
                   />
-                  <label htmlFor="unifiedFbEnabled" className="text-xs font-bold text-slate-700 cursor-pointer">
-                    Kích hoạt tài khoản này (Đang Bật)
-                  </label>
-                </div>
-              )}
+                  <span>Kích hoạt tài khoản này (Bật hoạt động)</span>
+                </label>
+              </div>
 
               {/* Action Buttons */}
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-200/80">
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setIsFbModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 transition-colors"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 transition-colors cursor-pointer"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white shadow-md shadow-blue-600/30 flex items-center gap-1.5 transition-all cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md shadow-blue-600/25 transition-all flex items-center gap-1.5 cursor-pointer"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  {isFbModalEditing ? 'Lưu thay đổi' : 'Lưu tài khoản Facebook'}
+                  {isFbModalEditing ? 'Lưu thay đổi' : 'Tạo tài khoản'}
                 </button>
               </div>
             </form>
