@@ -65,7 +65,7 @@ function parseFacebookUrls(value: unknown): string[] {
 
 function getFanpageConfig(): { accounts: FanpageAccount[] } {
   const raw = readJsonFile<Record<string, unknown>>(FANPAGE_CONFIG_PATH, {});
-  if (Array.isArray(raw.accounts) && raw.accounts.length > 0) {
+  if (Array.isArray(raw.accounts)) {
     return { accounts: raw.accounts as FanpageAccount[] };
   }
   if (raw.name || raw.pageUrl) {
@@ -84,17 +84,7 @@ function getFanpageConfig(): { accounts: FanpageAccount[] } {
     };
   }
   return {
-    accounts: [
-      {
-        id: 1,
-        name: 'Facebook Fanpage Chính',
-        pageUrl: 'https://www.facebook.com/',
-        profileDir: 'n8n-fb-profile-9223',
-        port: 9223,
-        enabled: true,
-        desc: 'Profile Chrome xuất bản bài viết lên Fanpage chính',
-      },
-    ],
+    accounts: [],
   };
 }
 
@@ -325,6 +315,16 @@ export async function GET() {
     }
 
     // 3. Kiểm tra trạng thái kết nối qua CDP song song
+    interface CheckableAccountItem {
+      port: number;
+      isReady?: boolean;
+      loginStatus?: string;
+      currentUrl?: string;
+      status?: string;
+      checkpointReason?: string;
+      checkpointUrl?: string;
+    }
+
     const allItemsToCheck = [...chatgptItems, ...allFbAccounts];
     const checkPromises: Promise<void>[] = [];
     for (const item of allItemsToCheck) {
@@ -333,7 +333,7 @@ export async function GET() {
       checkPromises.push(
         (async () => {
           const status = await checkChromeTabStatus(item.port, service);
-          const itemObj = item as Record<string, any>;
+          const itemObj = item as unknown as CheckableAccountItem;
           itemObj.isReady = status.isReady;
           itemObj.loginStatus = status.loginStatus;
           itemObj.currentUrl = status.currentUrl;
@@ -351,8 +351,8 @@ export async function GET() {
     await Promise.all(checkPromises);
 
     // 4. Phân nhóm: Checkpoint vs Hoạt động bình thường
-    const checkpointItems: any[] = [];
-    const activeFacebookItems: any[] = [];
+    const checkpointItems: UnifiedFbItem[] = [];
+    const activeFacebookItems: UnifiedFbItem[] = [];
 
     for (const item of allFbAccounts) {
       if (item.status === 'checkpoint' || item.loginStatus === 'checkpoint' || item.roleGroup === 'quarantine') {
@@ -535,10 +535,10 @@ export async function POST(req: NextRequest) {
       const p = Number(accPort) || 0;
       let deleted = false;
 
-      // Xóa khỏi fanpage-config
+      // 1. Xóa khỏi fanpage-config
       const fpConfig = getFanpageConfig();
       const fpIdx = fpConfig.accounts.findIndex(a => 
-        (id && (String(a.id) === String(id) || `fb_acc_${a.id}` === String(id))) || 
+        (id && (String(a.id) === String(id) || `fb_acc_${a.id}` === String(id) || `fanpage_${a.id}` === String(id))) || 
         (p > 0 && Number(a.port) === p) || 
         (accName && a.name.toLowerCase().trim() === String(accName).toLowerCase().trim())
       );
@@ -548,7 +548,7 @@ export async function POST(req: NextRequest) {
         deleted = true;
       }
 
-      // Xóa khỏi groups-config
+      // 2. Xóa khỏi groups-config
       const grpConfig = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] });
       if (Array.isArray(grpConfig.accounts)) {
         const grpIdx = grpConfig.accounts.findIndex(a => 
@@ -559,6 +559,21 @@ export async function POST(req: NextRequest) {
         if (grpIdx >= 0) {
           grpConfig.accounts.splice(grpIdx, 1);
           writeJsonFile(GROUPS_CONFIG_PATH, grpConfig);
+          deleted = true;
+        }
+      }
+
+      // 3. Xóa khỏi personal-config
+      const persConfig = readJsonFile<{ activeAccount?: number; accounts?: Array<Record<string, unknown>> }>(PERSONAL_CONFIG_PATH, { accounts: [] });
+      if (Array.isArray(persConfig.accounts)) {
+        const persIdx = persConfig.accounts.findIndex(a => 
+          (id && (String(a.id) === String(id) || `fb_acc_${a.id}` === String(id) || `personal_acc_${a.id}` === String(id))) || 
+          (p > 0 && Number(a.port) === p) || 
+          (accName && String(a.name || '').toLowerCase().trim() === String(accName).toLowerCase().trim())
+        );
+        if (persIdx >= 0) {
+          persConfig.accounts.splice(persIdx, 1);
+          writeJsonFile(PERSONAL_CONFIG_PATH, persConfig);
           deleted = true;
         }
       }
@@ -576,7 +591,7 @@ export async function POST(req: NextRequest) {
 
       const fpConfig = getFanpageConfig();
       const fpTarget = fpConfig.accounts.find(a => 
-        (id && (String(a.id) === String(id) || `fb_acc_${a.id}` === String(id))) || 
+        (id && (String(a.id) === String(id) || `fb_acc_${a.id}` === String(id) || `fanpage_${a.id}` === String(id))) || 
         (p > 0 && Number(a.port) === p)
       );
       if (fpTarget) {
@@ -593,6 +608,18 @@ export async function POST(req: NextRequest) {
         if (grpTarget) {
           grpTarget.enabled = Boolean(nextState);
           writeJsonFile(GROUPS_CONFIG_PATH, grpConfig);
+        }
+      }
+
+      const persConfig = readJsonFile<{ activeAccount?: number; accounts?: Array<Record<string, unknown>> }>(PERSONAL_CONFIG_PATH, { accounts: [] });
+      if (Array.isArray(persConfig.accounts)) {
+        const persTarget = persConfig.accounts.find(a => 
+          (id && (String(a.id) === String(id) || `fb_acc_${a.id}` === String(id) || `personal_acc_${a.id}` === String(id))) || 
+          (p > 0 && Number(a.port) === p)
+        );
+        if (persTarget) {
+          persTarget.enabled = Boolean(nextState);
+          writeJsonFile(PERSONAL_CONFIG_PATH, persConfig);
         }
       }
 
@@ -998,8 +1025,8 @@ export async function POST(req: NextRequest) {
 
       // Kiểm tra trong Fanpage
       const fpConfig = getFanpageConfig();
-      const rawFpId = String(accountId).replace('fanpage_', '');
-      const fpTarget = fpConfig.accounts.find((a) => String(a.id) === rawFpId);
+      const rawFpId = String(accountId).replace(/^fanpage_/, '').replace(/^fb_acc_/, '');
+      const fpTarget = fpConfig.accounts.find((a) => String(a.id) === rawFpId || `fb_acc_${a.id}` === String(accountId) || `fanpage_${a.id}` === String(accountId));
       if (fpTarget) {
         fpTarget.status = 'active';
         fpTarget.enabled = true;
@@ -1012,7 +1039,8 @@ export async function POST(req: NextRequest) {
 
       // Kiểm tra trong Groups
       const grpConfig = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] });
-      const grpTarget = (grpConfig.accounts || []).find((a) => a.id === accountId);
+      const rawGrpId = String(accountId).replace(/^fb_acc_/, '');
+      const grpTarget = (grpConfig.accounts || []).find((a) => a.id === accountId || a.id === rawGrpId || `fb_acc_${a.id}` === String(accountId));
       if (grpTarget) {
         grpTarget.status = 'active';
         grpTarget.enabled = true;
@@ -1028,8 +1056,8 @@ export async function POST(req: NextRequest) {
 
       // Kiểm tra trong Personal
       const persConfig = readJsonFile<{ accounts?: Array<Record<string, unknown>> }>(PERSONAL_CONFIG_PATH, { accounts: [] });
-      const rawPersId = String(accountId).replace('personal_acc_', '');
-      const persTarget = (persConfig.accounts || []).find((a) => String(a.id) === rawPersId);
+      const rawPersId = String(accountId).replace(/^personal_acc_/, '').replace(/^fb_acc_/, '');
+      const persTarget = (persConfig.accounts || []).find((a) => String(a.id) === rawPersId || `fb_acc_${a.id}` === String(accountId));
       if (persTarget) {
         persTarget.status = 'active';
         persTarget.enabled = true;
