@@ -87,6 +87,7 @@ export default function AccountsTab({
   handleOpenChrome,
   handleDeleteChatGpt,
   handleToggleAccount,
+  handleMarkCheckpoint,
   handleResolveCheckpoint,
 
   isFbModalOpen,
@@ -165,19 +166,19 @@ export default function AccountsTab({
         </div>
 
         {/* ==================== KHỐI 1: TÀI KHOẢN YÊU CẦU XÁC THỰC (CHECKPOINT) ==================== */}
-        {checkpointCategory && checkpointCategory.items.length > 0 && (
-          <div className="liquid-glass rounded-3xl p-7 space-y-5 border-2 border-amber-300/90 bg-amber-50/30">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-200/80 pb-4">
+        {checkpointCategory && checkpointCategory.items.length > 0 ? (
+          <div className="liquid-glass rounded-3xl p-7 space-y-5 border-2 border-rose-300 bg-rose-50/25 shadow-md animate-in fade-in duration-200">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rose-200/80 pb-4">
               <div>
-                <h3 className="font-extrabold text-lg text-amber-950 flex items-center gap-2">
+                <h3 className="font-extrabold text-lg text-rose-950 flex items-center gap-2">
                   <ShieldAlert className="w-5 h-5 text-rose-600 animate-bounce" />
-                  {checkpointCategory.categoryName}
+                  Khu Vực Cách Ly Checkpoint ({checkpointCategory.items.length} tài khoản cần xác thực)
                 </h3>
-                <p className="text-xs text-amber-800 font-medium mt-0.5">
-                  {checkpointCategory.description}
+                <p className="text-xs text-rose-800 font-medium mt-0.5">
+                  Tài khoản đang bị Facebook yêu cầu xác minh người thật. Hệ thống đã tạm ngưng đăng bài để bảo vệ không bị khóa nick.
                 </p>
               </div>
-              <span className="px-3 py-1 bg-rose-100 text-rose-800 text-xs font-black rounded-full border border-rose-300">
+              <span className="px-3 py-1 bg-rose-100 text-rose-800 text-xs font-black rounded-full border border-rose-300 animate-pulse">
                 🔴 {checkpointCategory.items.length} Cần xác thực
               </span>
             </div>
@@ -186,11 +187,11 @@ export default function AccountsTab({
               {checkpointCategory.items.map((acc: AccountItem) => (
                 <div
                   key={acc.id}
-                  className="rounded-2xl p-5 border-2 border-amber-300/90 bg-white/95 shadow-md flex flex-col justify-between gap-4"
+                  className="rounded-2xl p-5 border-2 border-rose-200 bg-white shadow-md flex flex-col justify-between gap-4"
                 >
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
+                      <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-800 border border-slate-200 font-mono">
                         Port: {acc.port}
                       </span>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
@@ -209,7 +210,7 @@ export default function AccountsTab({
                     </div>
                   </div>
 
-                  <div className="space-y-2 pt-2 border-t border-amber-100">
+                  <div className="space-y-2 pt-2 border-t border-rose-100">
                     <button
                       onClick={() => handleOpenChrome(acc.profileDir, acc.port, acc.checkpointUrl || acc.url || 'https://www.facebook.com/')}
                       className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
@@ -220,12 +221,13 @@ export default function AccountsTab({
                       <button
                         onClick={() => handleResolveCheckpoint?.(acc.id, 'facebook')}
                         className="flex-1 py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                        title="Bấm sau khi đã vào Chrome xác thực xong với Facebook"
                       >
                         <Unlock className="w-3.5 h-3.5" /> Đã xác thực xong
                       </button>
                       <button
                         onClick={() => handleDeleteFbAccount(acc.id, acc.port, acc.name)}
-                        className="p-1.5 rounded-xl text-rose-500 hover:bg-rose-50 border border-rose-200 transition-colors"
+                        className="p-1.5 rounded-xl text-rose-500 hover:bg-rose-50 border border-rose-200 transition-colors cursor-pointer"
                         title="Xóa tài khoản này"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -235,6 +237,25 @@ export default function AccountsTab({
                 </div>
               ))}
             </div>
+          </div>
+        ) : (
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center shrink-0 font-bold">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  Khu vực Quản lý Checkpoint & Xác thực
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  Hiện tại không có tài khoản nào dính checkpoint. Khi quét thấy hoặc bạn nhấn nút &quot;Báo checkpoint&quot;, tài khoản sẽ tự động chuyển vào đây để bảo vệ.
+                </span>
+              </div>
+            </div>
+            <span className="text-[11px] font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg border border-emerald-200 shrink-0">
+              🟢 Tất cả an toàn
+            </span>
           </div>
         )}
 
@@ -387,23 +408,30 @@ export default function AccountsTab({
                       <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => openEditFbModal(acc)}
-                          className="flex-1 py-1.5 px-3 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all flex items-center justify-center gap-1 cursor-pointer"
+                          className="flex-1 py-1.5 px-2.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all flex items-center justify-center gap-1 cursor-pointer"
                           title="Chỉnh sửa thông tin nick, quyền đăng hoặc link nhóm"
                         >
                           <Edit3 className="w-3.5 h-3.5" /> Sửa
                         </button>
 
                         <button
+                          onClick={() => handleMarkCheckpoint?.(acc.id, 'facebook')}
+                          className="py-1.5 px-2.5 rounded-xl text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-all flex items-center justify-center gap-1 cursor-pointer"
+                          title="Báo tài khoản này bị dính checkpoint để đưa vào khu vực cách ly xác thực"
+                        >
+                          <ShieldAlert className="w-3.5 h-3.5 text-amber-600" /> Báo checkpoint
+                        </button>
+
+                        <button
                           onClick={() => handleToggleFbAccount(acc.id, acc.port, isEnabled)}
-                          className={`py-1.5 px-3 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                          className={`p-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center cursor-pointer ${
                             isEnabled
-                              ? 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
+                              ? 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'
                               : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
                           }`}
                           title={isEnabled ? 'Tạm dừng hoạt động tài khoản này' : 'Kích hoạt lại tài khoản này'}
                         >
                           <Power className="w-3.5 h-3.5" />
-                          {isEnabled ? 'Tắt' : 'Bật'}
                         </button>
 
                         <button

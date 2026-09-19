@@ -2991,6 +2991,7 @@ export default function DashboardPage() {
             handleOpenChrome={handleOpenChrome}
             handleDeleteChatGpt={handleDeleteChatGpt}
             handleToggleAccount={handleToggleAccount}
+            handleMarkCheckpoint={handleMarkCheckpoint}
             handleResolveCheckpoint={handleResolveCheckpoint}
 
             isFbModalOpen={isFbModalOpen}

@@ -967,53 +967,60 @@ export async function POST(req: NextRequest) {
 
     // ================= XỬ LÝ CHECKPOINT / YÊU CẦU XÁC THỰC =================
     if (action === 'mark_checkpoint') {
-      const { category, accountId, reason, checkpointUrl } = body;
-      const cpReason = reason?.trim() || 'Người dùng báo dính checkpoint (Hãy xác nhận bạn là người thật)';
+      const { category, accountId, port, reason, checkpointUrl } = body;
+      const cpReason = reason?.trim() || 'Phát hiện dính checkpoint: Facebook yêu cầu xác nhận danh tính';
       const cpTime = new Date().toISOString();
+      let markedName = '';
 
-      if (category === 'fanpage') {
-        const config = getFanpageConfig();
-        const rawId = String(accountId).replace('fanpage_', '');
-        const target = config.accounts.find((a) => String(a.id) === rawId);
-        if (target) {
-          target.status = 'checkpoint';
-          target.checkpointReason = cpReason;
-          target.checkpointUrl = checkpointUrl || '';
-          target.checkpointAt = cpTime;
-          target.enabled = false;
-          writeJsonFile(FANPAGE_CONFIG_PATH, config);
-          return NextResponse.json({ ok: true, message: `Đã đưa Fanpage "${target.name}" vào danh sách "Acc yêu cầu xác thực"` });
+      // 1. Kiểm tra Fanpage Config
+      const fpConfig = getFanpageConfig();
+      const rawFpId = String(accountId || '').replace(/^fanpage_/, '').replace(/^fb_acc_/, '');
+      const fpTarget = fpConfig.accounts.find((a) => String(a.id) === rawFpId || `fb_acc_${a.id}` === String(accountId) || (port && Number(a.port) === Number(port)));
+      if (fpTarget) {
+        fpTarget.status = 'checkpoint';
+        fpTarget.checkpointReason = cpReason;
+        fpTarget.checkpointUrl = checkpointUrl || '';
+        fpTarget.checkpointAt = cpTime;
+        fpTarget.enabled = false;
+        writeJsonFile(FANPAGE_CONFIG_PATH, fpConfig);
+        markedName = fpTarget.name;
+      }
+
+      // 2. Kiểm tra Groups Config
+      const grpConfig = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] });
+      const rawGrpId = String(accountId || '').replace(/^fb_acc_/, '');
+      const grpTarget = (grpConfig.accounts || []).find((a) => a.id === accountId || a.id === rawGrpId || `fb_acc_${a.id}` === String(accountId) || (port && Number(a.port) === Number(port)));
+      if (grpTarget) {
+        if (grpTarget.roleGroup !== 'quarantine') {
+          grpTarget.originalRoleGroup = grpTarget.roleGroup || 'group_1';
         }
-      } else if (category === 'groups') {
-        const config = readJsonFile<{ accounts?: GroupAccount[] }>(GROUPS_CONFIG_PATH, { accounts: [] });
-        const target = (config.accounts || []).find((a) => a.id === accountId);
-        if (target) {
-          if (target.roleGroup !== 'quarantine') {
-            target.originalRoleGroup = target.roleGroup || 'group_1';
-          }
-          target.roleGroup = 'quarantine';
-          target.status = 'checkpoint';
-          target.checkpointReason = cpReason;
-          target.quarantineReason = cpReason;
-          target.checkpointUrl = checkpointUrl || '';
-          target.checkpointAt = cpTime;
-          target.enabled = false;
-          writeJsonFile(GROUPS_CONFIG_PATH, config);
-          return NextResponse.json({ ok: true, message: `Đã đưa tài khoản Group "${target.name}" vào danh sách "Acc yêu cầu xác thực"` });
-        }
-      } else if (category === 'personal') {
-        const config = readJsonFile<{ accounts?: Array<Record<string, unknown>> }>(PERSONAL_CONFIG_PATH, { accounts: [] });
-        const rawId = String(accountId).replace('personal_acc_', '');
-        const target = (config.accounts || []).find((a) => String(a.id) === rawId);
-        if (target) {
-          target.status = 'checkpoint';
-          target.checkpointReason = cpReason;
-          target.checkpointUrl = checkpointUrl || '';
-          target.checkpointAt = cpTime;
-          target.enabled = false;
-          writeJsonFile(PERSONAL_CONFIG_PATH, config);
-          return NextResponse.json({ ok: true, message: `Đã đưa tài khoản cá nhân "${target.name}" vào danh sách "Acc yêu cầu xác thực"` });
-        }
+        grpTarget.roleGroup = 'quarantine';
+        grpTarget.status = 'checkpoint';
+        grpTarget.checkpointReason = cpReason;
+        grpTarget.quarantineReason = cpReason;
+        grpTarget.checkpointUrl = checkpointUrl || '';
+        grpTarget.checkpointAt = cpTime;
+        grpTarget.enabled = false;
+        writeJsonFile(GROUPS_CONFIG_PATH, grpConfig);
+        markedName = markedName || grpTarget.name;
+      }
+
+      // 3. Kiểm tra Personal Config
+      const persConfig = readJsonFile<{ accounts?: Array<Record<string, unknown>> }>(PERSONAL_CONFIG_PATH, { accounts: [] });
+      const rawPersId = String(accountId || '').replace(/^personal_acc_/, '').replace(/^fb_acc_/, '');
+      const persTarget = (persConfig.accounts || []).find((a) => String(a.id) === rawPersId || `fb_acc_${a.id}` === String(accountId) || (port && Number(a.port) === Number(port)));
+      if (persTarget) {
+        persTarget.status = 'checkpoint';
+        persTarget.checkpointReason = cpReason;
+        persTarget.checkpointUrl = checkpointUrl || '';
+        persTarget.checkpointAt = cpTime;
+        persTarget.enabled = false;
+        writeJsonFile(PERSONAL_CONFIG_PATH, persConfig);
+        markedName = markedName || String(persTarget.name || '');
+      }
+
+      if (markedName) {
+        return NextResponse.json({ ok: true, message: `Đã đưa tài khoản "${markedName}" vào khu vực "Acc yêu cầu xác thực (Checkpoint)"` });
       }
 
       return NextResponse.json({ ok: false, error: 'Không tìm thấy tài khoản để đưa vào mục xác thực' }, { status: 404 });
