@@ -16,12 +16,11 @@ sh.CurrentDirectory = bridgeDir
 ' Server 0: Next.js Control Center Dashboard (port 3000)
 sh.Run "cmd /c cd /d """ & bridgeDir & "\dashboard"" && node """ & bridgeDir & "\dashboard\node_modules\next\dist\bin\next"" start -p 3000 -H 127.0.0.1 >> """ & bridgeDir & "\dashboard\dashboard.log"" 2>&1", 0, False
 
-' Server 1: ChatGPT & Fanpage (port 3001)
+' Server 1: ChatGPT & Facebook Ca Nhan (port 3001)
 sh.Run "cmd /c cd /d """ & bridgeDir & """ && node """ & bridgeDir & "\server.mjs"" >> """ & bridgeDir & "\server.log"" 2>&1", 0, False
 
-' Server 2: Facebook Groups (port 3002)
+' Server 2: Facebook Groups (port 3002 - Dang bai trong nhom)
 sh.Run "cmd /c cd /d """ & bridgeDir & """ && node """ & bridgeDir & "\group-server.mjs"" >> """ & bridgeDir & "\group-server.log"" 2>&1", 0, False
-
 
 ' Server 4: Telegram Bot & Remote Watchdog (port 3004)
 sh.Run "cmd /c cd /d """ & bridgeDir & """ && node """ & bridgeDir & "\bot-server.mjs"" >> """ & bridgeDir & "\bot-server.log"" 2>&1", 0, False

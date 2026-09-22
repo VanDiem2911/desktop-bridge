@@ -202,8 +202,19 @@ export default function AccountModals({
               {/* 3. Mục đích sử dụng */}
               <div className="space-y-2.5">
                 <label className="block text-xs font-bold text-slate-800">
-                  Mục đích sử dụng (Tùy chọn quyền đăng bài):
+                  Mục đích sử dụng:
                 </label>
+
+                {/* Option: Đăng bài Nhóm Facebook */}
+                <div className="p-3 rounded-2xl border bg-indigo-50/60 border-indigo-300 ring-1 ring-indigo-400/20">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-4 h-4 rounded text-indigo-600 font-bold flex items-center justify-center">✓</span>
+                    <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Users className="w-4 h-4 text-indigo-600" />
+                      Dùng để đăng bài vào Nhóm Facebook (Profile độc lập chống Checkpoint)
+                    </span>
+                  </div>
+                </div>
 
                 {/* Option: Fanpage */}
                 <div className={`p-3 rounded-2xl border transition-all ${
@@ -220,7 +231,7 @@ export default function AccountModals({
                     />
                     <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                       <FileText className="w-4 h-4 text-blue-600" />
-                      Dùng để đăng lên Fanpage
+                      Dùng để đăng lên Fanpage (tùy chọn)
                     </span>
                   </label>
                   {fbModalForm.canPostFanpage && (
@@ -231,59 +242,6 @@ export default function AccountModals({
                         onChange={(e) => setFbModalForm(prev => ({ ...prev, fanpageUrl: e.target.value }))}
                         placeholder={fbModalForm.url || 'Link Fanpage riêng (để trống nếu dùng link ở trên)'}
                         className="w-full rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xs font-mono text-slate-800 outline-none focus:border-blue-500"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* Option: Nhóm Facebook */}
-                <div className={`p-3 rounded-2xl border transition-all ${
-                  fbModalForm.canPostGroup
-                    ? 'bg-indigo-50/60 border-indigo-300 ring-1 ring-indigo-400/20'
-                    : 'bg-white border-slate-200 hover:border-slate-300'
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={fbModalForm.canPostGroup}
-                        onChange={(e) => setFbModalForm(prev => ({ ...prev, canPostGroup: e.target.checked }))}
-                        className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                        <Users className="w-4 h-4 text-indigo-600" />
-                        Dùng để đăng vào các Nhóm Facebook
-                      </span>
-                    </label>
-
-                    {fbModalForm.canPostGroup && (
-                      <select
-                        value={fbModalForm.roleGroup || 'group_1'}
-                        onChange={(e) => setFbModalForm(prev => ({ ...prev, roleGroup: e.target.value }))}
-                        className="text-xs font-bold bg-white border border-indigo-200 rounded-xl px-2.5 py-1 text-indigo-950 shadow-2xs outline-none focus:border-indigo-500 cursor-pointer"
-                      >
-                        <option value="group_1">🟢 Nhóm 1 (Đội chính)</option>
-                        <option value="group_2">🟡 Nhóm 2 (Đội dự phòng)</option>
-                      </select>
-                    )}
-                  </div>
-
-                  {fbModalForm.canPostGroup && (
-                    <div className="mt-2.5 pl-6.5 space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-slate-600">
-                          Danh sách link nhóm Facebook của nick này:
-                        </span>
-                        <span className="text-[10px] text-slate-400">
-                          {fbModalForm.groupUrlsText ? fbModalForm.groupUrlsText.split('\n').filter(Boolean).length : 0} link
-                        </span>
-                      </div>
-                      <textarea
-                        value={fbModalForm.groupUrlsText || ''}
-                        onChange={(e) => setFbModalForm(prev => ({ ...prev, groupUrlsText: e.target.value }))}
-                        rows={3}
-                        placeholder="https://www.facebook.com/groups/nhom1/&#10;https://www.facebook.com/groups/nhom2/"
-                        className="w-full rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs font-mono text-slate-800 outline-none focus:border-indigo-500 resize-y"
                       />
                     </div>
                   )}

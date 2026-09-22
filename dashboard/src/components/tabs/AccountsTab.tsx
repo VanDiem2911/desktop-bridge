@@ -143,7 +143,7 @@ export default function AccountsTab({
               Tất Cả Tài Khoản Facebook Tại Một Nơi Duy Nhất
             </h3>
             <p className="text-xs sm:text-sm text-blue-100 font-medium leading-relaxed">
-              Mỗi tài khoản được cấp riêng <b>1 Cổng Remote Port</b> và <b>1 Thư mục Profile Chrome</b> (Độc lập 100% - Chống checkpoint chéo). Tùy chọn quyền Đăng Fanpage hoặc Đăng Nhóm cho từng tài khoản một cách dễ dàng.
+              Mỗi tài khoản được cấp riêng <b>1 Cổng Remote Port</b> và <b>1 Thư mục Profile Chrome</b> (Độc lập 100% - Chống checkpoint chéo). Chuyên dùng để đăng bài lên Fanpage và Nhóm Facebook tự động.
             </p>
           </div>
 
@@ -359,24 +359,14 @@ export default function AccountsTab({
 
                       {/* Role & Permissions Badges */}
                       <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200/80">
+                          <Users className="w-3 h-3 text-indigo-600" />
+                          Đăng Nhóm FB
+                        </span>
                         {acc.canPostFanpage && (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200/80">
                             <FileText className="w-3 h-3 text-blue-600" />
-                            Đăng Fanpage
-                          </span>
-                        )}
-                        {acc.canPostGroup && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200/80">
-                            <Users className="w-3 h-3 text-indigo-600" />
-                            Đăng Nhóm ({acc.groupCount || 0} link)
-                            <span className="ml-1 text-[10px] px-1 rounded bg-indigo-200/70 text-indigo-950 font-extrabold">
-                              {acc.roleGroup === 'group_2' ? '🟡 N2' : '🟢 N1'}
-                            </span>
-                          </span>
-                        )}
-                        {!acc.canPostFanpage && !acc.canPostGroup && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-600">
-                            Chưa gán vai trò
+                            Fanpage
                           </span>
                         )}
                       </div>

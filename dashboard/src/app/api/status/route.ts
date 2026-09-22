@@ -9,9 +9,8 @@ export async function GET() {
     const gpt1Port = gptPorts[0] || 9222;
     const gpt2Port = gptPorts[1] || 9242;
 
-    const [srv3001, srv3002, gpt1, gpt2] = await Promise.all([
+    const [srv3001, gpt1, gpt2] = await Promise.all([
       isPortOpen(ports.fanpageServer),
-      isPortOpen(ports.groupsServer),
       isPortOpen(gpt1Port),
       isPortOpen(gpt2Port),
     ]);
@@ -19,8 +18,8 @@ export async function GET() {
     return NextResponse.json({
       ok: true,
       servers: {
-        fanpageGpt: { port: ports.fanpageServer, name: 'Fanpage & ChatGPT', active: srv3001 },
-        fbGroups: { port: ports.groupsServer, name: 'Facebook Groups', active: srv3002 },
+        fanpageGpt: { port: ports.fanpageServer, name: 'ChatGPT & FB Cá Nhân', active: srv3001 },
+        fbGroups: { port: ports.groupsServer, name: 'Facebook Groups', active: false },
       },
       chromeGpt: {
         acc1: { port: gpt1Port, active: gpt1 },

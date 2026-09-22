@@ -1005,7 +1005,7 @@ export default function CredentialsTab({
                       className="liquid-input w-full rounded-xl px-3 py-2 text-xs font-semibold text-slate-800"
                     >
                       <option value="personal">Nick Cá Nhân Chính</option>
-                      <option value="via">Via Nuôi Nhóm</option>
+                      <option value="via">Via Đăng Nhóm</option>
                       <option value="clone">Nick Clone Phụ</option>
                       <option value="fanpage">Quản Trị Fanpage</option>
                     </select>

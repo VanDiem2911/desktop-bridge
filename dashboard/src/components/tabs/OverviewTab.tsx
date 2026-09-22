@@ -9,6 +9,7 @@ import {
   Globe,
   ArrowUpRight,
   Layers,
+  Users,
 } from 'lucide-react';
 import { ServerStatus, AccountItem, GroupAccount } from '@/types/dashboard';
 
@@ -22,7 +23,7 @@ interface OverviewTabProps {
   facebookGroupCount: number;
   totalAccountsCount: number;
   handleOpenChrome: (profileDir: string, port: number, url?: string) => Promise<void>;
-  setActiveTab: (tab: 'overview' | 'analytics' | 'accounts' | 'groups' | 'schedule' | 'bot') => void;
+  setActiveTab: (tab: 'overview' | 'analytics' | 'accounts' | 'credentials' | 'schedule' | 'bot') => void;
 }
 
 export default function OverviewTab({
@@ -65,12 +66,12 @@ export default function OverviewTab({
           <p className="text-xs text-slate-500 font-medium mt-1">Tạo ảnh ChatGPT xen kẽ & xuất bản Fanpage</p>
         </div>
 
-        {/* Server 2 */}
+        {/* Kênh Facebook Groups */}
         <div className="liquid-glass liquid-glass-interactive rounded-3xl p-6 relative overflow-hidden">
           <div className="flex justify-between items-start mb-3">
             <div className="flex items-center gap-2">
               <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 shadow-xs">
-                <Share2 className="w-4 h-4" />
+                <Users className="w-4 h-4" />
               </span>
               <span className="font-bold text-sm text-slate-900">Facebook Groups</span>
             </div>
@@ -90,7 +91,7 @@ export default function OverviewTab({
             </span>
           </div>
           <p className="text-xs text-slate-500 font-medium mt-1">
-            Tự động đăng xoay vòng {groupsData?.accounts?.length || 7} tài khoản nhóm
+            Đăng bài tự động xoay vòng danh sách {facebookGroupCount || 101} nhóm Facebook
           </p>
         </div>
 
@@ -215,10 +216,10 @@ export default function OverviewTab({
           </div>
 
           <button
-            onClick={() => setActiveTab('groups')}
+            onClick={() => setActiveTab('accounts')}
             className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold text-xs shadow-lg shadow-blue-600/30 hover:shadow-xl hover:shadow-blue-600/40 transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
-            <Share2 className="w-4 h-4" /> Quản lý Link Nhóm FB
+            <Users className="w-4 h-4" /> Quản lý Nick Facebook Cá Nhân
           </button>
         </div>
       </div>

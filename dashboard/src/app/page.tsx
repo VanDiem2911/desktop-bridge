@@ -85,7 +85,7 @@ import ScheduleTab from '@/components/tabs/ScheduleTab';
 import BotTab from '@/components/tabs/BotTab';
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'accounts' | 'credentials' | 'groups' | 'schedule' | 'bot'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'accounts' | 'groups' | 'credentials' | 'schedule' | 'bot'>('overview');
   const [status, setStatus] = useState<ServerStatus | null>(null);
 
   // Credentials State (ChatGPT & Facebook accounts and passwords)
@@ -129,11 +129,11 @@ export default function DashboardPage() {
     groqModel: 'llama-3.3-70b-versatile',
     scheduleTimes: ['08:00', '16:00'],
     channelSchedules: {
-      fanpage: { enabled: true, times: ['08:00', '16:00'], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string | string[]>([]), accountsByTime: Object.fromEntries<string[]>([]) },
-      groups: { enabled: true, times: ['09:30', '14:00', '20:00'], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string | string[]>([]), accountsByTime: Object.fromEntries<string[]>([]) },
-      personal: { enabled: false, times: [] as string[], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string | string[]>([]), accountsByTime: Object.fromEntries<string[]>([]) },
+      fanpage: { enabled: false, times: [] as string[], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string | string[]>([]), accountsByTime: Object.fromEntries<string[]>([]) },
+      groups: { enabled: false, times: [] as string[], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string | string[]>([]), accountsByTime: Object.fromEntries<string[]>([]) },
+      personal: { enabled: true, times: ['08:30', '11:30', '14:30', '19:30'] as string[], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string | string[]>([]), accountsByTime: Object.fromEntries<string[]>([]) },
     },
-    channels: { fanpage: true, groups: true, personal: false },
+    channels: { fanpage: false, groups: false, personal: true },
     aspectRatio: '4:5',
     hasMascotDu: true,
     googleSheets: {
@@ -2990,6 +2990,16 @@ export default function DashboardPage() {
               <Users className="w-4 h-4" /> Quản lý Profile Chrome
             </button>
             <button
+              onClick={() => { setActiveTab('groups'); fetchGroups(); }}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 cursor-pointer ${
+                activeTab === 'groups'
+                  ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md shadow-indigo-600/25 font-bold'
+                  : 'text-slate-600 hover:text-indigo-700 hover:bg-white/60'
+              }`}
+            >
+              <Share2 className="w-4 h-4" /> Quản lý Nhóm FB ({facebookGroupCount} nhóm)
+            </button>
+            <button
               onClick={() => { setActiveTab('credentials'); fetchCredentials(); }}
               className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 cursor-pointer ${
                 activeTab === 'credentials'
@@ -2998,16 +3008,6 @@ export default function DashboardPage() {
               }`}
             >
               <KeyRound className="w-4 h-4" /> Mật khẩu & TK (FB/GPT)
-            </button>
-            <button
-              onClick={() => setActiveTab('groups')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs md:text-sm font-semibold transition-all duration-200 ${
-                activeTab === 'groups'
-                  ? 'bg-white text-blue-700 shadow-md shadow-slate-900/5 font-bold border border-slate-200/80'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-              }`}
-            >
-              <Share2 className="w-4 h-4" /> Link Nhóm FB
             </button>
             <button
               onClick={() => { setActiveTab('schedule'); fetchScheduleConfig(); }}
@@ -3142,15 +3142,15 @@ export default function DashboardPage() {
           />
         )}
 
-        {/* ==================== TAB 4: QUẢN LÝ LINK NHÓM FACEBOOK ==================== */}
+        {/* ==================== TAB: QUẢN LÝ NHÓM FACEBOOK (GROUPS) ==================== */}
         {activeTab === 'groups' && (
           <GroupsTab
             isDetectingName={isDetectingName}
             handleAutoDetectFbName={handleAutoDetectFbName}
-            setIsAddAccountOpen={setIsAddAccountOpen}
             handleExportCsv={handleExportCsv}
             handleExportTxt={handleExportTxt}
             handlePoolDistribute={handlePoolDistribute}
+            setIsAddAccountOpen={setIsAddAccountOpen}
             setActiveTab={setActiveTab}
             groupsData={groupsData}
             fetchGroups={fetchGroups}
@@ -3228,6 +3228,7 @@ export default function DashboardPage() {
             exportCopied={exportCopied}
           />
         )}
+
 
         {/* ==================== TAB 5: LỊCH TRÌNH TỰ ĐỘNG & WORKFLOW ENGINE ==================== */}
         {activeTab === 'schedule' && (

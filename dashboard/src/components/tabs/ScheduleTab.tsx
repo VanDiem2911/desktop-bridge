@@ -607,9 +607,9 @@ export default function ScheduleTab({
                           ? 'bg-indigo-600 text-white shadow-xs hover:bg-indigo-700'
                           : 'bg-slate-200 text-slate-400 hover:bg-slate-300'
                       }`}
-                      title={`Bấm để Bật/Tắt ${facebookGroupCount} Nhóm`}
+                      title="Bấm để Bật/Tắt Facebook Groups (Đăng bài trong nhóm)"
                     >
-                      {scheduleConfig.channels?.groups ? `✓ ${facebookGroupCount} Nhóm` : `✕ ${facebookGroupCount} Nhóm`}
+                      {scheduleConfig.channels?.groups ? '✓ FB Nhóm' : '✕ FB Nhóm'}
                     </button>
                   </div>
                   {scheduleTriggering && liveProgress?.step === 4 && (
@@ -813,7 +813,7 @@ export default function ScheduleTab({
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     
                     {/* CARD 1: FANPAGE SCHEDULE */}
                     <div className="p-5 rounded-2xl bg-blue-50/60 border border-blue-200/80 shadow-xs space-y-4">
@@ -1109,7 +1109,7 @@ export default function ScheduleTab({
                       </button>
                     </div>
 
-                    {/* CARD 2: GROUPS SCHEDULE */}
+                    {/* CARD 2: GROUPS SCHEDULE - ĐĂNG BÀI TRONG NHÓM */}
                     <div className="p-5 rounded-2xl bg-indigo-50/60 border border-indigo-200/80 shadow-xs space-y-4">
                       <div className="flex items-center justify-between border-b border-indigo-200/80 pb-3">
                         <div className="flex items-center gap-2">
@@ -1117,8 +1117,8 @@ export default function ScheduleTab({
                             <Users className="w-4 h-4" />
                           </span>
                           <div>
-                            <h4 className="font-extrabold text-sm text-slate-900">{facebookGroupCount} Nhóm Facebook</h4>
-                            <span className="text-[10px] font-bold text-indigo-700">Port 3002</span>
+                            <h4 className="font-extrabold text-sm text-slate-900">Facebook Groups (Đăng bài trong nhóm)</h4>
+                            <span className="text-[10px] font-bold text-indigo-700">Port 3002 • Xoay vòng {facebookGroupCount || 101} nhóm Facebook</span>
                           </div>
                         </div>
 
@@ -1127,7 +1127,7 @@ export default function ScheduleTab({
                           type="button"
                           onClick={() => handleToggleChannel('groups')}
                           className="flex items-center gap-2 cursor-pointer group select-none p-1 rounded-xl hover:bg-indigo-100/50 transition-all"
-                          title={scheduleConfig.channels?.groups ? `Bấm để TẮT đăng ${facebookGroupCount} Nhóm` : `Bấm để BẬT đăng ${facebookGroupCount} Nhóm`}
+                          title={scheduleConfig.channels?.groups ? 'Bấm để TẮT đăng Nhóm Facebook' : 'Bấm để BẬT đăng Nhóm Facebook'}
                         >
                           <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full transition-all ${
                             scheduleConfig.channels?.groups ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-500'
@@ -1171,7 +1171,7 @@ export default function ScheduleTab({
 
                       {/* List of Times */}
                       <div className="space-y-2">
-                        <label className="block text-[11px] font-bold text-slate-700">Khung giờ Nhóm hiện tại:</label>
+                        <label className="block text-[11px] font-bold text-slate-700">Khung giờ đăng Nhóm hiện tại:</label>
                         <div className="flex flex-wrap gap-1.5">
                           {(scheduleConfig.channelSchedules?.groups?.times || ['09:30', '14:00', '20:00']).map((t: string) => (
                             <span
@@ -1207,7 +1207,7 @@ export default function ScheduleTab({
                           onClick={() => handleAddChannelTime('groups', newGroupsTime)}
                           className="flex-1 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs flex items-center justify-center gap-1 cursor-pointer transition-colors"
                         >
-                          <Plus className="w-3.5 h-3.5" /> Thêm Giờ
+                          <Plus className="w-3.5 h-3.5" /> Thêm Giờ Đăng Nhóm
                         </button>
                       </div>
 
@@ -1215,13 +1215,11 @@ export default function ScheduleTab({
                         type="button"
                         disabled={scheduleTriggering}
                         onClick={() => handleTriggerAutoPilot(customRunTopic, 'groups')}
-                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
+                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
                       >
-                        <Send className="w-3.5 h-3.5" /> 🚀 ĐĂNG NGAY LÊN {facebookGroupCount} NHÓM (TEST)
+                        <Send className="w-3.5 h-3.5" /> 🚀 ĐĂNG NGAY VÀO NHÓM (TEST)
                       </button>
                     </div>
-
-
 
                   </div>
                 </div>

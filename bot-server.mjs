@@ -713,7 +713,7 @@ async function handleTelegramMessage(message) {
 
     case '/restart': {
       await sendTelegramMessage(
-        '⏳ <b>Đang kích hoạt quy trình khởi động lại toàn bộ hệ thống...</b>\n• Tắt các tiến trình cũ (3000, 3001, 3002, 3004)\n• Cập nhật build và khởi chạy lại dịch vụ ngầm.\n<i>Vui lòng chờ khoảng 15-25 giây.</i>',
+        '⏳ <b>Đang kích hoạt quy trình khởi động lại hệ thống...</b>\n• Tắt các tiến trình cũ (3000, 3001, 3004)\n• Cập nhật build và khởi chạy lại dịch vụ ngầm.\n<i>Vui lòng chờ khoảng 15-25 giây.</i>',
         chatId,
       );
 
@@ -730,17 +730,16 @@ async function handleTelegramMessage(message) {
       setTimeout(async () => {
         const p3000 = await checkPort(3000);
         const p3001 = await checkPort(3001);
-        const p3002 = await checkPort(3002);
-        const allOk = p3000 && p3001 && p3002;
+        const allOk = p3000 && p3001;
 
         if (allOk) {
           await sendTelegramMessage(
-            '✅ <b>HỆ THỐNG ĐÃ KHỞI ĐỘNG LẠI THÀNH CÔNG!</b>\n🟢 Dashboard 3000: Online\n🟢 Bridge 3001, 3002: Online\n🚀 Hệ thống đã sẵn sàng nhận việc!',
+            '✅ <b>HỆ THỐNG ĐÃ KHỞI ĐỘNG LẠI THÀNH CÔNG!</b>\n🟢 Dashboard 3000: Online\n🟢 Bridge ChatGPT & FB Cá Nhân 3001: Online\n🚀 Hệ thống đã sẵn sàng nhận việc!',
             chatId,
           );
         } else {
           await sendTelegramMessage(
-            `⚠️ <b>Khởi động lại hoàn tất nhưng một số port chưa sẵn sàng:</b>\n• 3000: ${p3000 ? '🟢' : '🔴'}\n• 3001: ${p3001 ? '🟢' : '🔴'}\n• 3002: ${p3002 ? '🟢' : '🔴'}\nVui lòng gửi lại lệnh <code>/status</code> sau vài giây.`,
+            `⚠️ <b>Khởi động lại hoàn tất nhưng một số port chưa sẵn sàng:</b>\n• 3000: ${p3000 ? '🟢' : '🔴'}\n• 3001: ${p3001 ? '🟢' : '🔴'}\nVui lòng gửi lại lệnh <code>/status</code> sau vài giây.`,
             chatId,
           );
         }
@@ -778,15 +777,15 @@ async function getSystemStatusText() {
   const [p3000, p3001, p3002, p5678] = await Promise.all([
     checkPort(3000),
     checkPort(3001),
-    checkPort(3002),
+    checkPort(3002), // Facebook Groups Server
     checkPort(5678), // n8n port mặc định
   ]);
 
   const [c9222, c9223, c9224, c9242] = await Promise.all([
-    checkPort(9222), // ChatGPT 1 & Fanpage
-    checkPort(9223), // Groups Nick 1
-    checkPort(9224), // Groups Nick 2
-    checkPort(9242), // ChatGPT 2
+    checkPort(9222), // ChatGPT 1
+    checkPort(9223), // Facebook Chrome Nick 1
+    checkPort(9224), // Facebook Chrome Nick 2
+    checkPort(9242), // ChatGPT 2 Quota Fallback
   ]);
 
   // Đọc lịch sử hôm nay
@@ -815,17 +814,17 @@ async function getSystemStatusText() {
     '',
     '🖥️ <b>Máy chủ & Dịch vụ:</b>',
     `• Dashboard (3000): ${p3000 ? '🟢 Online' : '🔴 Mất kết nối'}`,
-    `• Bridge Fanpage & GPT (3001): ${p3001 ? '🟢 Online' : '🔴 Mất kết nối'}`,
-    `• Bridge Groups (3002): ${p3002 ? '🟢 Online' : '🔴 Mất kết nối'}`,
+    `• Bridge ChatGPT & Fanpage (3001): ${p3001 ? '🟢 Online' : '🔴 Mất kết nối'}`,
+    `• Facebook Groups Bridge (3002): ${p3002 ? '🟢 Online' : '🔴 Mất kết nối'}`,
     `• n8n Workflow (5678): ${p5678 ? '🟢 Online' : '⚪ Chưa bật'}`,
     '',
     '🌐 <b>Chrome Debugging & Nick FB/AI:</b>',
-    `• ChatGPT 1 / Fanpage (9222): ${c9222 ? '🟢 Sẵn sàng' : '⚪ Đang tắt'}`,
-    `• ChatGPT 2 Quota Fallback (9242): ${c9242 ? '🟢 Sẵn sàng' : '⚪ Đang tắt'}`,
-    `• Facebook Group Nick 1 (9223): ${c9223 ? '🟢 Sẵn sàng' : '⚪ Đang tắt'}`,
-    `• Facebook Group Nick 2 (9224): ${c9242 ? '🟢 Sẵn sàng' : '⚪ Đang tắt'}`,
+    `• ChatGPT 1 (9222): ${c9222 ? '🟢 Sẵn sàng' : '⚪ Đang tắt'}`,
+    `• ChatGPT 2 Fallback (9242): ${c9242 ? '🟢 Sẵn sàng' : '⚪ Đang tắt'}`,
+    `• Facebook Nick 1 (9223): ${c9223 ? '🟢 Sẵn sàng' : '⚪ Đang tắt'}`,
+    `• Facebook Nick 2 (9224): ${c9224 ? '🟢 Sẵn sàng' : '⚪ Đang tắt'}`,
     '',
-    '📈 <b>Tiến độ hôm nay:</b>',
+    '📈 <b>Tiến độ đăng bài hôm nay:</b>',
     `• Đã đăng thành công: <b>${todaySuccess}</b> bài`,
     `• Bài lỗi: <b>${todayFailed}</b> bài`,
     `• Checkpoint: <b>0</b> tài khoản bị chặn`,
@@ -846,8 +845,7 @@ async function runWatchdogCheck() {
   // 1. Kiểm tra Server Bridge
   if (botConfig.alertOnServerDown) {
     const servers = [
-      { port: 3001, name: 'Server 1 (Fanpage & ChatGPT Xen Kẽ)' },
-      { port: 3002, name: 'Server 2 (Facebook Groups)' },
+      { port: 3001, name: 'Server 1 (ChatGPT & Facebook Cá Nhân)' },
     ];
 
     for (const s of servers) {
@@ -1202,20 +1200,20 @@ async function checkAutoPilotSchedule() {
     const todayDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }); // YYYY-MM-DD
     const currentSlot = `${todayDateStr}_${vnTimeStr}`;
 
-    // Lấy lịch riêng biệt cho từng kênh (Fanpage, Groups, Personal)
+    // Lấy lịch riêng biệt cho từng kênh (Personal, Fanpage)
     const channelSchedules = scheduleConfig.channelSchedules || {
-      fanpage: { enabled: scheduleConfig.channels?.fanpage !== false, times: scheduleConfig.scheduleTimes || ['08:00', '16:00'] },
-      groups: { enabled: scheduleConfig.channels?.groups !== false, times: ['09:30', '14:00', '20:00'] },
-      personal: { enabled: Boolean(scheduleConfig.channels?.personal), times: ['11:30', '19:30'] },
+      personal: { enabled: true, times: scheduleConfig.scheduleTimes || ['08:30', '11:30', '14:30', '19:30'] },
+      fanpage: { enabled: false, times: [] },
+      groups: { enabled: false, times: [] },
     };
 
     const triggeredChannels = {
+      personal: Boolean(channelSchedules.personal?.enabled !== false && channelSchedules.personal?.times?.includes(vnTimeStr)),
       fanpage: Boolean(channelSchedules.fanpage?.enabled && channelSchedules.fanpage?.times?.includes(vnTimeStr)),
-      groups: Boolean(channelSchedules.groups?.enabled && channelSchedules.groups?.times?.includes(vnTimeStr)),
-      personal: Boolean(channelSchedules.personal?.enabled && channelSchedules.personal?.times?.includes(vnTimeStr)),
+      groups: false,
     };
 
-    const hasAnyTrigger = triggeredChannels.fanpage || triggeredChannels.groups || triggeredChannels.personal;
+    const hasAnyTrigger = triggeredChannels.personal || triggeredChannels.fanpage;
 
     if (hasAnyTrigger && lastAutoPilotRunSlot !== currentSlot) {
       if (isAutoPilotRunning) {
@@ -1225,11 +1223,9 @@ async function checkAutoPilotSchedule() {
 
       lastAutoPilotRunSlot = currentSlot;
       isAutoPilotRunning = true;
-      const facebookGroupCount = loadFacebookGroupCount();
       const triggeredNames = [
+        triggeredChannels.groups ? 'Facebook Groups (Nhóm)' : null,
         triggeredChannels.fanpage ? 'Fanpage' : null,
-        triggeredChannels.groups ? `${facebookGroupCount} Groups` : null,
-        triggeredChannels.personal ? 'Cá Nhân' : null,
       ].filter(Boolean).join(', ');
 
       console.log(`[Scheduler] ⏰ Đến khung giờ hẹn ${vnTimeStr}! Bắt đầu kích hoạt Auto-Pilot cho: ${triggeredNames}...`);
