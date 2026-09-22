@@ -645,42 +645,51 @@ async function dismissAllPopups(page, service = 'facebook') {
 }
 
 /**
- * Xử lý popup Call-to-Action của Facebook ("Chat trực tiếp với khách hàng" / "Trò chuyện trực tiếp").
- * Ưu tiên bấm "Thêm nút" nếu có, fallback sang "Lúc khác" hoặc nút X nếu không có.
+ * Xử lý popup Call-to-Action của Facebook ("Thêm nút vào bài viết" / "Thêm nút tin nhắn / số điện thoại").
+ * TUYỆT ĐỐI KHÔNG BẤM "Thêm nút" (gây lỗi popup Nhập số điện thoại).
+ * Ưu tiên bấm "Lúc khác" / "Để sau" hoặc nút X để bỏ qua.
  */
 async function handleFacebookCtaPopup(page) {
   try {
-    // 1. Ưu tiên bấm nút "Thêm nút" (hoặc "Add button" / "Add CTA")
-    const addBtn = page.getByRole('button', { name: /^(Thêm nút|Thêm nút gửi tin nhắn|Thêm|Add button|Add CTA)$/i });
-    if (await addBtn.count() && await addBtn.first().isVisible()) {
-      await addBtn.first().click();
-      console.log('Đã bấm "Thêm nút" (Gửi tin nhắn) trên popup Facebook.');
-      await delay(2000);
-      return true;
-    }
-    const addBtnLocator = page.locator('[role="dialog"] [role="button"]:has-text("Thêm nút"), [role="button"]:has-text("Thêm nút")').first();
-    if (await addBtnLocator.count() && await addBtnLocator.isVisible()) {
-      await addBtnLocator.click();
-      console.log('Đã bấm "Thêm nút" (Gửi tin nhắn) trên popup Facebook (locator).');
-      await delay(2000);
-      return true;
-    }
-
-    // 2. Fallback: Nếu không có nút "Thêm nút" -> bấm "Lúc khác"
-    const laterBtn = page.getByRole('button', { name: /Lúc khác|Not Now|Later|Skip/i });
-    if (await laterBtn.count() && await laterBtn.first().isVisible()) {
-      await laterBtn.first().click();
-      console.log('Đã bấm "Lúc khác" để bỏ qua popup Facebook.');
-      await delay(1000);
+    // 1. Nếu có modal/dialog "Nhập số điện thoại" đang hiển thị -> đóng ngay bằng nút X hoặc Esc
+    const phoneDialog = page.locator('[role="dialog"]:has-text("Nhập số điện thoại"), [role="dialog"]:has-text("số điện thoại"), [role="dialog"]:has-text("WhatsApp")').last();
+    if (await phoneDialog.count() && await phoneDialog.isVisible()) {
+      const closeBtn = phoneDialog.locator('[aria-label="Đóng"], [aria-label="Close"], [role="button"][aria-label*="đóng" i], [role="button"][aria-label*="close" i]').first();
+      if (await closeBtn.count() && await closeBtn.isVisible()) {
+        await closeBtn.click({ force: true });
+        console.log('Đã đóng popup "Nhập số điện thoại" bằng nút X.');
+        await delay(1500);
+        return true;
+      }
+      await page.keyboard.press('Escape');
+      console.log('Đã gửi phím Escape để đóng popup "Nhập số điện thoại".');
+      await delay(1500);
       return true;
     }
 
-    // 3. Fallback cuối: bấm nút X đóng dialog
-    const closeBtn = page.locator('[aria-label="Close"], [aria-label="Đóng"], [role="button"][aria-label*="close" i]').first();
+    // 2. Ưu tiên bấm "Lúc khác" / "Not Now" / "Để sau" / "Không phải bây giờ" / "Skip"
+    const laterBtn = page.getByRole('button', { name: /^(Lúc khác|Not Now|Later|Skip|Để sau|Không phải bây giờ|Bỏ qua|Hủy)$/i }).first();
+    if (await laterBtn.count() && await laterBtn.isVisible()) {
+      await laterBtn.click({ force: true });
+      console.log('Đã bấm "Lúc khác" để bỏ qua popup thêm nút Facebook.');
+      await delay(1500);
+      return true;
+    }
+
+    const laterLocator = page.locator('[role="dialog"] [role="button"]:has-text("Lúc khác"), [role="dialog"] [role="button"]:has-text("Not Now"), [role="dialog"] [role="button"]:has-text("Để sau"), [role="dialog"] [role="button"]:has-text("Bỏ qua")').first();
+    if (await laterLocator.count() && await laterLocator.isVisible()) {
+      await laterLocator.click({ force: true });
+      console.log('Đã bấm "Lúc khác" (locator) để bỏ qua popup thêm nút Facebook.');
+      await delay(1500);
+      return true;
+    }
+
+    // 3. Fallback: Bấm nút X đóng popup nếu có
+    const closeBtn = page.locator('[role="dialog"] [aria-label="Close"], [role="dialog"] [aria-label="Đóng"], [role="dialog"] [role="button"][aria-label*="close" i], [role="dialog"] [role="button"][aria-label*="đóng" i]').first();
     if (await closeBtn.count() && await closeBtn.isVisible()) {
-      await closeBtn.click();
+      await closeBtn.click({ force: true });
       console.log('Đã đóng popup Facebook bằng nút X.');
-      await delay(1000);
+      await delay(1500);
       return true;
     }
   } catch {
@@ -690,18 +699,48 @@ async function handleFacebookCtaPopup(page) {
 }
 
 async function clickDialogActionButton(page) {
-  // 1. Thử click nút "Thêm nút" (Gửi tin nhắn)
-  const addBtn = page.getByRole('button', { name: /^(Thêm nút|Thêm nút gửi tin nhắn|Thêm|Add button)$/i }).last();
-  if (await addBtn.count() && await addBtn.isVisible()) {
+  // 1. Kiểm tra nếu có popup "Nhập số điện thoại" -> Đóng ngay bằng nút X hoặc Escape
+  const phoneDialog = page.locator('[role="dialog"]:has-text("Nhập số điện thoại"), [role="dialog"]:has-text("số điện thoại"), [role="dialog"]:has-text("WhatsApp")').last();
+  if (await phoneDialog.count() && await phoneDialog.isVisible()) {
+    const closeBtn = phoneDialog.locator('[aria-label="Đóng"], [aria-label="Close"], [role="button"][aria-label*="đóng" i], [role="button"][aria-label*="close" i]').first();
+    if (await closeBtn.count() && await closeBtn.isVisible()) {
+      try {
+        await closeBtn.click({ force: true });
+        console.log('Đã bấm nút Đóng (X) trên popup "Nhập số điện thoại".');
+        await delay(1500);
+        return 'closed_phone';
+      } catch {}
+    }
     try {
-      await addBtn.click({ force: true });
-      console.log('Đã bấm nút "Thêm nút" trên popup.');
-      await delay(2000);
-      return 'add_btn';
+      await page.keyboard.press('Escape');
+      console.log('Đã bấm Escape để đóng popup "Nhập số điện thoại".');
+      await delay(1500);
+      return 'closed_phone';
     } catch {}
   }
 
-  // 2. Thử click nút "Tiếp" (Next)
+  // 2. Bỏ qua bước "Thêm nút" (bấm "Lúc khác" / "Not Now" / "Để sau" - TUYỆT ĐỐI KHÔNG bấm "Thêm nút")
+  const laterBtn = page.getByRole('button', { name: /^(Lúc khác|Not Now|Later|Skip|Để sau|Không phải bây giờ|Bỏ qua|Hủy)$/i }).last();
+  if (await laterBtn.count() && await laterBtn.isVisible()) {
+    try {
+      await laterBtn.click({ force: true });
+      console.log('Đã bấm nút "Lúc khác" để bỏ qua thêm nút liên hệ/SĐT.');
+      await delay(2000);
+      return 'skip_btn';
+    } catch {}
+  }
+
+  const laterLocator = page.locator('[role="dialog"] [role="button"]:has-text("Lúc khác"), [role="dialog"] [role="button"]:has-text("Not Now"), [role="dialog"] [role="button"]:has-text("Để sau"), [role="dialog"] [role="button"]:has-text("Bỏ qua")').last();
+  if (await laterLocator.count() && await laterLocator.isVisible()) {
+    try {
+      await laterLocator.click({ force: true });
+      console.log('Đã bấm nút "Lúc khác" (locator) để bỏ qua thêm nút liên hệ/SĐT.');
+      await delay(2000);
+      return 'skip_btn';
+    } catch {}
+  }
+
+  // 3. Thử click nút "Tiếp" (Next)
   const nextExact = page.getByRole('button', { name: /^(Tiếp|Next)$/i }).last();
   if (await nextExact.count() && await nextExact.isVisible()) {
     try {
@@ -722,7 +761,7 @@ async function clickDialogActionButton(page) {
     } catch {}
   }
 
-  // 3. Thử click nút "Đăng" (Post/Publish)
+  // 4. Thử click nút "Đăng" (Post/Publish)
   const postExact = page.getByRole('button', { name: /^(Đăng|Post|Publish)$/i }).last();
   if (await postExact.count() && await postExact.isVisible()) {
     try {
@@ -743,7 +782,7 @@ async function clickDialogActionButton(page) {
     } catch {}
   }
 
-  return null;
+  return 'none';
 }
 
 function cleanFbUrl(href) {
@@ -1553,7 +1592,7 @@ const DEFAULT_DU_REFERENCE_URL = 'auto_drive';
 async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenceImageUrl = DEFAULT_DU_REFERENCE_URL, checkText = true, newConversation = false }) {
   const targetReferenceUrl = resolveReferenceImageUrl(referenceImageUrl);
   const hasDu = targetReferenceUrl !== null;
-  const cleanRatio = (aspectRatio === '4:5' || aspectRatio === '4/5' || !aspectRatio) ? '9:16' : aspectRatio;
+  const cleanRatio = (aspectRatio === '4:5' || aspectRatio === '4/5' || aspectRatio === '9:16' || aspectRatio === '9/16' || !aspectRatio) ? '16:9' : aspectRatio;
 
   const { browser, page } = await openChatGptPage(account, { newConversation });
   try {
@@ -1589,26 +1628,31 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
       let promptToSend;
 
       if (hasDu) {
-        // CHẾ ĐỘ GIỮ NGUYÊN BỐI CẢNH ẢNH MẪU GOOGLE DRIVE — CHỈ THAY DUY NHẤT CHỮ TRÊN CARD
+        // CHẾ ĐỘ GIỮ NGUYÊN BỐI CẢNH ẢNH MẪU GOOGLE DRIVE — CHỈ THAY DUY NHẤT CHỮ TRÊN CARD (GỌN GÀNG 16:9)
         const { headline, subheadline } = extractCardTextFromPrompt(prompt);
-        console.log(`[ChatGPT] 🎯 LẤY NGUYÊN BỐI CẢNH ẢNH MẪU — CHỈ THAY CHỮ TRÊN CARD (Tỉ lệ ${cleanRatio}):`);
+        console.log(`[ChatGPT] 🎯 LẤY BỐI CẢNH ẢNH MẪU — BỎ THANH THỐNG KÊ & CARD ĐÁY, CHỈ THAY CHỮ TRÊN CARD (Tỉ lệ ${cleanRatio}):`);
         console.log(`   - Tiêu đề chính: "${headline}"`);
         if (subheadline) console.log(`   - Phụ đề / nội dung: "${subheadline}"`);
 
         promptToSend = [
           'Using the uploaded reference image:',
-          '1. STRICTLY PRESERVE THE COMPLETE 3D SCENE & ENVIRONMENT:',
-          '- Keep the exact same 3D background scene, environment, setting, atmosphere, lighting, and colors as shown in the uploaded reference image.',
-          '- Keep the exact same 3D mascot character (identical design, outfit, pose, proportions, and placement) from the uploaded reference image.',
-          '- Keep the exact same card/panel shape, style, position, and layout from the uploaded reference image.',
-          '- Do NOT change the background scene. Do NOT invent a new room, office, or setting. Do NOT change the character or clothing.',
+          '1. STRICTLY PRESERVE THE 3D SCENE & MASCOT:',
+          '- Keep the exact same 3D background scene, environment, atmosphere, lighting, and colors as shown in the uploaded reference image.',
+          '- Keep the exact same 3D mascot character (identical design, outfit, pose, proportions, and placement) from the reference image.',
+          '- Keep the main translucent card/panel style, position, and layout.',
+          '- Do NOT change the background setting. Do NOT change the character or clothing.',
           '',
-          '2. YOUR ONLY TASK IS TO REPLACE THE TEXT ON THE CARD:',
-          'Replace the text inside the card with this new Vietnamese content:',
+          '2. CLEAN & COMPACT COMPOSITION (MANDATORY):',
+          '- DO NOT generate any top statistics banner (NO "100+ dự án", NO "98% hài lòng", NO top stats bar).',
+          '- DO NOT generate any bottom row of feature cards below the main panel.',
+          '- Keep the overall composition clean, neat, uncluttered, and perfectly balanced in 16:9 landscape aspect ratio.',
+          '',
+          '3. YOUR ONLY TASK IS TO REPLACE THE TEXT ON THE MAIN CARD:',
+          'Replace the text inside the main card with this new Vietnamese content:',
           `- TIÊU ĐỀ: "${headline}"`,
           subheadline ? `- NỘI DUNG: "${subheadline}"` : '',
           '',
-          '3. TEXT ACCURACY REQUIREMENTS:',
+          '4. TEXT ACCURACY REQUIREMENTS:',
           '- Render the text cleanly inside the card with 100% correct Vietnamese spelling, standard diacritics, and elegant typography matching the original card style.',
           '- Keep the DUDI Software brand logo.',
           '',

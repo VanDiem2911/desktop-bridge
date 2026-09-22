@@ -367,7 +367,7 @@ async function handleQuickPost(e) {
       body: JSON.stringify({
         action: 'generate_chatgpt_image',
         prompt: prompt || 'Professional modern marketing visual for Vietnamese technology company',
-        aspectRatio: aspectRatio || '9:16',
+        aspectRatio: aspectRatio || '16:9',
         referenceImageUrl: hasDu ? 'https://res.cloudinary.com/dbwahdjzg/image/upload/v1789449519/nail_DU_hjqnmq.png' : null,
       }),
     });

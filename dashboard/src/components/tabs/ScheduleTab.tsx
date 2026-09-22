@@ -558,7 +558,7 @@ export default function ScheduleTab({
                   </div>
                   <h4 className="text-xs font-extrabold text-slate-800">3. ChatGPT Robot</h4>
                   <p className="text-[11px] text-slate-500 mt-1 leading-snug">
-                    Tự động mở trình duyệt vẽ ảnh poster 3D, tỉ lệ 9:16 kèm linh vật Gấu Đỏ.
+                    Tự động mở trình duyệt vẽ ảnh poster 3D, tỉ lệ 16:9 kèm linh vật Gấu Đỏ.
                   </p>
                   {scheduleTriggering && liveProgress?.step === 3 && (
                     <div className="mt-2.5 flex items-center gap-1.5 text-[10px] font-bold text-indigo-700">
@@ -753,7 +753,7 @@ export default function ScheduleTab({
                       />
                       <div className="text-xs text-emerald-800">
                         <p className="font-bold">Ảnh Poster 3D Gấu Đỏ đã được đính kèm vào bài viết</p>
-                        <p className="text-[11px] text-slate-500 mt-0.5">Tỉ lệ chuẩn 9:16 hiển thị tối ưu trên Facebook</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5">Tỉ lệ chuẩn 16:9 hiển thị tối ưu trên Facebook</p>
                       </div>
                     </div>
                   )}
@@ -1890,12 +1890,12 @@ export default function ScheduleTab({
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">Tỉ lệ ảnh tạo bởi ChatGPT:</label>
                       <select
-                        value={scheduleConfig.aspectRatio || '9:16'}
+                        value={scheduleConfig.aspectRatio || '16:9'}
                         onChange={(e) => setScheduleConfig({ ...scheduleConfig, aspectRatio: e.target.value })}
                         className="liquid-input w-full rounded-xl px-4 py-2.5 text-xs font-bold text-slate-900"
                       >
-                        <option value="9:16">9:16 (Khuyên dùng - Chuẩn giao diện bài viết Facebook dọc)</option>
-                        <option value="16:9">16:9 (Ngang - Phù hợp bài tin tức)</option>
+                        <option value="16:9">16:9 (Khuyên dùng - Chuẩn ảnh ngang gọn gàng, thoáng đẹp)</option>
+                        <option value="9:16">9:16 (Dọc - Facebook Story / Reels)</option>
                         <option value="1:1">1:1 (Vuông - Chuẩn đa nền tảng)</option>
                       </select>
                     </div>

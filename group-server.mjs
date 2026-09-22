@@ -1699,7 +1699,7 @@ async function waitForGeneratedImageGpt(page, initialSrcs = new Set(), waitStart
 async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenceImageUrl = 'auto_drive', newConversation = false }) {
   const targetReferenceUrl = resolveReferenceImageUrl(referenceImageUrl);
   const hasDu = targetReferenceUrl !== null;
-  const cleanRatio = (aspectRatio === '4:5' || aspectRatio === '4/5' || !aspectRatio) ? '9:16' : aspectRatio;
+  const cleanRatio = (aspectRatio === '4:5' || aspectRatio === '4/5' || aspectRatio === '9:16' || aspectRatio === '9/16' || !aspectRatio) ? '16:9' : aspectRatio;
 
   const { browser, page } = await openChatGptPage(account, { newConversation });
   try {
@@ -1731,26 +1731,31 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
       let fullPrompt;
 
       if (hasDu) {
-        // CHẾ ĐỘ GIỮ NGUYÊN BỐI CẢNH ẢNH MẪU GOOGLE DRIVE — CHỈ THAY DUY NHẤT CHỮ TRÊN CARD
+        // CHẾ ĐỘ GIỮ NGUYÊN BỐI CẢNH ẢNH MẪU GOOGLE DRIVE — CHỈ THAY DUY NHẤT CHỮ TRÊN CARD (GỌN GÀNG 16:9)
         const { headline, subheadline } = extractCardTextFromPrompt(prompt);
-        console.log(`[Group Server ChatGPT] 🎯 LẤY NGUYÊN BỐI CẢNH ẢNH MẪU — CHỈ THAY CHỮ TRÊN CARD (Tỉ lệ ${cleanRatio}):`);
+        console.log(`[Group Server ChatGPT] 🎯 LẤY BỐI CẢNH ẢNH MẪU — BỎ THANH THỐNG KÊ & CARD ĐÁY, CHỈ THAY CHỮ TRÊN CARD (Tỉ lệ ${cleanRatio}):`);
         console.log(`   - Tiêu đề chính: "${headline}"`);
         if (subheadline) console.log(`   - Phụ đề / nội dung: "${subheadline}"`);
 
         fullPrompt = [
           'Using the uploaded reference image:',
-          '1. STRICTLY PRESERVE THE COMPLETE 3D SCENE & ENVIRONMENT:',
-          '- Keep the exact same 3D background scene, environment, setting, atmosphere, lighting, and colors as shown in the uploaded reference image.',
+          '1. STRICTLY PRESERVE THE 3D SCENE & MASCOT:',
+          '- Keep the exact same 3D background scene, environment, atmosphere, lighting, and colors as shown in the uploaded reference image.',
           '- Keep the exact same 3D mascot character (identical design, outfit, pose, proportions, and placement) from the uploaded reference image.',
-          '- Keep the exact same card/panel shape, style, position, and layout from the uploaded reference image.',
-          '- Do NOT change the background scene. Do NOT invent a new room, office, or setting. Do NOT change the character or clothing.',
+          '- Keep the main translucent card/panel style, position, and layout.',
+          '- Do NOT change the background setting. Do NOT change the character or clothing.',
           '',
-          '2. YOUR ONLY TASK IS TO REPLACE THE TEXT ON THE CARD:',
-          'Replace the text inside the card with this new Vietnamese content:',
+          '2. CLEAN & COMPACT COMPOSITION (MANDATORY):',
+          '- DO NOT generate any top statistics banner (NO "100+ dự án", NO "98% hài lòng", NO top stats bar).',
+          '- DO NOT generate any bottom row of feature cards below the main panel.',
+          '- Keep the overall composition clean, neat, uncluttered, and perfectly balanced in 16:9 landscape aspect ratio.',
+          '',
+          '3. YOUR ONLY TASK IS TO REPLACE THE TEXT ON THE MAIN CARD:',
+          'Replace the text inside the main card with this new Vietnamese content:',
           `- TIÊU ĐỀ: "${headline}"`,
           subheadline ? `- NỘI DUNG: "${subheadline}"` : '',
           '',
-          '3. TEXT ACCURACY REQUIREMENTS:',
+          '4. TEXT ACCURACY REQUIREMENTS:',
           '- Render the text cleanly inside the card with 100% correct Vietnamese spelling, standard diacritics, and elegant typography matching the original card style.',
           '- Keep the DUDI Software brand logo.',
           '',
