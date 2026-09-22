@@ -1551,20 +1551,27 @@ async function downloadAsBase64Gpt(page, src) {
 
 async function checkChatGptLimit(page) {
   try {
-    const bodyText = await page.locator('body').innerText();
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const normalizedText = bodyText.replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ');
+
     const limitPatterns = [
-      /You've reached your limit/i,
-      /You have reached our limit/i,
-      /limit for GPT-4o/i,
+      /Chat paused/i,
+      /usage resets/i,
+      /reached (?:the|your|our) limit/i,
+      /limit for chats that include files or images/i,
+      /limit for (?:GPT-4o|GPT-4|image)/i,
       /hit the Free plan limit/i,
       /Try again after/i,
       /Rate limit/i,
+      /Start a new text-only chat or upgrade/i,
       /Bạn đã đạt đến giới hạn/i,
       /Hết lượt tạo ảnh/i,
+      /Vui lòng thử lại sau/i,
+      /Cuộc trò chuyện bị tạm dừng/i,
     ];
     for (const pattern of limitPatterns) {
-      if (pattern.test(bodyText)) {
-        return { isLimited: true, message: 'ChatGPT đã hết token/lượt (Rate limit reached).' };
+      if (pattern.test(normalizedText)) {
+        return { isLimited: true, message: 'ChatGPT đã chạm hạn mức sử dụng (Chat paused / Rate limit reached).' };
       }
     }
   } catch {}
@@ -1708,6 +1715,13 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       console.log(`[${account.name}] Bắt đầu tạo ảnh Group (Lần thử ${attempt}/${MAX_RETRIES})...`);
+
+      // 1. Kiểm tra ngay xem tài khoản có đang bị Chat paused / hết hạn mức từ trước không
+      const preCheckLimit = await checkChatGptLimit(page);
+      if (preCheckLimit.isLimited) {
+        throw new Error(`[ChatGPT Quota Exceeded] ${preCheckLimit.message}`);
+      }
+
       const initialSrcs = new Set(await imageSourcesGpt(page));
 
       // Upload ảnh tham chiếu Du (khi hasDu = true)
@@ -1775,7 +1789,13 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
       await input.press('Enter');
       console.log(`[${account.name}] Đã gửi prompt lần ${attempt}. Đang theo dõi tiến trình...`);
       const promptSentAt = Date.now();
-      await delay(5000);
+
+      // Kiểm tra ngay sau 2s xem có bị dính Chat paused / Rate limit ngay sau khi gửi không
+      await delay(2000);
+      const instantLimit = await checkChatGptLimit(page);
+      if (instantLimit.isLimited) {
+        throw new Error(`[ChatGPT Quota Exceeded] ${instantLimit.message}`);
+      }
 
       try {
         const image = await waitForGeneratedImageGpt(page, initialSrcs, promptSentAt);
@@ -1790,12 +1810,15 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
         lastError = err;
         console.error(`[${account.name}] Lần thử ${attempt} thất bại:`, err.message);
 
-        // Nếu là lỗi fatal không thể thử lại trên cùng tài khoản (hết token, limit, mất kết nối Chrome, không tìm thấy ô chat...) thì thoát ngay để chuyển sang tài khoản khác
+        // Nếu là lỗi fatal không thể thử lại trên cùng tài khoản (hết token, limit, paused, timeout 6 phút, mất kết nối Chrome, không tìm thấy ô chat...) thì thoát ngay để chuyển sang tài khoản khác
         const isFatalError =
           err.message.includes('Quota Exceeded') ||
           err.message.includes('Rate limit') ||
           err.message.includes('đã hết token') ||
           err.message.includes('limit') ||
+          err.message.includes('Chat paused') ||
+          err.message.includes('usage resets') ||
+          err.message.includes('Hết thời gian') ||
           err.message.includes('prompt box was not found') ||
           err.message.includes('Không tìm thấy ô chat prompt') ||
           err.message.includes('signed in') ||

@@ -1341,21 +1341,28 @@ async function captureLatestImage(requestedAccount) {
 
 async function checkChatGptLimit(page) {
   try {
-    const bodyText = await page.locator('body').innerText();
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    // Chuẩn hóa dấu nháy cong Unicode và khoảng trắng để regex nhận diện chính xác
+    const normalizedText = bodyText.replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ');
+
     const limitPatterns = [
-      /You've reached your limit/i,
-      /You have reached our limit/i,
-      /limit for GPT-4o/i,
+      /Chat paused/i,
+      /usage resets/i,
+      /reached (?:the|your|our) limit/i,
+      /limit for chats that include files or images/i,
+      /limit for (?:GPT-4o|GPT-4|image)/i,
       /hit the Free plan limit/i,
       /Try again after/i,
       /Rate limit/i,
+      /Start a new text-only chat or upgrade/i,
       /Bạn đã đạt đến giới hạn/i,
       /Hết lượt tạo ảnh/i,
       /Vui lòng thử lại sau/i,
+      /Cuộc trò chuyện bị tạm dừng/i,
     ];
     for (const pattern of limitPatterns) {
-      if (pattern.test(bodyText)) {
-        return { isLimited: true, message: 'ChatGPT đã hết token/lượt (Rate limit reached).' };
+      if (pattern.test(normalizedText)) {
+        return { isLimited: true, message: 'ChatGPT đã chạm hạn mức sử dụng (Chat paused / Rate limit reached).' };
       }
     }
   } catch {}
@@ -1541,13 +1548,20 @@ async function waitForGeneratedImage(page, initialSrcs = new Set(), waitStartTim
   throw new Error('Hết thời gian 6 phút chờ ChatGPT tạo ảnh mới hoặc ChatGPT không tạo ra ảnh.');
 }
 
-async function verifyGeneratedImageWithChatGpt(page) {
+async function verifyGeneratedImageWithChatGpt(page, targetText = {}) {
   try {
     console.log('Đang yêu cầu ChatGPT Web soi ảnh và kiểm tra chữ tiếng Việt...');
     const input = await promptBox(page);
+    const { headline = '', subheadline = '' } = targetText;
+    const focusNote = headline
+      ? `Focus STRICTLY and ONLY on the primary text inside the main card: Title "${headline}"${subheadline ? ` and Subtitle "${subheadline}"` : ''}.
+DO NOT fail the image for small background drawings, decorative easel charts, tiny icons, or minor peripheral background elements.`
+      : 'Focus ONLY on the main headlines and central text. Ignore tiny decorative background drawings or small background icons.';
+
     const checkPrompt = `DO NOT GENERATE AN IMAGE. DO NOT CALL DALL-E. TEXT RESPONSE ONLY.
-Inspect the image you just generated above in this conversation. Read all rendered Vietnamese text in that image.
-Check if any Vietnamese word has spelling errors, broken accent marks, missing diacritics, corrupted characters, or garbled text.
+Inspect the image you just generated above in this conversation. Read the central Vietnamese text on the main card.
+${focusNote}
+Check if the central Vietnamese headline/subtitle has spelling errors, broken accent marks, or missing diacritics.
 Respond ONLY with text in JSON format (no image, no markdown, no extra text):
 {"isValid": true or false, "reason": "Short explanation in Vietnamese if isValid is false, or 'Chữ chuẩn' if true"}`;
 
@@ -1589,18 +1603,26 @@ Respond ONLY with text in JSON format (no image, no markdown, no extra text):
 
 const DEFAULT_DU_REFERENCE_URL = 'auto_drive';
 
-async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenceImageUrl = DEFAULT_DU_REFERENCE_URL, checkText = true, newConversation = false }) {
+async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenceImageUrl = DEFAULT_DU_REFERENCE_URL, checkText = true, newConversation = false, onFallbackImage = null }) {
   const targetReferenceUrl = resolveReferenceImageUrl(referenceImageUrl);
   const hasDu = targetReferenceUrl !== null;
   const cleanRatio = (aspectRatio === '4:5' || aspectRatio === '4/5' || aspectRatio === '9:16' || aspectRatio === '9/16' || !aspectRatio) ? '16:9' : aspectRatio;
+  const { headline = '', subheadline = '' } = hasDu ? extractCardTextFromPrompt(prompt) : {};
 
   const { browser, page } = await openChatGptPage(account, { newConversation });
   try {
     const MAX_RETRIES = 3;
     let lastError = null;
+    let firstSuccessfulImage = null;
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       console.log(`[${account.name}] Bắt đầu tạo ảnh (Lần thử ${attempt}/${MAX_RETRIES})...`);
+
+      // 1. Kiểm tra ngay xem tài khoản có đang bị Chat paused / hết hạn mức từ trước không
+      const preCheckLimit = await checkChatGptLimit(page);
+      if (preCheckLimit.isLimited) {
+        throw new Error(`[ChatGPT Quota Exceeded] ${preCheckLimit.message}`);
+      }
 
       // Ghi nhận số lượng tin nhắn assistant và các ảnh đã có trước khi gửi prompt
       const initialAssistantCount = await page.locator('[data-message-author-role="assistant"]').count().catch(() => 0);
@@ -1629,7 +1651,6 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
 
       if (hasDu) {
         // CHẾ ĐỘ GIỮ NGUYÊN BỐI CẢNH ẢNH MẪU GOOGLE DRIVE — CHỈ THAY DUY NHẤT CHỮ TRÊN CARD (GỌN GÀNG 16:9)
-        const { headline, subheadline } = extractCardTextFromPrompt(prompt);
         console.log(`[ChatGPT] 🎯 LẤY BỐI CẢNH ẢNH MẪU — BỎ THANH THỐNG KÊ & CARD ĐÁY, CHỈ THAY CHỮ TRÊN CARD (Tỉ lệ ${cleanRatio}):`);
         console.log(`   - Tiêu đề chính: "${headline}"`);
         if (subheadline) console.log(`   - Phụ đề / nội dung: "${subheadline}"`);
@@ -1674,7 +1695,13 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
 
       console.log(`[${account.name}] Đã gửi prompt lần ${attempt}. Đang theo dõi quá trình tạo ảnh...`);
       const promptSentAt = Date.now();
-      await delay(5000);
+
+      // Kiểm tra ngay sau 2s xem có bị dính Chat paused / Rate limit ngay sau khi gửi prompt không
+      await delay(2000);
+      const instantLimit = await checkChatGptLimit(page);
+      if (instantLimit.isLimited) {
+        throw new Error(`[ChatGPT Quota Exceeded] ${instantLimit.message}`);
+      }
 
       try {
         const image = await waitForGeneratedImage(page, initialSrcs, promptSentAt, initialAssistantCount);
@@ -1683,11 +1710,21 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
         let textVerification = { isValid: true, reason: 'Chưa bật kiểm tra chữ' };
         if (checkText) {
           console.log(`[${account.name}] Bắt đầu bước soi và kiểm tra chữ tiếng Việt trên ảnh vừa tạo...`);
-          textVerification = await verifyGeneratedImageWithChatGpt(page);
+          textVerification = await verifyGeneratedImageWithChatGpt(page, { headline, subheadline });
           console.log('Kết quả kiểm tra chữ:', JSON.stringify(textVerification));
 
           if (!textVerification.isValid && attempt < MAX_RETRIES) {
-            console.warn(`[${account.name}] Ảnh vừa tạo bị lỗi chữ (${textVerification.reason}). Sẽ tự động tạo lại ảnh mới...`);
+            console.warn(`[${account.name}] Ảnh vừa tạo có chữ chưa hoàn hảo (${textVerification.reason}). Lưu ảnh dự phòng và thử tạo lại...`);
+            if (!firstSuccessfulImage) {
+              firstSuccessfulImage = {
+                ...image,
+                fileName: 'chatgpt-' + Date.now() + '.png',
+                source: 'chatgpt-web',
+                account: account.name,
+                textVerification,
+              };
+              if (typeof onFallbackImage === 'function') onFallbackImage(firstSuccessfulImage);
+            }
             lastError = new Error(`Lỗi chữ tiếng Việt: ${textVerification.reason}`);
             continue;
           }
@@ -1705,12 +1742,15 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
         lastError = err;
         console.error(`[${account.name}] Lần thử ${attempt} gặp lỗi:`, err.message);
 
-        // Nếu là lỗi fatal không thể thử lại trên cùng tài khoản (hết token, limit, mất kết nối Chrome, không tìm thấy ô chat...) thì thoát ngay để chuyển sang tài khoản khác
+        // Nếu là lỗi fatal không thể thử lại trên cùng tài khoản (hết token, limit, paused, timeout 6 phút, mất kết nối Chrome, không tìm thấy ô chat...) thì thoát ngay để chuyển sang tài khoản khác
         const isFatalError =
           err.message.includes('Quota Exceeded') ||
           err.message.includes('Rate limit') ||
           err.message.includes('đã hết token') ||
           err.message.includes('limit') ||
+          err.message.includes('Chat paused') ||
+          err.message.includes('usage resets') ||
+          err.message.includes('Hết thời gian') ||
           err.message.includes('prompt box was not found') ||
           err.message.includes('Không tìm thấy ô chat prompt') ||
           err.message.includes('signed in') ||
@@ -1729,6 +1769,11 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
           await delay(4000);
         }
       }
+    }
+
+    if (firstSuccessfulImage) {
+      console.warn(`[${account.name}] Các lần tạo lại tiếp theo không thành công, sử dụng ảnh đã tạo thành công ở lần đầu.`);
+      return firstSuccessfulImage;
     }
 
     throw new Error(`ChatGPT tạo ảnh thất bại sau ${MAX_RETRIES} lần thử lại. Chi tiết lỗi: ${lastError?.message || 'Không tạo được ảnh hợp lệ'}`);
@@ -1765,6 +1810,7 @@ async function generateImage(params) {
   ];
 
   let lastError = null;
+  let fallbackImage = null;
   for (let i = 0; i < accountsToTry.length; i++) {
     const acc = accountsToTry[i];
     if (i > 0) {
@@ -1774,12 +1820,24 @@ async function generateImage(params) {
     }
 
     try {
-      return await executeGenerateOnAccount(acc, { prompt, aspectRatio, referenceImageUrl, checkText, newConversation });
+      return await executeGenerateOnAccount(acc, {
+        prompt,
+        aspectRatio,
+        referenceImageUrl,
+        checkText,
+        newConversation,
+        onFallbackImage: (img) => { if (!fallbackImage) fallbackImage = img; },
+      });
     } catch (err) {
       lastError = err;
       console.error(`[ChatGPT Server 3001] Tài khoản ${acc.name} (Port ${acc.port}) gặp lỗi:`, err.message);
       // Bất kể lỗi gì (limit, kết nối, lỗi mạng, lỗi giao diện,...) đều chuyển sang tài khoản tiếp theo
     }
+  }
+
+  if (fallbackImage) {
+    console.warn('[ChatGPT Server 3001] Tất cả tài khoản tạo mới bị gián đoạn, nhưng đã có ảnh sinh ra trước đó. Dùng ảnh đã tạo thành công.');
+    return fallbackImage;
   }
 
   throw new Error(`Tất cả ${accountsToTry.length} tài khoản ChatGPT đều thất bại. Chi tiết lỗi cuối cùng: ${lastError?.message || 'Không tạo được ảnh'}`);
