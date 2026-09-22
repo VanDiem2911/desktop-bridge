@@ -134,7 +134,7 @@ export default function DashboardPage() {
       personal: { enabled: true, times: ['08:30', '11:30', '14:30', '19:30'] as string[], sheetByTime: Object.fromEntries<string>([]), accountByTime: Object.fromEntries<string | string[]>([]), accountsByTime: Object.fromEntries<string[]>([]) },
     },
     channels: { fanpage: false, groups: false, personal: true },
-    aspectRatio: '4:5',
+    aspectRatio: '9:16',
     hasMascotDu: true,
     googleSheets: {
       enabled: true,
@@ -405,7 +405,7 @@ export default function DashboardPage() {
   const [qpChannel, setQpChannel] = useState<'fanpage' | 'groups'>('fanpage');
   const [qpCaption, setQpCaption] = useState<string>('');
   const [qpPrompt, setQpPrompt] = useState<string>('');
-  const [qpAspect, setQpAspect] = useState<string>('4:5');
+  const [qpAspect, setQpAspect] = useState<string>('9:16');
   const [qpHasDu, setQpHasDu] = useState<boolean>(true);
   const [qpLoading, setQpLoading] = useState<boolean>(false);
   const [qpResult, setQpResult] = useState<{ success?: boolean; message?: string; imageBase64?: string } | null>(null);
@@ -1310,7 +1310,7 @@ export default function DashboardPage() {
       } else if (nodeType === 'chatgpt') {
         payload = {
           prompt: '3D vinyl Mascot Du bear in modern software high-tech workspace, cinematic lighting, realistic render',
-          aspectRatio: scheduleConfig.aspectRatio || '4:5',
+          aspectRatio: scheduleConfig.aspectRatio || '9:16',
           hasMascotDu: scheduleConfig.hasMascotDu,
           chatgptAccount: workflowAccounts.chatgpt,
         };

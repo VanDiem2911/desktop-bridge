@@ -308,7 +308,7 @@ export async function POST(req: NextRequest) {
         caption: entry.caption || '',
         prompt: entry.prompt || '',
         chatgptAccount: entry.chatgptAccount || null,
-        aspectRatio: entry.aspectRatio || '4:5',
+        aspectRatio: (entry.aspectRatio === '4:5' || entry.aspectRatio === '4/5' || !entry.aspectRatio) ? '9:16' : entry.aspectRatio,
         hasMascotDu: entry.hasMascotDu !== undefined ? entry.hasMascotDu : true,
         durationMs: entry.durationMs || 0,
         error: entry.error || null,

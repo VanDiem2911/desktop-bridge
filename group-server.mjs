@@ -1699,6 +1699,7 @@ async function waitForGeneratedImageGpt(page, initialSrcs = new Set(), waitStart
 async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenceImageUrl = 'auto_drive', newConversation = false }) {
   const targetReferenceUrl = resolveReferenceImageUrl(referenceImageUrl);
   const hasDu = targetReferenceUrl !== null;
+  const cleanRatio = (aspectRatio === '4:5' || aspectRatio === '4/5' || !aspectRatio) ? '9:16' : aspectRatio;
 
   const { browser, page } = await openChatGptPage(account, { newConversation });
   try {
@@ -1732,7 +1733,7 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
       if (hasDu) {
         // CHẾ ĐỘ GIỮ NGUYÊN BỐI CẢNH ẢNH MẪU GOOGLE DRIVE — CHỈ THAY DUY NHẤT CHỮ TRÊN CARD
         const { headline, subheadline } = extractCardTextFromPrompt(prompt);
-        console.log(`[Group Server ChatGPT] 🎯 LẤY NGUYÊN BỐI CẢNH ẢNH MẪU — CHỈ THAY CHỮ TRÊN CARD:`);
+        console.log(`[Group Server ChatGPT] 🎯 LẤY NGUYÊN BỐI CẢNH ẢNH MẪU — CHỈ THAY CHỮ TRÊN CARD (Tỉ lệ ${cleanRatio}):`);
         console.log(`   - Tiêu đề chính: "${headline}"`);
         if (subheadline) console.log(`   - Phụ đề / nội dung: "${subheadline}"`);
 
@@ -1753,14 +1754,14 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
           '- Render the text cleanly inside the card with 100% correct Vietnamese spelling, standard diacritics, and elegant typography matching the original card style.',
           '- Keep the DUDI Software brand logo.',
           '',
-          aspectRatio ? 'Preferred aspect ratio: ' + aspectRatio + '.' : '',
+          'Preferred aspect ratio: ' + cleanRatio + '.',
           'Do not explain. Generate the image now.',
         ].filter(Boolean).join('\n');
       } else {
         fullPrompt = [
           'Generate one high-quality, professional commercial image matching the following description:',
           prompt.trim(),
-          aspectRatio ? 'Preferred aspect ratio: ' + aspectRatio + '.' : '',
+          'Preferred aspect ratio: ' + cleanRatio + '.',
           'Do not explain. Generate the image now.',
         ].filter(Boolean).join('\n\n');
       }

@@ -112,7 +112,7 @@ const DEFAULT_CONFIG: ScheduleConfig = {
     groups: true,
     personal: false,
   },
-  aspectRatio: '4:5',
+  aspectRatio: '9:16',
   hasMascotDu: true,
   googleSheets: {
     enabled: true,
