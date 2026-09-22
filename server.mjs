@@ -9,6 +9,14 @@ import https from 'node:https';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { logPostActivity } from './lib/history-logger.mjs';
+import {
+  GOOGLE_DRIVE_DU_IDS,
+  getNextDriveReferenceUrl,
+  resolveReferenceImageUrl,
+  extractCardTextFromPrompt,
+  fetchImageBuffer,
+  attachReferenceImage,
+} from './lib/chatgpt-image-helper.mjs';
 
 const host = '127.0.0.1';
 const port = 3001;
@@ -1494,176 +1502,6 @@ async function waitForGeneratedImage(page, initialSrcs = new Set(), waitStartTim
   throw new Error('Hết thời gian 6 phút chờ ChatGPT tạo ảnh mới hoặc ChatGPT không tạo ra ảnh.');
 }
 
-/**
- * Tải ảnh từ URL về buffer (hỗ trợ cả http và https).
- */
-function fetchImageBuffer(url) {
-  return new Promise((resolve, reject) => {
-    const client = url.startsWith('https') ? https : http;
-    client.get(url, (response) => {
-      if (response.statusCode !== 200) {
-        reject(new Error(`Failed to fetch image: HTTP ${response.statusCode}`));
-        return;
-      }
-      const chunks = [];
-      response.on('data', (chunk) => chunks.push(chunk));
-      response.on('end', () => resolve({ buffer: Buffer.concat(chunks), mimeType: response.headers['content-type'] || 'image/png' }));
-      response.on('error', reject);
-    }).on('error', reject);
-  });
-}
-
-/**
- * Đính kèm ảnh tham chiếu vào ChatGPT bằng cách upload file qua nút đính kèm hoặc input file.
- * Trả về true nếu upload thành công và đã xuất hiện preview trên giao diện.
- */
-async function attachReferenceImage(page, referenceImageUrl) {
-  let tempFilePath = null;
-  try {
-    console.log('Đang tải ảnh tham chiếu từ URL:', referenceImageUrl);
-    const { buffer, mimeType } = await fetchImageBuffer(referenceImageUrl);
-    const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
-    const fileName = `du-reference-${Date.now()}.${ext}`;
-    tempFilePath = path.join(os.tmpdir(), fileName);
-    await fs.promises.writeFile(tempFilePath, buffer);
-    console.log(`Đã lưu ảnh tạm thời tại: ${tempFilePath} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
-
-    // Danh sách selector nút đính kèm / thêm nội dung trên ChatGPT Web
-    const plusSelectors = [
-      '#composer-plus-btn',
-      'button[data-testid="composer-plus-btn"]',
-      'button[aria-label*="Add content" i]',
-      'button[aria-label*="Thêm nội dung" i]',
-      'button[aria-label*="Attach" i]',
-      'button[aria-label*="Đính kèm" i]',
-      'button[aria-label*="Upload" i]',
-      'button[aria-label*="Tải tệp" i]',
-      'button[aria-label*="Tải lên" i]',
-      '[data-testid="composer-footer-attachment-button"]',
-    ];
-
-    // Selector kiểm tra xem ảnh đã được nạp vào giao diện composer chưa
-    const attachmentPreviewSelectors = [
-      'button[aria-label*="Remove" i]',
-      'button[aria-label*="Xóa" i]',
-      'button[aria-label*="Delete" i]',
-      '[data-testid*="attachment"]',
-      'div[class*="attachment"]',
-      'form img[alt*="reference" i]',
-      'form img[src*="blob:"]',
-    ];
-
-    async function checkIsAttached() {
-      for (const sel of attachmentPreviewSelectors) {
-        const loc = page.locator(sel).first();
-        if ((await loc.count()) > 0) {
-          try {
-            if (await loc.isVisible()) return true;
-          } catch {}
-        }
-      }
-      return false;
-    }
-
-    // Cách 1: Nạp file trực tiếp vào input file của composer nếu có
-    const composerFileInput = page.locator('form input[type="file"], input[type="file"][multiple], input[type="file"]').first();
-    if ((await composerFileInput.count()) > 0) {
-      try {
-        await composerFileInput.setInputFiles(tempFilePath);
-        console.log('Đã nạp file vào input file. Đang chờ ChatGPT tải ảnh lên...');
-        const startWait = Date.now();
-        while (Date.now() - startWait < 8000) {
-          if (await checkIsAttached()) {
-            console.log('✅ Đã đính kèm ảnh con DU thành công (xác nhận qua preview)!');
-            await delay(2000);
-            return true;
-          }
-          await delay(800);
-        }
-      } catch (err) {
-        console.warn('Thử setInputFiles trực tiếp chưa được:', err.message);
-      }
-    }
-
-    // Cách 2: Bấm nút (+) đính kèm và đón sự kiện filechooser
-    for (const btnSel of plusSelectors) {
-      const btn = page.locator(btnSel).first();
-      if ((await btn.count()) > 0 && (await btn.isVisible())) {
-        console.log(`Tìm thấy nút đính kèm (${btnSel}), đang mở để tải ảnh...`);
-        const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 3500 }).catch(() => null);
-        await btn.click();
-        await delay(800);
-
-        let fileChooser = await fileChooserPromise;
-        if (fileChooser) {
-          console.log('Bắt được filechooser từ nút đính kèm, đang nạp ảnh...');
-          await fileChooser.setFiles(tempFilePath);
-        } else {
-          // Menu popup có thể xuất hiện: tìm mục Upload
-          const menuItems = [
-            'button[role="menuitem"]:has-text("Upload")',
-            'button[role="menuitem"]:has-text("Tải lên")',
-            'div[role="menuitem"]:has-text("Upload")',
-            'div[role="menuitem"]:has-text("Tải lên")',
-            '[role="menuitem"]',
-          ];
-
-          for (const itemSel of menuItems) {
-            const item = page.locator(itemSel).first();
-            if ((await item.count()) > 0 && (await item.isVisible())) {
-              const menuChooserPromise = page.waitForEvent('filechooser', { timeout: 3500 }).catch(() => null);
-              await item.click();
-              fileChooser = await menuChooserPromise;
-              if (fileChooser) {
-                console.log('Bắt được filechooser từ menu, đang nạp ảnh...');
-                await fileChooser.setFiles(tempFilePath);
-                break;
-              }
-            }
-          }
-        }
-
-        if (!fileChooser) {
-          const freshFileInput = page.locator('input[type="file"]').last();
-          if ((await freshFileInput.count()) > 0) {
-            await freshFileInput.setInputFiles(tempFilePath);
-            console.log('Đã nạp file vào input xuất hiện sau khi mở menu.');
-          }
-        }
-
-        // Chờ ChatGPT upload xong và hiển thị preview
-        const waitUploadStart = Date.now();
-        while (Date.now() - waitUploadStart < 12000) {
-          if (await checkIsAttached()) {
-            console.log('✅ Đã đính kèm ảnh con DU thành công (xác nhận qua preview)!');
-            await delay(2000);
-            return true;
-          }
-          await delay(1000);
-        }
-        break;
-      }
-    }
-
-    if (await checkIsAttached()) {
-      console.log('✅ Đã đính kèm ảnh tham chiếu thành công!');
-      return true;
-    }
-
-    console.warn('⚠️ Không thể xác nhận ảnh tham chiếu con DU đã được đính kèm vào ChatGPT.');
-    return false;
-  } catch (error) {
-    console.error('Lỗi khi đính kèm ảnh tham chiếu:', error.message);
-    return false;
-  } finally {
-    if (tempFilePath) {
-      setTimeout(() => {
-        fs.promises.unlink(tempFilePath).catch(() => {});
-      }, 30000);
-    }
-  }
-}
-
 async function verifyGeneratedImageWithChatGpt(page) {
   try {
     console.log('Đang yêu cầu ChatGPT Web soi ảnh và kiểm tra chữ tiếng Việt...');
@@ -1710,236 +1548,7 @@ Respond ONLY with text in JSON format (no image, no markdown, no extra text):
   return { isValid: true, reason: 'Chưa xác định được lỗi chữ (mặc định cho qua)' };
 }
 
-// Danh sách 50 ảnh mascot DUDI từ Google Drive: https://drive.google.com/drive/folders/16KN6FZqNbVOEd1MhjTFv_n1-n28Qq7vY
-const GOOGLE_DRIVE_DU_IDS = [
-  '1xPJ88Cz8f0EyBtvYUveUBVlsv_qCfnR1', // 0aeb64d0-1897-4533-9b1e-102087f17536.png
-  '1TlscbOhGchHZ5mJiAIs9Y2Nd6cO3O5uo', // 0bcd0255-6636-4d9c-b815-2c28c7cfc7d9.png
-  '1QA5DY2tPZRgsraLN3dQabK7AJjNh3gxN', // 0bfb4506-9033-4ddc-85d5-d3cd2359ad20.png
-  '1ijFISLLHpGMhEYzGLIVuzzawn-v5BAil', // 0d63820e-f2f8-4791-aa12-2cf020c23fd9.png
-  '1mKyG1zzZeHZFhsaA8oSsA5xfUDmH-bGG', // 0e52d437-edcc-4145-be21-0d2a6df99343.png
-  '1bQ7oQpOoQdEs9Iq0ky36sm7S2o9xI9Hf', // 1c1d79e1-f5f5-44b9-bb9e-85bfeb1b8cf6.png
-  '1cbLE0t5y8vUtwrwJ599Q_4r_ZjDR6_6v', // 1d358e13-a683-4f5c-a7bb-4a748b92dcea.png
-  '1veukSxqJrJJmy-65utFzJRukKAZ1IDHQ', // 1d02694f-903f-4b6f-b55d-0c8d649431a3.png
-  '1VqkMkxcBIkUA6iXX_0473tTbR_8trNVC', // 1dad3c99-1f59-4a30-93f2-da7c3a5d548c.png
-  '1FJOMpMUqEE8XuMeP7hUNwuZsjsH6OrYO', // 1ebebef0-ade7-4189-bacb-67617c9f8f9f.png
-  '1kHLcjG2EKr6Fb8TVs66YfEiO8ePtVQrG', // 2a377615-6861-4718-9af4-62581f16c7b1.png
-  '1BIg_hrE3MuF1edgfjYSmo41Q8hyiSSWC', // 2b176300-6ecc-4717-b216-59a4dc7be711.png
-  '1_rh4qn4J2cZOG0wBe5SChZHIXpzXrHrf', // 3accbc64-6032-4ce2-af85-af99ca24d009.png
-  '1Gy6VoKFlniwrVIB38ExCxJumizK4-hmA', // 4b3fbc51-28b5-4a98-acaf-6dd7e49d65a4.png
-  '1QwCOpZpbrYmuiAneymO7rx59Ud-zDPWu', // 4d81c4e4-9c85-479e-98d9-8c21b596d09e.png
-  '169J8fFIprkINTSJKxxk7HnwDcLPGseV-', // 4e0bfa65-db39-4ec4-b741-cccae95b5264.png
-  '1ESKUBSw6R_EcdCT3Z9sGa_pHtBRNvDBS', // 4f1a027e-c1df-462c-993a-9a1a15a82d12.png
-  '14c3lpnad40nBp0CS5dvmQjezjXnLlCyM', // 4fde10b8-6ec6-4be4-b313-d2afee96a246.png
-  '1RgBx4mEdUSHbbvYDkgLLeT37b9bmw43l', // 5b3c0f1d-6d85-4a53-8ad6-2986a208f393.png
-  '1aWxxCwRms3Wd2Cz0ziarq3wulYr8bm_W', // 5bbdaa22-ae4b-48b9-bf15-e59f51dd7490.png
-  '12r7KVo7pWJqM6Z9rIY0ouJQSEzoWDH4q', // 5e2786cc-49b1-49bd-98c6-98f0ae3142f0.png
-  '1i_vy-vnN9dV8UZeXizntEgQuCffHJzDT', // 5f6a4691-923c-4269-a0d4-fb5810f858ca.png
-  '1o_pFUEVi9xkVAkxQ-4K2uXQ-QNK1njw7', // 6b5df704-6411-4068-85ec-9d94219cf019.png
-  '1UPREMADYVi9NZyAhm1U2kTEoQTl2023b', // 6b586058-98e5-43e4-8631-e7ae89e17a7f.png
-  '1_M9O3ueDvP_uWkPY1rrqrJTBumCypRs1', // 6c9c9ecb-717a-4dc7-a22c-4f05462dc098.png
-  '1bRqQrd9Gsqvhn47u3YLsUOygpVe91noO', // 6ed3abc0-fcba-4bd0-855b-c0941d5db8c1.png
-  '11ZImbyme0ICrHZuvnOgSwE5OMMKSkPPy', // 6fc6f2c5-2348-4593-89d9-ad8364308afc.png
-  '1RYAkapekIZk-qaLXJJcbYFHurHpdLACz', // 7f6208df-39ae-4979-8bc4-13ad2be775dd.png
-  '14qlX6yH-av6G7hwRRcMYg9jR1Z8WUG9t', // 08b7b700-a54b-47ea-b4ee-bbe4fb6b8415.png
-  '1M0mtCll2CKgeW5fvvqjiPTh_ikT1JMMr', // 8f0e31c4-aad9-4b79-9536-22f861ab6ecc.png
-  '1ZkHIAK4m6623Y1eyBz797If4xSliINA8', // 33a2e236-2640-431d-997a-e44f4beee44e.png
-  '1rxtz4IjGwJdM2kohgsh-1xQKjkrhknMN', // 33e327c8-99ef-4b9a-bb77-3ca35203fb11.png
-  '1fhV_NN6dwBp_QYoFvaqbW0Fq_e1pg5sv', // 44d19776-3c22-4d39-882b-356622d7805a.png
-  '1AnEfFAmH0qdq9TTaE5uOsNANXFcZgJq1', // 54d79b31-20d3-419a-b643-be76efd9e91c.png
-  '1rI29GBS3NRcONeg6IcHzVDnd8rc73fkt', // 61c1cdbc-7d49-494c-acbd-829e8073c2e4.png
-  '1wjdIRcr6LwMSFSQdAg_vFi_d9L8Y_EIp', // 63dc4509-ad43-4c5e-b3fc-ae0517fa7190.png
-  '1SL-MP-mcLxhrXimxFwV1s4JSm_i1dm8f', // 078a3f85-6fa9-44e9-ab48-0497192bea1d (1).png
-  '1j3l5dPnWeYcBrWKisEYz81OBeKrBGb7L', // 078a3f85-6fa9-44e9-ab48-0497192bea1d.png
-  '1hzUsTUQ_zsEdxsB58qWNDnTgcrDPf14J', // 92b2e901-115b-4616-8e50-ff3f621573c4.png
-  '1ii3na3mrR64SNrC9vFCsW9CMDFjNPghd', // 95f667ad-61f5-4120-99a1-54f420c4c710.png
-  '1nuDOtseoG2rb9sf_ZU5IPkusNaav_1Mf', // 96ec10c8-96ab-4640-b211-3c85cfef3326.png
-  '1nY5rS9KapH2boJNRjozlg5PbjE4BWa7J', // 97e73b67-3e00-4d27-af42-764a2baec473.png
-  '1135UkH056BvyRw9yxpdFcebvxZXQlpVF', // 0128a3ce-aa02-4885-9197-639ce08991ed.png
-  '1MExDx0Uw3iKpG5-6Yt1QFkfvC31gR5z0', // 133db003-13ed-4af3-8fa9-5c08b5ecb7c6.png
-  '1IfGPpC-DAMS4bpSHu54lIV4p2HxwZ8_W', // 223eee1c-2d82-4c9b-9e57-a7cbab882298.png
-  '1VbZ34Te-9B1SiADOX_WtvQeec_MtNL7f', // 352e97fd-f21e-4114-bd9e-6325d4e6ebc2.png
-  '1mZaVAmo3z6bR3ZKXoZjoAfFU6nI0o9d0', // 0419f47a-11d2-4d59-859c-3fd955ac1cb1.png
-  '1-ITk4ePUEQbtBMq-fX4FiqIgydQeoiWu', // 429b8b6d-11de-4f2d-b1f5-6c77410a5c8c.png
-  '11xilaoIPz6qbnJaNFS3TmVmCs5x6Yo2X', // 545c249e-4dd2-47a8-9b38-78e4f0e20e15.png
-  '1I8swqVsnbRgOOV_wJ1QG-VGnG3UjUNsS', // 600d778a-0586-4282-aaa6-9b8b6d56aaee.png
-];
-
-let currentDriveDuIndex = Math.floor(Math.random() * GOOGLE_DRIVE_DU_IDS.length);
-
-export function getNextDriveReferenceUrl() {
-  const fileId = GOOGLE_DRIVE_DU_IDS[currentDriveDuIndex % GOOGLE_DRIVE_DU_IDS.length];
-  currentDriveDuIndex = (currentDriveDuIndex + 1) % GOOGLE_DRIVE_DU_IDS.length;
-  return `https://lh3.googleusercontent.com/d/${fileId}`;
-}
-
-const DEFAULT_DU_REFERENCE_URL = getNextDriveReferenceUrl();
-
-function resolveReferenceImageUrl(rawUrl) {
-  if (rawUrl === null || rawUrl === false) return null;
-  if (!rawUrl || typeof rawUrl !== 'string' || rawUrl.includes('cloudinary.com') || rawUrl.includes('drive.google.com/drive/folders')) {
-    const picked = getNextDriveReferenceUrl();
-    console.log(`[Drive Reference] Tự động chọn ảnh mẫu từ Google Drive (#${currentDriveDuIndex}/${GOOGLE_DRIVE_DU_IDS.length}): ${picked}`);
-    return picked;
-  }
-  return rawUrl;
-}
-
-
-// 20 BACKGROUND NỔI BẬT ĐA DẠNG MÀU SẮC (Tím, Xanh nước biển, Lục bảo, Đỏ, Cyberpunk, 3D Luxury)
-const VIBRANT_BACKGROUNDS = [
-  // 1. Tím Neon Cyberpunk
-  'futuristic cyberpunk stage bathed in intense neon violet and electric purple lighting, glowing purple holographic geometry, dark glossy floor with vivid reflections, cinematic atmospheric purple fog',
-  // 2. Xanh Nước Biển Sapphire
-  'stunning deep ocean sapphire showroom with glowing electric blue and cyan light ribbons, sleek dark glass pedestal, immersive aquatic blue ambient glow, high-contrast cool atmosphere',
-  // 3. Lục Bảo Cao Cấp & Mint
-  'luxurious 3D digital gallery with deep emerald green and glowing mint neon accents, dark obsidian marble reflective floor, floating jade light crystals, premium modern aesthetic',
-  // 4. Đỏ Rực Cyberpunk & Ruby
-  'high-impact futuristic showroom bathed in dramatic crimson red and glowing ruby neon lighting, dark carbon-fiber textured panels, striking red rim lighting and sharp reflections',
-  // 5. Tím Midnight & Magenta
-  'luxurious midnight indigo studio with vibrant magenta and purple neon light tubes, floating frosted glass geometric prisms, deep amethyst backdrop, futuristic soft glow',
-  // 6. Xanh Băng Tuyết & Cyan
-  'cutting-edge futuristic stage with glowing ice blue neon pillars, sleek frosted glass architectural elements, clean minimalist deep cobalt and arctic cyan lighting',
-  // 7. Lục Bảo Sinh Học & Teal Garden
-  'breathtaking futuristic indoor bio-tech garden with glowing teal and emerald flora, sleek architectural glass arches, soft cyan and mint lighting, modern tech vibe',
-  // 8. Đỏ Scarlet & Đen Obsidian
-  'dramatic dark obsidian stage with glowing scarlet red neon light rings, floating red holographic geometric shapes, bold and energetic high-tech atmosphere',
-  // 9. Tím Vũ Trụ & Cosmic Matrix
-  'abstract 3D luxury stage with curved glossy purple panels, floating glowing violet rings, deep galaxy purple backdrop with shimmering starlight ambient glow',
-  // 10. Xanh Biển Điện Tử & Cobalt Matrix
-  'sleek dark cobalt blue virtual space with floating glowing neon cyan data nodes, interconnected digital light lines, futuristic technology showroom aesthetic',
-  // 11. Lục Bảo & Neon Mint Aqua
-  'futuristic high-tech lab with glowing neon emerald and bright mint green light strips, holographic matrix projections, dark charcoal metallic surfaces, vibrant green ambient glow',
-  // 12. Đỏ Ruby & Lưới Laser
-  'cutting-edge technology studio with glowing ruby red laser grid lines, floating glass panels, dark matte background with vivid crimson backlight and sleek reflections',
-  // 13. Tím Hoàng Hôn Penthouse
-  'dramatic high-tech penthouse terrace overlooking a glowing neon cyberpunk city at dusk, rich purple and neon violet glow, soft city bokeh lights, reflective glass railings',
-  // 14. Xanh Đại Dương Royal Blue
-  'futuristic high-tech digital studio bathed in electric royal blue and glowing cyan neon lighting, transparent holographic interfaces, sleek reflective floor, cool blue atmosphere',
-  // 15. Lục Bảo & Ngọc Bích Showroom
-  'modern digital showroom with deep teal and dark aqua tones, glowing mint neon light tubes, floating 3D geometric glass prisms, crisp emerald reflections',
-  // 16. Đỏ Năng Động & Lửa Neon
-  'energetic futuristic presentation stage with warm crimson red and glowing neon scarlet arches, sleek polished dark podium, dynamic cinematic lighting',
-  // 17. Tím Neon Laser Hologram
-  'sleek futuristic exhibition stage with glowing violet laser light grids, floating holographic data crystals, deep dark purple backdrop with neon purple accents',
-  // 18. Xanh Biển Pha Lê Sapphire
-  'sleek panoramic lounge overlooking a neon-lit futuristic city with glowing blue and cyan skyscrapers at night, polished dark marble surfaces, rich cool blue tones',
-  // 19. Lục Bảo Pha Lê 3D
-  'abstract 3D stage featuring floating glowing emerald crystals, neon mint ambient lighting, dark glossy floor reflecting vibrant green light',
-  // 20. Đỏ Cyber Metropolis
-  'futuristic urban terrace overlooking a neon red cyberpunk cityscape at night, glowing ruby billboards in background, sleek dark metal architecture, high-contrast glow',
-];
-
-// Bộ đếm xoay vòng tuần tự để xen kẽ 100% không trùng lặp bối cảnh
-let currentBgIndex = Math.floor(Math.random() * VIBRANT_BACKGROUNDS.length);
-let currentLayoutIndex = Math.floor(Math.random() * 5);
-let currentPoseIndex = Math.floor(Math.random() * 7);
-
-function getNextBackground() {
-  const bg = VIBRANT_BACKGROUNDS[currentBgIndex % VIBRANT_BACKGROUNDS.length];
-  const bgNumber = (currentBgIndex % VIBRANT_BACKGROUNDS.length) + 1;
-  currentBgIndex = (currentBgIndex + 1) % VIBRANT_BACKGROUNDS.length;
-  return { bg, bgNumber };
-}
-
-function getNextLayout(layouts) {
-  const layout = layouts[currentLayoutIndex % layouts.length];
-  const layoutNumber = (currentLayoutIndex % layouts.length) + 1;
-  currentLayoutIndex = (currentLayoutIndex + 1) % layouts.length;
-  return { layout, layoutNumber };
-}
-
-function getNextPose(poses) {
-  const pose = poses[currentPoseIndex % poses.length];
-  const poseNumber = (currentPoseIndex % poses.length) + 1;
-  currentPoseIndex = (currentPoseIndex + 1) % poses.length;
-  return { pose, poseNumber };
-}
-
-// Layout, Pose và Background xoay vòng xen kẽ (Tím -> Xanh biển -> Lục bảo -> Đỏ -> ...)
-function pickVariation(promptText = '', hasDu = true) {
-  if (!hasDu) {
-    const humanLayouts = [
-      'FULL-BLEED SCENE WITH SOFT CURVED OVERLAY CARD (Right): Environmental background spans 100% full-bleed. A sleek semi-transparent white frosted glass panel with smooth curved edges rests on the RIGHT side (50% width), containing all headline text. A photorealistic Vietnamese professional model stands on the LEFT side.',
-
-      'FULL-BLEED SCENE WITH FROSTED GLASS PANEL (Left): Environmental background spans 100% full-bleed. A sleek semi-transparent frosted glass panel rests on the LEFT side (50% width) containing all headline text. A photorealistic Vietnamese human model stands on the RIGHT side in a dynamic pose.',
-
-      'FULL-BLEED SCENE WITH TOP-RIGHT FLOATING CARD: Environmental background spans 100% full-bleed. Text block is set inside a clean translucent floating card in the TOP-RIGHT zone. Photorealistic Vietnamese human model stands neatly in the BOTTOM-LEFT zone.',
-
-      'FULL-BLEED SCENE WITH TOP-LEFT FLOATING CARD: Environmental background spans 100% full-bleed. Headline text is placed on a sleek translucent floating card in the TOP-LEFT zone. Photorealistic Vietnamese human model stands in the BOTTOM-RIGHT zone.',
-
-      'FULL-BLEED SCENE WITH BOTTOM TEXT BAR: Environmental background spans 100% full-bleed. A translucent frosted glass bar across the BOTTOM 35% contains all text. Photorealistic Vietnamese human model stands prominently in the UPPER-LEFT area.',
-    ];
-
-    const humanPoses = [
-      'standing confidently in smart casual attire, one arm extended pointing gracefully toward the text card area',
-      'holding a glowing holographic tablet or modern smartphone in hands, looking forward with a bright confident smile',
-      'sitting relaxed at a sleek modern desk with an open laptop, turning slightly toward the camera with a warm professional smile',
-      'walking forward dynamically with an energetic stride, carrying a sleek digital device, smiling warmly',
-      'standing with arms crossed over chest in a proud, confident executive stance, smiling brightly',
-      'leaning slightly against a sleek glass desk or railing, gesturing with one hand in an engaging presentation pose',
-      'standing near floating holographic UI dashboards, interacting with data graphics with one hand',
-    ];
-
-    const { layout, layoutNumber } = getNextLayout(humanLayouts);
-    const { pose, poseNumber } = getNextPose(humanPoses);
-
-    console.log(`[Variation] Human Model Layout: ${layoutNumber}/${humanLayouts.length} | Pose: ${poseNumber}/${humanPoses.length} (Bối cảnh tự nhiên linh hoạt theo bài viết)`);
-    return [
-      '⚠️ ART DIRECTION & COMPOSITION REQUIREMENTS:',
-      '1. BACKGROUND & ENVIRONMENT: Create a photorealistic, natural, high-end commercial environment that directly matches and illustrates the article topic. Do NOT force unnatural neon or artificial cyberpunk stages.',
-      '2. BRANDING / LOGO: Include a clean brand logo badge in the TOP corner (top-left or top-right) displaying bold white text "DUDI" with "software" underneath on a vibrant red background.',
-      '3. CHARACTER: Include ONE photorealistic Vietnamese human model matching the article topic. ABSOLUTELY NO cartoon mascots, NO 3D toy mascots, NO Du mascot.',
-      '4. CHARACTER POSE: The human model is ' + pose + '.',
-      '5. TEXT ZONE: All text MUST be placed inside a clean semi-transparent frosted glass panel or translucent overlay card resting directly over the full-bleed background.',
-      '6. ZONE SEPARATION: Text and human model occupy separate non-overlapping spatial zones. Text must be 100% legible.',
-      `LAYOUT: ${layout}`,
-      'The composition and branding above are requirements. The background setting must dynamically match the article context naturally.',
-      '---',
-    ].join('\n');
-  }
-
-  // Workflow Giờ Chẵn / Có DU mascot: BỐ CỤC ĐA DẠNG, BỐI CẢNH TỰ NHIÊN HÒA HỢP VỚI ẢNH MẪU GOOGLE DRIVE
-  const duLayouts = [
-    'FULL-BLEED SCENE WITH SOFT CURVED OVERLAY CARD (Right): Environmental background spans 100% full-bleed. A sleek semi-transparent white frosted glass panel with smooth curved edges rests on the RIGHT side containing all headline text. Du mascot stands neatly on the LEFT side.',
-
-    'FULL-BLEED SCENE WITH FROSTED GLASS PANEL (Left): Environmental background spans 100% full-bleed. A sleek semi-transparent frosted glass panel rests on the LEFT side containing all text. Du mascot stands cleanly on the RIGHT side.',
-
-    'FULL-BLEED SCENE WITH FLOATING TEXT CARD (Top-Right): Environmental background spans 100% full-bleed. Headline text is placed on a clean translucent floating card in the TOP-RIGHT area. Du mascot stands in the BOTTOM-LEFT corner.',
-
-    'FULL-BLEED SCENE WITH FLOATING TEXT CARD (Top-Left): Environmental background spans 100% full-bleed. Headline text is placed on a clean translucent floating card in the TOP-LEFT area. Du mascot stands in the BOTTOM-RIGHT corner.',
-
-    'FULL-BLEED SCENE WITH BOTTOM TEXT BAR: Environmental background spans 100% full-bleed. Translucent frosted glass bar across the BOTTOM 35% contains all text. Du mascot stands in the UPPER-LEFT area.',
-  ];
-
-  const duPoses = [
-    'standing upright with RIGHT arm extended, index finger confidently pointing toward the text area',
-    'sitting casually on the edge of a stylized floating geometric platform, one leg dangling, relaxed and approachable pose',
-    'walking forward dynamically with a confident energetic stride, arms swinging naturally',
-    'arms crossed over chest in a cool confident stance, head tilted slightly',
-    'holding a glowing holographic tablet or phone in both hands, screen emitting soft blue light',
-    'both arms raised upward in a celebratory V-shape victory pose',
-    'leaning forward slightly with one hand raised in a friendly wave gesture',
-  ];
-
-  const { layout, layoutNumber } = getNextLayout(duLayouts);
-  const { pose, poseNumber } = getNextPose(duPoses);
-
-  console.log(`[Variation] Du Mascot Layout: ${layoutNumber}/${duLayouts.length} | Pose: ${poseNumber}/${duPoses.length} (Bối cảnh tự nhiên theo bài viết & ảnh mẫu Drive)`);
-
-  return [
-    '⚠️ ART DIRECTION & COMPOSITION REQUIREMENTS:',
-    '1. DU CHARACTER IDENTITY: Look closely at the uploaded reference image of Du mascot. Du must strictly maintain the identical 3D mascot design, glossy red helmet, cyan LED eyes, and proportions shown in the reference image.',
-    '2. BACKGROUND & SETTING: Create an engaging, professional commercial background environment that seamlessly and naturally fits the article topic and harmonizes with the uploaded reference image. Do NOT force artificial neon cyberpunk or repetitive rigid backgrounds.',
-    '3. BRANDING / LOGO: Include a clean brand logo badge in the TOP corner (top-left or top-right) displaying bold white text "DUDI" with "software" underneath on a vibrant red background.',
-    '4. DU CHARACTER: Du mascot is medium-to-small size (20-40% of frame height), fully opaque and solid.',
-    '5. TEXT ZONE: All text MUST be placed inside a clean semi-transparent frosted glass panel or translucent overlay card resting over the full-bleed background.',
-    '6. ZONE SEPARATION: Text and Du character occupy separate non-overlapping spatial zones — zero text printed on top of Du.',
-    `LAYOUT: ${layout}`,
-    `DU POSE: ${pose}`,
-    'The composition, character fidelity, and branding above are requirements. The background setting must dynamically match the article context.',
-    '---',
-  ].join('\n');
-}
+const DEFAULT_DU_REFERENCE_URL = 'auto_drive';
 
 async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenceImageUrl = DEFAULT_DU_REFERENCE_URL, checkText = true, newConversation = false }) {
   const targetReferenceUrl = resolveReferenceImageUrl(referenceImageUrl);
@@ -1957,7 +1566,7 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
       const initialAssistantCount = await page.locator('[data-message-author-role="assistant"]').count().catch(() => 0);
       const initialSrcs = new Set(await imageSources(page));
 
-      // Upload ảnh tham chiếu Du (khi Workflow 1 — hasDu = true)
+      // Upload ảnh tham chiếu Du (khi hasDu = true)
       let attachSuccess = false;
       if (hasDu && targetReferenceUrl) {
         attachSuccess = await attachReferenceImage(page, targetReferenceUrl);
@@ -1971,37 +1580,45 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenc
         for (const s of afterAttachSrcs) initialSrcs.add(s);
 
         if (!attachSuccess) {
-          console.warn(`[${account.name}] Cảnh báo: Không thể xác thực ảnh con DU được đính kèm. Sẽ tự động dùng prompt chuẩn để tránh lỗi.`);
+          console.warn(`[${account.name}] Cảnh báo: Trình duyệt chưa bắt được preview ảnh, nhưng file đã nạp vào composer.`);
         }
       }
 
       const input = await promptBox(page);
       let promptToSend;
 
-      if (attempt === 1) {
-        // Chỉ yêu cầu ChatGPT vẽ con DU khi đã đính kèm thành công ảnh tham chiếu
-        // Nếu ảnh chưa đính kèm mà ép vẽ Du mascot, ChatGPT sẽ dừng lại và hỏi ảnh
-        const effectiveHasDu = hasDu && attachSuccess;
-        const variation = pickVariation(prompt, effectiveHasDu);
-        promptToSend = [
-          'Generate one high-quality image using this exact art direction:',
-          variation,
-          prompt.trim(),
-          aspectRatio ? 'Preferred aspect ratio: ' + aspectRatio + '.' : '',
-          'Do not explain the prompt. Generate the image now.',
-        ].filter(Boolean).join('\n\n');
-      } else {
-        // Khi thử lại (do policy error, generation failure hoặc text error): tối ưu prompt an toàn hơn
-        console.warn(`[${account.name}] Thử lại tạo ảnh lần ${attempt}: tự động tối ưu prompt tuân thủ chính sách và chính xác...`);
-        const safePrompt = sanitizePromptForPolicy(prompt);
-        const retryNote = lastError?.message?.includes('chính tả') || lastError?.message?.includes('chữ')
-          ? 'CRITICAL REQUIREMENT: Make sure all Vietnamese text rendered on the image is 100% correct with full standard diacritics and no typos.'
-          : 'CRITICAL REQUIREMENT: Strictly follow all safety and content policies. Create a clean, professional, family-friendly marketing visual.';
+      if (hasDu) {
+        // CHẾ ĐỘ GIỮ NGUYÊN BỐI CẢNH ẢNH MẪU GOOGLE DRIVE — CHỈ THAY DUY NHẤT CHỮ TRÊN CARD
+        const { headline, subheadline } = extractCardTextFromPrompt(prompt);
+        console.log(`[ChatGPT] 🎯 LẤY NGUYÊN BỐI CẢNH ẢNH MẪU — CHỈ THAY CHỮ TRÊN CARD:`);
+        console.log(`   - Tiêu đề chính: "${headline}"`);
+        if (subheadline) console.log(`   - Phụ đề / nội dung: "${subheadline}"`);
 
         promptToSend = [
-          'Please regenerate a brand new high-quality image for the following topic:',
-          retryNote,
-          safePrompt,
+          'Using the uploaded reference image:',
+          '1. STRICTLY PRESERVE THE COMPLETE 3D SCENE & ENVIRONMENT:',
+          '- Keep the exact same 3D background scene, environment, setting, atmosphere, lighting, and colors as shown in the uploaded reference image.',
+          '- Keep the exact same 3D mascot character (identical design, outfit, pose, proportions, and placement) from the uploaded reference image.',
+          '- Keep the exact same card/panel shape, style, position, and layout from the uploaded reference image.',
+          '- Do NOT change the background scene. Do NOT invent a new room, office, or setting. Do NOT change the character or clothing.',
+          '',
+          '2. YOUR ONLY TASK IS TO REPLACE THE TEXT ON THE CARD:',
+          'Replace the text inside the card with this new Vietnamese content:',
+          `- TIÊU ĐỀ: "${headline}"`,
+          subheadline ? `- NỘI DUNG: "${subheadline}"` : '',
+          '',
+          '3. TEXT ACCURACY REQUIREMENTS:',
+          '- Render the text cleanly inside the card with 100% correct Vietnamese spelling, standard diacritics, and elegant typography matching the original card style.',
+          '- Keep the DUDI Software brand logo.',
+          '',
+          aspectRatio ? 'Preferred aspect ratio: ' + aspectRatio + '.' : '',
+          'Do not explain. Generate the image now.',
+        ].filter(Boolean).join('\n');
+      } else {
+        // Chế độ không dùng Du (mô hình người/human model hoặc đồ họa tự do)
+        promptToSend = [
+          'Generate one high-quality, professional commercial image matching the following description:',
+          prompt.trim(),
           aspectRatio ? 'Preferred aspect ratio: ' + aspectRatio + '.' : '',
           'Do not explain. Generate the image now.',
         ].filter(Boolean).join('\n\n');

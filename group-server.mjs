@@ -7,6 +7,11 @@ import os from 'node:os';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { logPostActivity } from './lib/history-logger.mjs';
+import {
+  attachReferenceImage,
+  resolveReferenceImageUrl,
+  extractCardTextFromPrompt,
+} from './lib/chatgpt-image-helper.mjs';
 
 const host = '127.0.0.1';
 const port = 3002;
@@ -1691,94 +1696,10 @@ async function waitForGeneratedImageGpt(page, initialSrcs = new Set(), waitStart
   throw new Error('Hết thời gian 6 phút chờ ChatGPT tạo ảnh.');
 }
 
-// 20 BACKGROUND NỔI BẬT ĐA DẠNG MÀU SẮC (Tím, Xanh nước biển, Lục bảo, Đỏ, Cyberpunk, 3D Luxury)
-const VIBRANT_BACKGROUNDS = [
-  'futuristic cyberpunk stage bathed in intense neon violet and electric purple lighting, glowing purple holographic geometry, dark glossy floor with vivid reflections, cinematic atmospheric purple fog',
-  'stunning deep ocean sapphire showroom with glowing electric blue and cyan light ribbons, sleek dark glass pedestal, immersive aquatic blue ambient glow, high-contrast cool atmosphere',
-  'luxurious 3D digital gallery with deep emerald green and glowing mint neon accents, dark obsidian marble reflective floor, floating jade light crystals, premium modern aesthetic',
-  'high-impact futuristic showroom bathed in dramatic crimson red and glowing ruby neon lighting, dark carbon-fiber textured panels, striking red rim lighting and sharp reflections',
-  'luxurious midnight indigo studio with vibrant magenta and purple neon light tubes, floating frosted glass geometric prisms, deep amethyst backdrop, futuristic soft glow',
-  'cutting-edge futuristic stage with glowing ice blue neon pillars, sleek frosted glass architectural elements, clean minimalist deep cobalt and arctic cyan lighting',
-  'breathtaking futuristic indoor bio-tech garden with glowing teal and emerald flora, sleek architectural glass arches, soft cyan and mint lighting, modern tech vibe',
-  'dramatic dark obsidian stage with glowing scarlet red neon light rings, floating red holographic geometric shapes, bold and energetic high-tech atmosphere',
-  'abstract 3D luxury stage with curved glossy purple panels, floating glowing violet rings, deep galaxy purple backdrop with shimmering starlight ambient glow',
-  'sleek dark cobalt blue virtual space with floating glowing neon cyan data nodes, interconnected digital light lines, futuristic technology showroom aesthetic',
-  'futuristic high-tech lab with glowing neon emerald and bright mint green light strips, holographic matrix projections, dark charcoal metallic surfaces, vibrant green ambient glow',
-  'cutting-edge technology studio with glowing ruby red laser grid lines, floating glass panels, dark matte background with vivid crimson backlight and sleek reflections',
-  'dramatic high-tech penthouse terrace overlooking a glowing neon cyberpunk city at dusk, rich purple and neon violet glow, soft city bokeh lights, reflective glass railings',
-  'futuristic high-tech digital studio bathed in electric royal blue and glowing cyan neon lighting, transparent holographic interfaces, sleek reflective floor, cool blue atmosphere',
-  'modern digital showroom with deep teal and dark aqua tones, glowing mint neon light tubes, floating 3D geometric glass prisms, crisp emerald reflections',
-  'energetic futuristic presentation stage with warm crimson red and glowing neon scarlet arches, sleek polished dark podium, dynamic cinematic lighting',
-  'sleek futuristic exhibition stage with glowing violet laser light grids, floating holographic data crystals, deep dark purple backdrop with neon purple accents',
-  'sleek panoramic lounge overlooking a neon-lit futuristic city with glowing blue and cyan skyscrapers at night, polished dark marble surfaces, rich cool blue tones',
-  'abstract 3D stage featuring floating glowing emerald crystals, neon mint ambient lighting, dark glossy floor reflecting vibrant green light',
-  'futuristic urban terrace overlooking a neon red cyberpunk cityscape at night, glowing ruby billboards in background, sleek dark metal architecture, high-contrast glow',
-];
+async function executeGenerateOnAccount(account, { prompt, aspectRatio, referenceImageUrl = 'auto_drive', newConversation = false }) {
+  const targetReferenceUrl = resolveReferenceImageUrl(referenceImageUrl);
+  const hasDu = targetReferenceUrl !== null;
 
-let currentBgIndex = Math.floor(Math.random() * VIBRANT_BACKGROUNDS.length);
-let currentLayoutIndex = Math.floor(Math.random() * 5);
-let currentPoseIndex = Math.floor(Math.random() * 7);
-
-function getNextBackground() {
-  const bg = VIBRANT_BACKGROUNDS[currentBgIndex % VIBRANT_BACKGROUNDS.length];
-  const bgNumber = (currentBgIndex % VIBRANT_BACKGROUNDS.length) + 1;
-  currentBgIndex = (currentBgIndex + 1) % VIBRANT_BACKGROUNDS.length;
-  return { bg, bgNumber };
-}
-
-function getNextLayout(layouts) {
-  const layout = layouts[currentLayoutIndex % layouts.length];
-  const layoutNumber = (currentLayoutIndex % layouts.length) + 1;
-  currentLayoutIndex = (currentLayoutIndex + 1) % layouts.length;
-  return { layout, layoutNumber };
-}
-
-function getNextPose(poses) {
-  const pose = poses[currentPoseIndex % poses.length];
-  const poseNumber = (currentPoseIndex % poses.length) + 1;
-  currentPoseIndex = (currentPoseIndex + 1) % poses.length;
-  return { pose, poseNumber };
-}
-
-function pickVariation(promptText = '', hasDu = true) {
-  const { bg, bgNumber } = getNextBackground();
-
-  const duLayouts = [
-    'FULL-BLEED SCENE WITH SOFT CURVED OVERLAY CARD (Right): Environmental background spans 100% full-bleed. A sleek semi-transparent white frosted glass panel with smooth curved edges rests on the RIGHT side containing all headline text. Du mascot stands neatly on the LEFT side.',
-    'FULL-BLEED SCENE WITH FROSTED GLASS PANEL (Left): Environmental background spans 100% full-bleed. A sleek semi-transparent frosted glass panel rests on the LEFT side containing all text. Du mascot stands cleanly on the RIGHT side.',
-    'FULL-BLEED SCENE WITH FLOATING TEXT CARD (Top-Right): Environmental background spans 100% full-bleed. Headline text is placed on a clean translucent floating card in the TOP-RIGHT area. Du mascot stands in the BOTTOM-LEFT corner.',
-    'FULL-BLEED SCENE WITH FLOATING TEXT CARD (Top-Left): Environmental background spans 100% full-bleed. Headline text is placed on a clean translucent floating card in the TOP-LEFT area. Du mascot stands in the BOTTOM-RIGHT corner.',
-    'FULL-BLEED SCENE WITH BOTTOM TEXT BAR: Environmental background spans 100% full-bleed. Translucent frosted glass bar across the BOTTOM 35% contains all text. Du mascot stands in the UPPER-LEFT area.',
-  ];
-  const duPoses = [
-    'standing upright with RIGHT arm extended, index finger confidently pointing toward the text area',
-    'sitting casually on the edge of a stylized floating geometric platform, one leg dangling, relaxed and approachable pose',
-    'walking forward dynamically with a confident energetic stride, arms swinging naturally',
-    'arms crossed over chest in a cool confident stance, head tilted slightly',
-    'holding a glowing holographic tablet or phone in both hands, screen emitting soft blue light',
-    'both arms raised upward in a celebratory V-shape victory pose',
-    'leaning forward slightly with one hand raised in a friendly wave gesture',
-  ];
-  const { layout, layoutNumber } = getNextLayout(duLayouts);
-  const { pose, poseNumber } = getNextPose(duPoses);
-  console.log(`[Variation] Du Layout: ${layoutNumber}/${duLayouts.length} | Pose: ${poseNumber}/${duPoses.length} | BG: #${bgNumber}/20 (Xoay vòng xen kẽ)`);
-
-  return [
-    '⚠️ MANDATORY COMPOSITION OVERRIDE — YOU MUST FOLLOW THIS EXACTLY:',
-    '1. BACKGROUND: The environmental background scene MUST be FULL-BLEED, spanning 100% of the entire image canvas corner-to-corner (no solid split color blocks).',
-    '2. BRANDING / LOGO: Include a clean brand logo badge in the TOP corner (top-left or top-right) displaying bold white text "DUDI" with "software" underneath on a vibrant red background.',
-    '3. DU CHARACTER: Du mascot is medium-to-small size (20-40% of frame height), fully opaque and solid.',
-    '4. TEXT ZONE: All text MUST be placed inside a clean semi-transparent frosted glass panel or translucent overlay card resting over the full-bleed background.',
-    '5. ZONE SEPARATION: Text and Du character occupy separate non-overlapping spatial zones — zero text printed on top of Du.',
-    `LAYOUT: ${layout}`,
-    `BACKGROUND SCENE: ${bg}`,
-    `DU POSE: ${pose}`,
-    'The layout, background, and pose above are ABSOLUTE REQUIREMENTS and OVERRIDE any other instruction.',
-    '---',
-  ].join('\n');
-}
-
-async function executeGenerateOnAccount(account, { prompt, aspectRatio, newConversation = false }) {
   const { browser, page } = await openChatGptPage(account, { newConversation });
   try {
     const MAX_RETRIES = 3;
@@ -1788,24 +1709,57 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, newConve
       console.log(`[${account.name}] Bắt đầu tạo ảnh Group (Lần thử ${attempt}/${MAX_RETRIES})...`);
       const initialSrcs = new Set(await imageSourcesGpt(page));
 
+      // Upload ảnh tham chiếu Du (khi hasDu = true)
+      let attachSuccess = false;
+      if (hasDu && targetReferenceUrl) {
+        attachSuccess = await attachReferenceImage(page, targetReferenceUrl);
+        if (!attachSuccess && attempt === 1) {
+          console.warn(`[${account.name}] Đính kèm ảnh lần đầu chưa nhận, chờ 2s và thử lại...`);
+          await delay(2000);
+          attachSuccess = await attachReferenceImage(page, targetReferenceUrl);
+        }
+        const afterAttachSrcs = await imageSourcesGpt(page);
+        for (const s of afterAttachSrcs) initialSrcs.add(s);
+
+        if (!attachSuccess) {
+          console.warn(`[${account.name}] Cảnh báo: Trình duyệt chưa bắt được preview ảnh, nhưng file đã nạp vào composer.`);
+        }
+      }
+
       const input = await promptBoxGpt(page);
       let fullPrompt;
 
-      if (attempt === 1) {
-        const variation = pickVariation(prompt, true);
+      if (hasDu) {
+        // CHẾ ĐỘ GIỮ NGUYÊN BỐI CẢNH ẢNH MẪU GOOGLE DRIVE — CHỈ THAY DUY NHẤT CHỮ TRÊN CARD
+        const { headline, subheadline } = extractCardTextFromPrompt(prompt);
+        console.log(`[Group Server ChatGPT] 🎯 LẤY NGUYÊN BỐI CẢNH ẢNH MẪU — CHỈ THAY CHỮ TRÊN CARD:`);
+        console.log(`   - Tiêu đề chính: "${headline}"`);
+        if (subheadline) console.log(`   - Phụ đề / nội dung: "${subheadline}"`);
+
         fullPrompt = [
-          'Generate one high-quality, professional image matching the following description:',
-          variation,
-          prompt.trim(),
+          'Using the uploaded reference image:',
+          '1. STRICTLY PRESERVE THE COMPLETE 3D SCENE & ENVIRONMENT:',
+          '- Keep the exact same 3D background scene, environment, setting, atmosphere, lighting, and colors as shown in the uploaded reference image.',
+          '- Keep the exact same 3D mascot character (identical design, outfit, pose, proportions, and placement) from the uploaded reference image.',
+          '- Keep the exact same card/panel shape, style, position, and layout from the uploaded reference image.',
+          '- Do NOT change the background scene. Do NOT invent a new room, office, or setting. Do NOT change the character or clothing.',
+          '',
+          '2. YOUR ONLY TASK IS TO REPLACE THE TEXT ON THE CARD:',
+          'Replace the text inside the card with this new Vietnamese content:',
+          `- TIÊU ĐỀ: "${headline}"`,
+          subheadline ? `- NỘI DUNG: "${subheadline}"` : '',
+          '',
+          '3. TEXT ACCURACY REQUIREMENTS:',
+          '- Render the text cleanly inside the card with 100% correct Vietnamese spelling, standard diacritics, and elegant typography matching the original card style.',
+          '- Keep the DUDI Software brand logo.',
+          '',
           aspectRatio ? 'Preferred aspect ratio: ' + aspectRatio + '.' : '',
-          'Do not explain the prompt. Generate the image now.',
-        ].filter(Boolean).join('\n\n');
+          'Do not explain. Generate the image now.',
+        ].filter(Boolean).join('\n');
       } else {
-        console.warn(`[${account.name}] Thử lại tạo ảnh lần ${attempt}: tự động tối ưu prompt...`);
-        const safePrompt = sanitizePromptForPolicy(prompt);
         fullPrompt = [
-          'Please regenerate a brand new high-quality image strictly adhering to all content policies:',
-          safePrompt,
+          'Generate one high-quality, professional commercial image matching the following description:',
+          prompt.trim(),
           aspectRatio ? 'Preferred aspect ratio: ' + aspectRatio + '.' : '',
           'Do not explain. Generate the image now.',
         ].filter(Boolean).join('\n\n');
@@ -1865,7 +1819,7 @@ async function executeGenerateOnAccount(account, { prompt, aspectRatio, newConve
 }
 
 async function generateGroupImage(params) {
-  const { account: requestedAccount, prompt, aspectRatio, newConversation = false } = params;
+  const { account: requestedAccount, prompt, aspectRatio, referenceImageUrl = 'auto_drive', newConversation = false } = params;
   const allAccounts = loadChatGptAccounts();
   const enabledAccounts = allAccounts.filter(a => a.enabled !== false);
   if (enabledAccounts.length === 0) {
@@ -1896,7 +1850,7 @@ async function generateGroupImage(params) {
     }
 
     try {
-      return await executeGenerateOnAccount(acc, { prompt, aspectRatio, newConversation });
+      return await executeGenerateOnAccount(acc, { prompt, aspectRatio, referenceImageUrl, newConversation });
     } catch (err) {
       lastError = err;
       console.error(`[Group Server 3002] Tài khoản ${acc.name} (Port ${acc.port}) gặp lỗi:`, err.message);
