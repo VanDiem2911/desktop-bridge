@@ -1108,6 +1108,39 @@ async function executeGroupPosting(body) {
 
   const rawConfig = loadConfig();
   const config = resolveRotationAndQuarantine(rawConfig);
+  if (!Array.isArray(config.accounts)) config.accounts = [];
+
+  // Tự động bổ sung tài khoản từ fanpage-config.json nếu có nick chưa có trong groups-config
+  const fpConfigPath = path.join(__dirname, 'configs', 'fanpage-config.json');
+  if (fs.existsSync(fpConfigPath)) {
+    try {
+      const fpRaw = JSON.parse(fs.readFileSync(fpConfigPath, 'utf-8'));
+      const fpAccounts = Array.isArray(fpRaw.accounts) ? fpRaw.accounts : [];
+      for (const fp of fpAccounts) {
+        const fpIdStr = String(fp.id);
+        const alreadyExists = config.accounts.some(a => 
+          String(a.id) === fpIdStr ||
+          String(a.id) === `acc_${fpIdStr}` ||
+          String(a.id) === `fb_acc_${fpIdStr}` ||
+          (fp.port && Number(a.port) === Number(fp.port)) ||
+          (a.name && fp.name && a.name.toLowerCase().trim() === fp.name.toLowerCase().trim())
+        );
+        if (!alreadyExists) {
+          config.accounts.push({
+            id: `fb_acc_${fp.id}`,
+            name: fp.name || `Tài khoản ${fp.id}`,
+            port: fp.port || (9222 + (Number(fp.id) || 1)),
+            profileDir: fp.profileDir || `n8n-fb-profile-${fp.port || fp.id}`,
+            enabled: fp.enabled !== false,
+            status: fp.status || 'active',
+            roleGroup: 'group_1',
+            groupUrls: [],
+          });
+        }
+      }
+    } catch {}
+  }
+
   const now = Date.now();
   const activeGroupToday = config.rotation?.activeGroupToday || 'group_1';
   const rotationEnabled = config.rotation?.enabled !== false;
@@ -1195,9 +1228,24 @@ async function executeGroupPosting(body) {
       groups: [],
     };
 
-    const groupUrls = Array.isArray(account.groupUrls)
+    let groupUrls = Array.isArray(account.groupUrls)
       ? account.groupUrls.filter(u => u.startsWith('http') && !u.includes('your_group_id'))
       : [];
+
+    if (groupUrls.length === 0 && Array.isArray(config.centralPool)) {
+      const poolGroups = config.centralPool.filter(p =>
+        p.assignedAccountId && (
+          String(p.assignedAccountId) === String(account.id) ||
+          String(p.assignedAccountId) === String(account.id).replace(/^(acc_|fb_acc_)/, '') ||
+          String(p.assignedAccountId) === `acc_${String(account.id).replace(/^(acc_|fb_acc_)/, '')}` ||
+          (account.name && p.assignedAccountName && String(p.assignedAccountName).toLowerCase().trim() === String(account.name).toLowerCase().trim())
+        )
+      ).map(p => p.url).filter(u => u && u.startsWith('http'));
+
+      if (poolGroups.length > 0) {
+        groupUrls = poolGroups;
+      }
+    }
     if (groupUrls.length === 0) {
       console.log(`[Group Server] Tài khoản ${account.name} không có URL nhóm hợp lệ, bỏ qua.`);
       accResult.skipped = true;

@@ -218,10 +218,12 @@ export default function ScheduleTab({
 
   const fanpageAccounts = React.useMemo(() => {
     const list: Array<{ id: string; name: string; port?: number }> = [];
+    const seenIds = new Set<string>();
     (accounts || []).forEach((cat) => {
       if (cat.category === 'facebook' || cat.category === 'fanpage') {
         (cat.items || []).forEach((item) => {
-          if (item.enabled !== false && item.canPostFanpage !== false) {
+          if (item.enabled !== false && item.canPostFanpage !== false && !seenIds.has(item.id)) {
+            seenIds.add(item.id);
             list.push({ id: item.id, name: item.name, port: item.port });
           }
         });
@@ -246,12 +248,12 @@ export default function ScheduleTab({
 
   const groupAccounts = React.useMemo(() => {
     const list: Array<{ id: string; name: string; port?: number; groupCount?: number; roleGroup?: string }> = [];
+    const seenIds = new Set<string>();
     (accounts || []).forEach((cat) => {
       if (cat.category === 'facebook' || cat.category === 'groups') {
         (cat.items || []).forEach((item) => {
-          const hasGroups = (item.groupCount && item.groupCount > 0) || (Array.isArray(item.groupUrls) && item.groupUrls.length > 0);
-          const isGroupAllowed = item.canPostGroup === true || (item.canPostGroup !== false && (hasGroups || cat.category === 'groups'));
-          if (item.enabled !== false && isGroupAllowed) {
+          if (item.enabled !== false && !seenIds.has(item.id)) {
+            seenIds.add(item.id);
             list.push({
               id: item.id,
               name: item.name,
