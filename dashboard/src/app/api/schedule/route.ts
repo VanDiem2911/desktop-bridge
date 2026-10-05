@@ -27,6 +27,8 @@ export interface ChannelScheduleItem {
   enabled: boolean;
   times: string[];
   sheetByTime?: Record<string, string>;
+  accountByTime?: Record<string, string | string[]>;
+  accountsByTime?: Record<string, string[]>;
 }
 
 export interface ChannelSchedules {

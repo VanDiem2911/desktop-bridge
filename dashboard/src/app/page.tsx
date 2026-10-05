@@ -1257,9 +1257,11 @@ export default function DashboardPage() {
     delete sheetByTime[timeStr];
     const accountByTime = { ...(currentChannel.accountByTime || {}) };
     delete accountByTime[timeStr];
+    const accountsByTime = { ...(currentChannel.accountsByTime || {}) };
+    delete accountsByTime[timeStr];
     const updatedChannelSchedules = {
       ...scheduleConfig.channelSchedules,
-      [channelKey]: { ...currentChannel, times: updatedTimes, sheetByTime, accountByTime },
+      [channelKey]: { ...currentChannel, times: updatedTimes, sheetByTime, accountByTime, accountsByTime },
     };
     const newCfg = { ...scheduleConfig, channelSchedules: updatedChannelSchedules };
     setScheduleConfig(newCfg);

@@ -1210,10 +1210,10 @@ async function checkAutoPilotSchedule() {
     const triggeredChannels = {
       personal: Boolean(channelSchedules.personal?.enabled !== false && channelSchedules.personal?.times?.includes(vnTimeStr)),
       fanpage: Boolean(channelSchedules.fanpage?.enabled && channelSchedules.fanpage?.times?.includes(vnTimeStr)),
-      groups: false,
+      groups: Boolean(channelSchedules.groups?.enabled && channelSchedules.groups?.times?.includes(vnTimeStr)),
     };
 
-    const hasAnyTrigger = triggeredChannels.personal || triggeredChannels.fanpage;
+    const hasAnyTrigger = triggeredChannels.personal || triggeredChannels.fanpage || triggeredChannels.groups;
 
     if (hasAnyTrigger && lastAutoPilotRunSlot !== currentSlot) {
       if (isAutoPilotRunning) {
@@ -1226,6 +1226,7 @@ async function checkAutoPilotSchedule() {
       const triggeredNames = [
         triggeredChannels.groups ? 'Facebook Groups (Nhóm)' : null,
         triggeredChannels.fanpage ? 'Fanpage' : null,
+        triggeredChannels.personal ? 'Trang cá nhân' : null,
       ].filter(Boolean).join(', ');
 
       console.log(`[Scheduler] ⏰ Đến khung giờ hẹn ${vnTimeStr}! Bắt đầu kích hoạt Auto-Pilot cho: ${triggeredNames}...`);

@@ -1157,13 +1157,24 @@ async function executeGroupPosting(body) {
     if (targets.length > 0) {
       accountsToRun = accountsToRun.filter(acc => {
         const idStr = String(acc.id);
-        const rawId = idStr.replace(/^acc_/, '');
-        return targets.includes(idStr) || targets.includes(rawId) || targets.includes(acc.name);
+        const rawId = idStr.replace(/^(acc_|fb_acc_|grp_|fb_)/, '');
+        const normTargets = targets.map(t => String(t).replace(/^(acc_|fb_acc_|grp_|fb_)/, ''));
+        return targets.includes(idStr) ||
+          targets.includes(rawId) ||
+          targets.includes(`acc_${rawId}`) ||
+          targets.includes(`fb_acc_${rawId}`) ||
+          targets.includes(acc.name) ||
+          normTargets.includes(rawId) ||
+          normTargets.includes(String(acc.name)) ||
+          (acc.port && targets.includes(String(acc.port)));
       });
     }
   }
 
   if (accountsToRun.length === 0) {
+    if (targetAccounts) {
+      throw new Error(`Không tìm thấy tài khoản nhóm nào phù hợp với danh sách được chọn (${Array.isArray(targetAccounts) ? targetAccounts.join(', ') : targetAccounts}). Vui lòng kiểm tra lại cấu hình tài khoản!`);
+    }
     throw new Error(`Không có tài khoản nào thuộc [${activeGroupToday === 'group_1' ? 'Nhóm 1' : 'Nhóm 2'}] sẵn sàng để đăng bài hôm nay (có thể các nick đang trong Khu cách ly 7 ngày hoặc bị tắt). Hãy kiểm tra lại trên Dashboard!`);
   }
 
