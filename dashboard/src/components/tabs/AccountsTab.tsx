@@ -357,17 +357,40 @@ export default function AccountsTab({
                         </span>
                       </div>
 
-                      {/* Role & Permissions Badges */}
-                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200/80">
-                          <Users className="w-3 h-3 text-indigo-600" />
-                          Đăng Nhóm FB
-                        </span>
-                        {acc.canPostFanpage && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200/80">
-                            <FileText className="w-3 h-3 text-blue-600" />
-                            Fanpage
+                      {/* Role & Permissions Badges & Ca Luân Phiên */}
+                      <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200/80">
+                            <Users className="w-3 h-3 text-indigo-600" />
+                            Đăng Nhóm FB
                           </span>
+                          {acc.canPostFanpage && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200/80">
+                              <FileText className="w-3 h-3 text-blue-600" />
+                              Fanpage
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Nút bấm chuyển Ca Nhóm 1 / Nhóm 2 trực tiếp cho từng Nick */}
+                        {handleChangeRoleGroup && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetAccId = acc.rawId || acc.id;
+                              const newRole = (acc.roleGroup === 'group_2') ? 'group_1' : 'group_2';
+                              handleChangeRoleGroup(targetAccId, newRole);
+                            }}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer transition-all border shadow-xs ${
+                              acc.roleGroup === 'group_2'
+                                ? 'bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200'
+                                : 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200'
+                            }`}
+                            title="Bấm để đổi ca luân phiên cho nick này: Nhóm 1 ⇄ Nhóm 2"
+                          >
+                            <span>{acc.roleGroup === 'group_2' ? '🟡 Ca: Nhóm 2' : '🟢 Ca: Nhóm 1'}</span>
+                            <ArrowLeftRight className="w-2.5 h-2.5 ml-0.5 opacity-70" />
+                          </button>
                         )}
                       </div>
 

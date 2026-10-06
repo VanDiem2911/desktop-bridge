@@ -1208,7 +1208,11 @@ async function executeGroupPosting(body) {
     if (targetAccounts) {
       throw new Error(`Không tìm thấy tài khoản nhóm nào phù hợp với danh sách được chọn (${Array.isArray(targetAccounts) ? targetAccounts.join(', ') : targetAccounts}). Vui lòng kiểm tra lại cấu hình tài khoản!`);
     }
-    throw new Error(`Không có tài khoản nào thuộc [${activeGroupToday === 'group_1' ? 'Nhóm 1' : 'Nhóm 2'}] sẵn sàng để đăng bài hôm nay (có thể các nick đang trong Khu cách ly 7 ngày hoặc bị tắt). Hãy kiểm tra lại trên Dashboard!`);
+    console.warn(`[Group Server] ⚠️ Ca [${activeGroupToday === 'group_1' ? 'Nhóm 1' : 'Nhóm 2'}] không có nick nào sẵn sàng! Tự động fallback chạy các nick sẵn sàng khác để không gián đoạn lịch đăng.`);
+    accountsToRun = (config.accounts || []).filter(acc => acc.enabled !== false && acc.roleGroup !== 'quarantine' && !acc.checkpointAt && acc.status !== 'checkpoint');
+    if (accountsToRun.length === 0) {
+      throw new Error(`Không có tài khoản nào sẵn sàng để đăng bài hôm nay (tất cả nick đang bị tắt hoặc cách ly). Hãy kiểm tra lại trên Dashboard!`);
+    }
   }
 
   const results = [];

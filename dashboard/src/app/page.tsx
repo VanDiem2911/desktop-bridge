@@ -2684,6 +2684,7 @@ export default function DashboardPage() {
       if (data.ok) {
         showToast(data.message, 'success');
         fetchGroups();
+        fetchAccounts();
       } else {
         showToast(data.error || 'Lỗi chuyển nhóm', 'error');
       }
