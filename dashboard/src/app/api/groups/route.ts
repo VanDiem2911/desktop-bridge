@@ -38,9 +38,11 @@ export interface GroupAccountItem {
   disabledReason?: string | null;
   disabledAt?: string | null;
   profileDir?: string;
+  port?: number;
   groupUrls?: string[];
   lastGroupIndex?: number;
   lastPostedAt?: string | null;
+  [key: string]: unknown;
 }
 
 export interface GroupsConfig {
@@ -922,7 +924,7 @@ export async function POST(req: NextRequest) {
         const targetPort = p || Number(fpAcc?.port) || (9223 + nextNum);
         const targetProfileDir = (fpAcc?.profileDir as string) || `n8n-fb-profile-${targetPort}`;
 
-        target = {
+        const createdAcc: GroupAccountItem = {
           id: newId,
           name: newName,
           port: targetPort,
@@ -935,7 +937,12 @@ export async function POST(req: NextRequest) {
           lastGroupIndex: -1,
         };
         if (!Array.isArray(config.accounts)) config.accounts = [];
-        config.accounts.push(target);
+        config.accounts.push(createdAcc);
+        target = createdAcc;
+      }
+
+      if (!target) {
+        return NextResponse.json({ ok: false, error: 'Không tìm thấy tài khoản' }, { status: 404 });
       }
 
       if (roleGroup === 'quarantine') {
