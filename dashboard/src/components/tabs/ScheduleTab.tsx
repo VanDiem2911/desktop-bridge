@@ -725,19 +725,37 @@ export default function ScheduleTab({
               {triggerResult && (
                 <div className="p-5 rounded-2xl bg-emerald-50/90 border-2 border-emerald-400 shadow-md space-y-4 animate-in fade-in duration-300">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/20">
-                        <CheckCircle2 className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-extrabold text-emerald-950">
-                          Đã Đăng Bài Thành Công Lên Facebook!
-                        </h4>
-                        <p className="text-xs text-emerald-700 mt-0.5">
-                          Tiêu đề: <strong className="font-bold text-emerald-900">"{triggerResult.title || 'Bài viết marketing'}"</strong>
-                        </p>
-                      </div>
-                    </div>
+                    {(() => {
+                      const resList = Array.isArray(triggerResult.publishResults) ? triggerResult.publishResults : [];
+                      const anySuccess = resList.some((r: any) => r.success) || Boolean(triggerResult.postUrl);
+                      const allFailed = resList.length > 0 && resList.every((r: any) => !r.success);
+
+                      return (
+                        <div className="flex items-center gap-2.5">
+                          <div className={`w-9 h-9 rounded-2xl flex items-center justify-center shadow-md ${
+                            anySuccess
+                              ? 'bg-emerald-500 text-white shadow-emerald-500/20'
+                              : allFailed
+                              ? 'bg-rose-500 text-white shadow-rose-500/20'
+                              : 'bg-amber-500 text-white shadow-amber-500/20'
+                          }`}>
+                            <CheckCircle2 className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h4 className={`text-sm font-extrabold ${anySuccess ? 'text-emerald-950' : allFailed ? 'text-rose-950' : 'text-amber-950'}`}>
+                              {anySuccess
+                                ? 'Đã Đăng Bài Thành Công Lên Facebook!'
+                                : allFailed
+                                ? 'Đăng Bài Facebook Thất Bại (Xem chi tiết lỗi bên dưới)'
+                                : 'Đã Tạo Xong Ảnh & Nội Dung (Chưa đăng do các kênh Facebook đang TẮT)'}
+                            </h4>
+                            <p className="text-xs text-slate-600 mt-0.5">
+                              Tiêu đề: <strong className="font-bold text-slate-900">"{triggerResult.title || 'Bài viết marketing'}"</strong>
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* NÚT MỞ LINK BÀI VIẾT TRỰC TIẾP TRÊN FACEBOOK */}
                     {triggerResult.postUrl && (
@@ -755,18 +773,36 @@ export default function ScheduleTab({
 
                   {/* Kênh đã đăng, Trạng thái Google Sheet & Nhà cung cấp AI viết bài */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 pt-2 border-t border-emerald-200">
-                    <div className="p-2.5 rounded-xl bg-white/80 border border-emerald-200 text-xs">
-                      <span className="text-slate-500">{facebookGroupCount} Nhóm FB:</span>{' '}
-                      <span className="font-bold text-emerald-700">
-                        {triggerResult.publishResults?.groups?.success ? `✓ Đã đăng (${triggerResult.publishResults.groups.count || 1} nhóm)` : 'Không bật / Đã bỏ qua'}
-                      </span>
-                    </div>
-                    <div className="p-2.5 rounded-xl bg-white/80 border border-emerald-200 text-xs">
-                      <span className="text-slate-500">Fanpage:</span>{' '}
-                      <span className="font-bold text-emerald-700">
-                        {triggerResult.publishResults?.fanpage?.success ? '✓ Đã đăng Fanpage' : 'Không bật / Đã bỏ qua'}
-                      </span>
-                    </div>
+                    {(() => {
+                      const resList = Array.isArray(triggerResult.publishResults) ? triggerResult.publishResults : [];
+                      const grpRes = triggerResult.publishResults?.groups || resList.find((r: any) => r.channel === 'groups');
+                      const fanRes = triggerResult.publishResults?.fanpage || resList.find((r: any) => r.channel === 'fanpage');
+
+                      return (
+                        <>
+                          <div className="p-2.5 rounded-xl bg-white/80 border border-emerald-200 text-xs">
+                            <span className="text-slate-500">{facebookGroupCount} Nhóm FB:</span>{' '}
+                            <span className={`font-bold ${grpRes?.success ? 'text-emerald-700' : grpRes?.error ? 'text-rose-600' : 'text-slate-500'}`}>
+                              {grpRes?.success
+                                ? `✓ Đã đăng (${grpRes.count || 1} nhóm)`
+                                : grpRes?.error
+                                ? `❌ Lỗi: ${grpRes.error}`
+                                : 'Không bật / Đã bỏ qua'}
+                            </span>
+                          </div>
+                          <div className="p-2.5 rounded-xl bg-white/80 border border-emerald-200 text-xs">
+                            <span className="text-slate-500">Fanpage:</span>{' '}
+                            <span className={`font-bold ${fanRes?.success ? 'text-emerald-700' : fanRes?.error ? 'text-rose-600' : 'text-slate-500'}`}>
+                              {fanRes?.success
+                                ? '✓ Đã đăng Fanpage'
+                                : fanRes?.error
+                                ? `❌ Lỗi: ${fanRes.error}`
+                                : 'Không bật / Đã bỏ qua'}
+                            </span>
+                          </div>
+                        </>
+                      );
+                    })()}
                     <div className="p-2.5 rounded-xl bg-white/80 border border-emerald-200 text-xs">
                       <span className="text-slate-500">Google Sheet:</span>{' '}
                       <span className="font-bold text-emerald-700">
