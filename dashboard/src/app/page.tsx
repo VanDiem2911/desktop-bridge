@@ -2684,13 +2684,15 @@ export default function DashboardPage() {
 
   const handleChangeRoleGroup = async (
     accountId: string,
-    roleGroup: 'group_1' | 'group_2' | 'quarantine'
+    roleGroup: 'group_1' | 'group_2' | 'quarantine',
+    port?: number,
+    name?: string
   ) => {
     try {
       const res = await fetch('/api/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'change_role_group', accountId, roleGroup }),
+        body: JSON.stringify({ action: 'change_role_group', accountId, roleGroup, port, name }),
       });
       const data = await res.json();
       if (data.ok) {
@@ -2706,18 +2708,19 @@ export default function DashboardPage() {
     }
   };
 
-  const handleReleaseQuarantine = async (accountId: string) => {
+  const handleReleaseQuarantine = async (accountId: string, port?: number, name?: string) => {
     if (!confirm('Bạn có chắc chắn muốn giải phóng tài khoản này khỏi khu cách ly sớm?')) return;
     try {
       const res = await fetch('/api/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'release_quarantine', accountId }),
+        body: JSON.stringify({ action: 'release_quarantine', accountId, port, name }),
       });
       const data = await res.json();
       if (data.ok) {
         showToast(data.message, 'success');
         fetchGroups();
+        fetchAccounts();
       } else {
         showToast(data.error || 'Lỗi giải phóng cách ly', 'error');
       }

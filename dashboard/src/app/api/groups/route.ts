@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readJsonFile, writeJsonFile, GROUPS_CONFIG_PATH, POST_HISTORY_PATH, fetchFacebookTitle } from '@/lib/server-utils';
+import { readJsonFile, writeJsonFile, GROUPS_CONFIG_PATH, FANPAGE_CONFIG_PATH, POST_HISTORY_PATH, fetchFacebookTitle } from '@/lib/server-utils';
 
 export interface CentralPoolItem {
   id: string;
@@ -875,9 +875,68 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'change_role_group') {
-      const { accountId, roleGroup } = body;
-      const target = config.accounts.find((a) => a.id === accountId);
-      if (!target) return NextResponse.json({ ok: false, error: 'Không tìm thấy tài khoản' }, { status: 404 });
+      const { accountId, roleGroup, port, name } = body;
+      const p = Number(port) || 0;
+      const idStr = accountId !== undefined && accountId !== null ? String(accountId).trim() : '';
+      const numOnly = idStr ? idStr.replace(/\D/g, '') : '';
+      const normName = name ? String(name).toLowerCase().trim() : '';
+
+      // 1. Tìm tài khoản trong config.accounts theo ID, rawId, prefix, port, hoặc name
+      let target = (config.accounts || []).find((a) => {
+        const aId = String(a.id).trim();
+        const aNum = aId.replace(/\D/g, '');
+        if (idStr) {
+          if (aId === idStr) return true;
+          if (`acc_${idStr}` === aId) return true;
+          if (`fb_acc_${aId}` === idStr) return true;
+          if (`fb_acc_${idStr}` === aId) return true;
+          if (`grp_${aId}` === idStr) return true;
+          if (numOnly && aNum && numOnly === aNum) return true;
+        }
+        if (p > 0 && Number(a.port) === p) return true;
+        if (normName && a.name && a.name.toLowerCase().trim() === normName) return true;
+        return false;
+      });
+
+      // 2. Nếu tài khoản chưa có trong groups-config (ví dụ nick tạo từ Fanpage / Profile Chrome), tự động tạo entry trong groups-config
+      if (!target) {
+        const fpConfig = readJsonFile<{ accounts?: Array<Record<string, unknown>> }>(FANPAGE_CONFIG_PATH, { accounts: [] });
+        const fpAcc = (fpConfig.accounts || []).find((a) => {
+          const fpId = String(a.id || '').trim();
+          const fpNum = fpId.replace(/\D/g, '');
+          if (idStr) {
+            if (fpId === idStr || `fb_acc_${fpId}` === idStr) return true;
+            if (numOnly && fpNum && numOnly === fpNum) return true;
+          }
+          if (p > 0 && Number(a.port) === p) return true;
+          if (normName && String(a.name || '').toLowerCase().trim() === normName) return true;
+          return false;
+        });
+
+        const nextNum = (config.accounts || []).reduce((max, a) => {
+          const m = String(a.id).match(/\d+/);
+          return Math.max(max, m ? Number(m[0]) : 0);
+        }, 0) + 1;
+        const newId = `acc_${nextNum}`;
+        const newName = name || (fpAcc?.name as string) || `Tài khoản ${nextNum}`;
+        const targetPort = p || Number(fpAcc?.port) || (9223 + nextNum);
+        const targetProfileDir = (fpAcc?.profileDir as string) || `n8n-fb-profile-${targetPort}`;
+
+        target = {
+          id: newId,
+          name: newName,
+          port: targetPort,
+          profileDir: targetProfileDir,
+          roleGroup: roleGroup || 'group_1',
+          originalRoleGroup: roleGroup || 'group_1',
+          enabled: true,
+          status: 'active',
+          groupUrls: [],
+          lastGroupIndex: -1,
+        };
+        if (!Array.isArray(config.accounts)) config.accounts = [];
+        config.accounts.push(target);
+      }
 
       if (roleGroup === 'quarantine') {
         const qDays = config.rotation?.quarantineDays || 7;
@@ -913,8 +972,26 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'release_quarantine') {
-      const { accountId } = body;
-      const target = config.accounts.find((a) => a.id === accountId);
+      const { accountId, port, name } = body;
+      const p = Number(port) || 0;
+      const idStr = accountId !== undefined && accountId !== null ? String(accountId).trim() : '';
+      const numOnly = idStr ? idStr.replace(/\D/g, '') : '';
+      const normName = name ? String(name).toLowerCase().trim() : '';
+
+      const target = (config.accounts || []).find((a) => {
+        const aId = String(a.id).trim();
+        const aNum = aId.replace(/\D/g, '');
+        if (idStr) {
+          if (aId === idStr) return true;
+          if (`acc_${idStr}` === aId) return true;
+          if (`fb_acc_${aId}` === idStr) return true;
+          if (`fb_acc_${idStr}` === aId) return true;
+          if (numOnly && aNum && numOnly === aNum) return true;
+        }
+        if (p > 0 && Number(a.port) === p) return true;
+        if (normName && a.name && a.name.toLowerCase().trim() === normName) return true;
+        return false;
+      });
       if (!target) return NextResponse.json({ ok: false, error: 'Không tìm thấy tài khoản' }, { status: 404 });
 
       const restored = target.originalRoleGroup || (target.id === 'acc_2' ? 'group_2' : 'group_1');

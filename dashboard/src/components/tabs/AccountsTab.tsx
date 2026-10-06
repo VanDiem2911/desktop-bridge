@@ -37,8 +37,8 @@ interface AccountsTabProps {
     pool?: CentralPoolItem[];
     rotation?: RotationConfig;
   };
-  handleChangeRoleGroup: (accId: string, roleGroup: 'group_1' | 'group_2' | 'quarantine') => Promise<void>;
-  handleReleaseQuarantine: (accId: string) => Promise<void>;
+  handleChangeRoleGroup: (accId: string, roleGroup: 'group_1' | 'group_2' | 'quarantine', port?: number, name?: string) => Promise<void>;
+  handleReleaseQuarantine: (accId: string, port?: number, name?: string) => Promise<void>;
   formatCountdown: (untilStr?: string | null) => string;
   handleSwitchActiveGroup: (targetGroup?: 'group_1' | 'group_2') => Promise<void>;
   handleToggleRotation: (enabled: boolean) => Promise<void>;
@@ -379,7 +379,7 @@ export default function AccountsTab({
                             onClick={() => {
                               const targetAccId = acc.rawId || acc.id;
                               const newRole = (acc.roleGroup === 'group_2') ? 'group_1' : 'group_2';
-                              handleChangeRoleGroup(targetAccId, newRole);
+                              handleChangeRoleGroup(targetAccId, newRole, acc.port, acc.name);
                             }}
                             className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-extrabold cursor-pointer transition-all border shadow-xs ${
                               acc.roleGroup === 'group_2'
