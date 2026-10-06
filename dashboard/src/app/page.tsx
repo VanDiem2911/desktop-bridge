@@ -964,7 +964,11 @@ export default function DashboardPage() {
     }
   };
 
-  const handleTriggerAutoPilot = async (customTopic?: string, channelKey?: 'fanpage' | 'groups' | 'personal' | 'all') => {
+  const handleTriggerAutoPilot = async (
+    customTopic?: string,
+    channelKey?: 'fanpage' | 'groups' | 'personal' | 'all',
+    targetAccounts?: string[] | string
+  ) => {
     if (scheduleTriggering) return;
     try {
       setScheduleTriggering(true);
@@ -1009,6 +1013,14 @@ export default function DashboardPage() {
         } catch {}
       }, 1000);
 
+      const chosenGroupsAccounts = (channelKey === 'groups' && targetAccounts)
+        ? (Array.isArray(targetAccounts) ? (targetAccounts.length > 0 ? targetAccounts : undefined) : [targetAccounts])
+        : (workflowAccounts.groups === 'all' ? undefined : workflowAccounts.groups);
+
+      const chosenFanpageAccounts = (channelKey === 'fanpage' && targetAccounts)
+        ? (Array.isArray(targetAccounts) ? (targetAccounts.length > 0 ? targetAccounts : undefined) : targetAccounts)
+        : workflowAccounts.fanpage;
+
       const res = await fetch('/api/schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1019,8 +1031,8 @@ export default function DashboardPage() {
           channels: effectiveChannels,
           accounts: {
             chatgpt: workflowAccounts.chatgpt,
-            groups: workflowAccounts.groups === 'all' ? undefined : workflowAccounts.groups,
-            fanpage: workflowAccounts.fanpage,
+            groups: chosenGroupsAccounts,
+            fanpage: chosenFanpageAccounts,
             personal: workflowAccounts.personal,
           },
         }),

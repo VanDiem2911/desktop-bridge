@@ -67,7 +67,7 @@ interface ScheduleTabProps {
   handleSlotAccountsToggle?: (channelKey: 'fanpage' | 'groups' | 'personal', time: string, accountId: string) => void;
   handleSlotAccountsSet?: (channelKey: 'fanpage' | 'groups' | 'personal', time: string, accountIds: string[]) => void;
   renderSlotSheetSelect: (channelKey: 'fanpage' | 'groups' | 'personal', time: string) => React.ReactNode;
-  handleTriggerAutoPilot: (customTopic?: string, channelKey?: 'fanpage' | 'groups' | 'personal') => Promise<void>;
+  handleTriggerAutoPilot: (customTopic?: string, channelKey?: 'fanpage' | 'groups' | 'personal', targetAccounts?: string[] | string) => Promise<void>;
   handleSyncGoogleSheets: (targetName?: string) => Promise<void>;
   sheetsOverview: {
     availableTabs?: Array<{ title: string; sheetId: number; rowCount?: number }>;
@@ -1179,7 +1179,7 @@ export default function ScheduleTab({
                       <button
                         type="button"
                         disabled={scheduleTriggering}
-                        onClick={() => handleTriggerAutoPilot(customRunTopic, 'fanpage')}
+                        onClick={() => handleTriggerAutoPilot(customRunTopic, 'fanpage', selectedNewFanpageAccounts.length > 0 ? selectedNewFanpageAccounts : undefined)}
                         className="w-full py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
                       >
                         <Send className="w-3.5 h-3.5" /> 🚀 ĐĂNG NGAY LÊN FANPAGE (TEST)
@@ -1483,7 +1483,7 @@ export default function ScheduleTab({
                       <button
                         type="button"
                         disabled={scheduleTriggering}
-                        onClick={() => handleTriggerAutoPilot(customRunTopic, 'groups')}
+                        onClick={() => handleTriggerAutoPilot(customRunTopic, 'groups', selectedNewGroupsAccounts.length > 0 ? selectedNewGroupsAccounts : undefined)}
                         className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
                       >
                         <Send className="w-3.5 h-3.5" /> 🚀 ĐĂNG NGAY VÀO NHÓM (TEST)
