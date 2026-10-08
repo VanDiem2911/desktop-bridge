@@ -1186,20 +1186,59 @@ async function executeGroupPosting(body) {
   });
 
   if (targetAccounts) {
-    const targets = Array.isArray(targetAccounts) ? targetAccounts.map(String) : [String(targetAccounts)];
+    const rawTargets = Array.isArray(targetAccounts) ? targetAccounts.map(String) : [String(targetAccounts)];
+    const targets = rawTargets.map(t => String(t).trim().toLowerCase());
     if (targets.length > 0) {
+      const normTargets = targets.map(t => t.replace(/^(acc_|fb_acc_|grp_|fb_)/, ''));
+
+      // Đọc thêm fanpage-config.json để tự động phân giải các ID dạng fb_acc_X thành Tên nick hoặc Port
+      const targetNamesAndPorts = new Set();
+      try {
+        if (fs.existsSync(FANPAGE_CONFIG_PATH)) {
+          const fpConf = JSON.parse(fs.readFileSync(FANPAGE_CONFIG_PATH, 'utf-8'));
+          (fpConf.accounts || []).forEach(fp => {
+            const fpId = String(fp.id || '').trim().toLowerCase();
+            const fpNorm = fpId.replace(/^(acc_|fb_acc_|grp_|fb_)/, '');
+            if (targets.includes(fpId) || targets.includes(`fb_acc_${fpId}`) || normTargets.includes(fpNorm)) {
+              if (fp.name) targetNamesAndPorts.add(String(fp.name).trim().toLowerCase());
+              if (fp.port) targetNamesAndPorts.add(String(fp.port));
+            }
+          });
+        }
+      } catch {}
+
       accountsToRun = accountsToRun.filter(acc => {
-        const idStr = String(acc.id);
+        const idStr = String(acc.id || '').trim().toLowerCase();
         const rawId = idStr.replace(/^(acc_|fb_acc_|grp_|fb_)/, '');
-        const normTargets = targets.map(t => String(t).replace(/^(acc_|fb_acc_|grp_|fb_)/, ''));
-        return targets.includes(idStr) ||
-          targets.includes(rawId) ||
-          targets.includes(`acc_${rawId}`) ||
-          targets.includes(`fb_acc_${rawId}`) ||
-          targets.includes(acc.name) ||
-          normTargets.includes(rawId) ||
-          normTargets.includes(String(acc.name)) ||
-          (acc.port && targets.includes(String(acc.port)));
+        const accName = String(acc.name || '').trim().toLowerCase();
+        const accPort = acc.port ? String(acc.port) : '';
+        const profileDir = String(acc.profileDir || '').trim().toLowerCase();
+
+        // 1. Khớp trực tiếp hoặc chuẩn hóa ID
+        if (targets.includes(idStr) || targets.includes(rawId) || normTargets.includes(rawId)) return true;
+        if (targets.includes(`acc_${rawId}`) || targets.includes(`fb_acc_${rawId}`)) return true;
+
+        // 2. Khớp Tên tài khoản (kể cả tên giải mã từ fanpage-config)
+        if (accName) {
+          if (targets.includes(accName) || normTargets.includes(accName)) return true;
+          if (targetNamesAndPorts.has(accName)) return true;
+          if (targets.some(t => t.length >= 3 && (accName.includes(t) || t.includes(accName)))) return true;
+          for (const mappedName of targetNamesAndPorts) {
+            if (mappedName.length >= 3 && (accName.includes(mappedName) || mappedName.includes(accName))) return true;
+          }
+        }
+
+        // 3. Khớp Port
+        if (accPort && (targets.includes(accPort) || normTargets.includes(accPort) || targetNamesAndPorts.has(accPort))) return true;
+
+        // 4. Khớp số ProfileDir (ví dụ n8n-fanpage-profile-3 khớp fb_acc_3 hoặc 3)
+        const profileNumMatch = profileDir.match(/(\d+)$/);
+        if (profileNumMatch) {
+          const pNum = profileNumMatch[1];
+          if (targets.includes(pNum) || normTargets.includes(pNum) || targets.includes(`fb_acc_${pNum}`)) return true;
+        }
+
+        return false;
       });
     }
   }

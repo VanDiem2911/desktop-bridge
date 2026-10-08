@@ -282,6 +282,20 @@ export default function ScheduleTab({
     setSelectedNewGroupsAccounts([]);
   };
 
+  const resolveTargetAccounts = (selectedIds: string[], accountList: Array<{ id: string; name: string; port?: number }>) => {
+    if (!selectedIds || selectedIds.length === 0) return undefined;
+    const identifiers = new Set<string>();
+    selectedIds.forEach((id) => {
+      identifiers.add(id);
+      const found = accountList.find((a) => a.id === id);
+      if (found) {
+        if (found.name) identifiers.add(found.name);
+        if (found.port) identifiers.add(String(found.port));
+      }
+    });
+    return Array.from(identifiers);
+  };
+
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
             
@@ -1048,7 +1062,7 @@ export default function ScheduleTab({
 
                                   <div className="flex flex-wrap gap-1.5">
                                     {fanpageAccounts.map((acc) => {
-                                      const isSelected = slotAccounts.includes(acc.id);
+                                      const isSelected = slotAccounts.includes(acc.id) || (Boolean(acc.name) && slotAccounts.includes(acc.name));
                                       return (
                                         <button
                                           key={acc.id}
@@ -1179,7 +1193,7 @@ export default function ScheduleTab({
                       <button
                         type="button"
                         disabled={scheduleTriggering}
-                        onClick={() => handleTriggerAutoPilot(customRunTopic, 'fanpage', selectedNewFanpageAccounts.length > 0 ? selectedNewFanpageAccounts : undefined)}
+                        onClick={() => handleTriggerAutoPilot(customRunTopic, 'fanpage', resolveTargetAccounts(selectedNewFanpageAccounts, fanpageAccounts))}
                         className="w-full py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
                       >
                         <Send className="w-3.5 h-3.5" /> 🚀 ĐĂNG NGAY LÊN FANPAGE (TEST)
@@ -1342,7 +1356,7 @@ export default function ScheduleTab({
 
                                   <div className="flex flex-wrap gap-1.5">
                                     {groupAccounts.map((acc) => {
-                                      const isSelected = slotAccounts.includes(acc.id);
+                                      const isSelected = slotAccounts.includes(acc.id) || (Boolean(acc.name) && slotAccounts.includes(acc.name));
                                       return (
                                         <button
                                           key={acc.id}
@@ -1483,7 +1497,7 @@ export default function ScheduleTab({
                       <button
                         type="button"
                         disabled={scheduleTriggering}
-                        onClick={() => handleTriggerAutoPilot(customRunTopic, 'groups', selectedNewGroupsAccounts.length > 0 ? selectedNewGroupsAccounts : undefined)}
+                        onClick={() => handleTriggerAutoPilot(customRunTopic, 'groups', resolveTargetAccounts(selectedNewGroupsAccounts, groupAccounts))}
                         className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all disabled:opacity-50"
                       >
                         <Send className="w-3.5 h-3.5" /> 🚀 ĐĂNG NGAY VÀO NHÓM (TEST)
